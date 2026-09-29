@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CircuitBuilder } from './CircuitBuilder';
 import { compile } from './Netlist';
-import { dLatch } from './Parts';
+import { dFlipFlop, dLatch } from './Parts';
 import { GATE_KINDS } from './Primitives';
 import { Simulator } from './Simulator';
 
@@ -168,5 +168,55 @@ describe('oscillation', () => {
 
     expect(sim.settle().settled).toBe(true);
     expect(sim.read('ram7.q')).toBe(0);
+  });
+});
+
+describe('adopting an earlier simulator', () => {
+  it('keeps what a counter holds across an edit that adds a gate', () => {
+    const build = (extra: boolean) => {
+      const b = new CircuitBuilder();
+      let clock = b.clock();
+      for (let bit = 0; bit < 3; bit++) {
+        const loop = b.gate('not', `bit${bit}.loop`);
+        const ff = dFlipFlop(b, loop.out, clock, `bit${bit}`);
+        b.connect(ff.q, loop.a);
+        clock = ff.qBar;
+      }
+      if (extra) {
+        b.output('spare', b.and(b.input('x'), b.input('y'), 'spare'));
+      }
+      return compile(b.build());
+    };
+    const count = (sim: Simulator) => [0, 1, 2].reduce((n, bit) => n | (sim.read(`bit${bit}.slave.q`) << bit), 0);
+    const before = new Simulator(build(false));
+    for (let n = 0; n < 5; n++) {
+      before.cycle();
+    }
+    const held = count(before);
+
+    const after = new Simulator(build(true));
+    after.adopt(before);
+
+    expect(after.settle().settled).toBe(true);
+    expect(count(after)).toBe(held);
+    expect(after.cycles).toBe(5);
+    after.cycle();
+    expect(count(after)).toBe((held + 1) % 8);
+  });
+
+  it('keeps an input where a person left it', () => {
+    const b = new CircuitBuilder();
+    b.output('q', b.not(b.input('x'), 'n'));
+    const netlist = compile(b.build());
+    const before = new Simulator(netlist);
+    before.set('x', 1);
+    before.settle();
+
+    const after = new Simulator(netlist);
+    after.adopt(before);
+    after.settle();
+
+    expect(after.read('x')).toBe(1);
+    expect(after.read('n')).toBe(0);
   });
 });

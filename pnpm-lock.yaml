@@ -35,6 +35,9 @@ importers:
       gesso-devtools:
         specifier: file:vendor/gesso-devtools-0.4.0-0a324ff5.tgz
         version: file:vendor/gesso-devtools-0.4.0-0a324ff5.tgz(rxjs@7.8.2)
+      gesso-testing:
+        specifier: file:vendor/gesso-testing-0.4.0-0021b8cd.tgz
+        version: file:vendor/gesso-testing-0.4.0-0021b8cd.tgz(rxjs@7.8.2)(vitest@4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)))
       gesso-vite-plugin:
         specifier: file:vendor/gesso-vite-plugin-0.4.0-0a5c363f.tgz
         version: file:vendor/gesso-vite-plugin-0.4.0-0a5c363f.tgz(vite@8.3.1(@types/node@26.6.3))
@@ -382,6 +385,16 @@ packages:
     version: 0.4.0
     peerDependencies:
       rxjs: ^7.8.2
+
+  gesso-testing@file:vendor/gesso-testing-0.4.0-0021b8cd.tgz:
+    resolution: {integrity: sha512-l9JBmUgQmMvzcZtKbpj5qUW+vw6hhOnOqTB7p/LLOrpHWdWAZClKg3ftlXz42sLsakFNpjLW+DRpVgrre0AxBw==, tarball: file:vendor/gesso-testing-0.4.0-0021b8cd.tgz}
+    version: 0.4.0
+    peerDependencies:
+      rxjs: ^7.8.2
+      vitest: ^4.1.10
+    peerDependenciesMeta:
+      vitest:
+        optional: true
 
   gesso-vite-plugin@file:vendor/gesso-vite-plugin-0.4.0-0a5c363f.tgz:
     resolution: {integrity: sha512-Y5NNBAVdof6hUZOQReZjb6n+Os3Kp154mBej2nDud5GMbrFIIdrWx3A80wxPeKPf0PnXn9H4g8jAee4KPzTbDg==, tarball: file:vendor/gesso-vite-plugin-0.4.0-0a5c363f.tgz}
@@ -840,6 +853,14 @@ snapshots:
     dependencies:
       gesso-core: file:vendor/gesso-core-0.4.0-e0f99f0b.tgz(rxjs@7.8.2)
       rxjs: 7.8.2
+
+  gesso-testing@file:vendor/gesso-testing-0.4.0-0021b8cd.tgz(rxjs@7.8.2)(vitest@4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3))):
+    dependencies:
+      gesso-core: file:vendor/gesso-core-0.4.0-e0f99f0b.tgz(rxjs@7.8.2)
+      gesso-framework: file:vendor/gesso-framework-0.4.0-09509557.tgz(rxjs@7.8.2)
+      rxjs: 7.8.2
+    optionalDependencies:
+      vitest: 4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3))
 
   gesso-vite-plugin@file:vendor/gesso-vite-plugin-0.4.0-0a5c363f.tgz(vite@8.3.1(@types/node@26.6.3)):
     dependencies:

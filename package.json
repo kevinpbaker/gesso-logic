@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/node": "^26.6.3",
     "gesso-devtools": "file:vendor/gesso-devtools-0.4.0-0a324ff5.tgz",
+    "gesso-testing": "file:vendor/gesso-testing-0.4.0-0021b8cd.tgz",
     "gesso-vite-plugin": "file:vendor/gesso-vite-plugin-0.4.0-0a5c363f.tgz",
     "typescript": "~7.0.2",
     "vite": "^8.2.0",

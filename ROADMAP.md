@@ -11,10 +11,11 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0, 0b and 1 done. Phase 0's findings are in
+**Status:** Phases 0, 0b, 1 and 2 done. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
-changed anything. The simulator runs headless under `src/sim`; nothing
-past Phase 1 is built.
+changed anything. The simulator runs headless under `src/sim` and
+behind the `circuit` channel in the application worker. The screen is
+still Phase 0's spike, until Phase 3.
 
 ---
 
@@ -320,6 +321,34 @@ a run / pause / step / clock-rate control.
 **Exit:** a gesso-testing spec that places two switches and an AND gate
 through commands, flips a switch, and reads the lit output from the
 view — no browser.
+
+**Done.** `src/app` holds the contract, a `CircuitService` (RxJS and
+`src/sim`, no framework), document edits as plain functions, and
+`circuitChannels`, which both `AppWorker.ts` and the exit spec serve.
+`channels.spec.ts` is the exit, through `gesso-testing`'s
+`serveForTest`. `CircuitService.spec.ts` drives time by hand: pacing at
+a set rate, slices bounded by their budget at `max`, a command handled
+between two slices, publishes never closer than 16 ms, a counter that
+keeps its count across an edit while running, and an oscillation that
+pauses the run and names the net. 40 specs in all. Where it departed
+from the plan:
+
+- **`place`, not `placeGate`**, since switches and outputs aren't gates.
+  There is no remove yet, so a document that stops compiling stays that
+  way until Phase 4. It's kept, drawn, and says why.
+- **An edit keeps the running state.** The new netlist adopts the old
+  simulator's values by pin, so latches keep their bits and switches
+  their positions. Phase 12's incremental recompile is about speed;
+  this is about not resetting.
+- **Net ids are in document order, not spatial.** Phase 0's chunk
+  locality relied on ids laid out by position. With document order, a
+  viewport's nets are spread over more chunks. That's harmless at this
+  size, and worth a renumbering pass when the CPU is on screen.
+- **The viewport test is a component's origin**, since pin positions
+  don't exist until Phase 3 draws shapes. A wire whose source component
+  is off screen isn't lit. Phase 3 replaces this with real extents.
+- **The spike's channel is renamed `spike`** and served beside
+  `circuit`, until Phase 3 replaces the screen.
 
 ## Phase 3 — The canvas
 

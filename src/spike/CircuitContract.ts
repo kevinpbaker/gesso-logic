@@ -81,7 +81,9 @@ export interface CircuitView {
 
 export const EMPTY_SIGNALS: Signals = { shape: 'hex', tick: 0, sentAt: 0, chunks: {}, nets: {} };
 
-export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
+// Named `spike`, so Phase 2's `circuit` channel can be served beside it until
+// Phase 3 replaces this screen.
+export const Circuit = channel<CircuitView, CircuitCommands>('spike', {
   signals: EMPTY_SIGNALS,
   stats: {
     publishes: 0,

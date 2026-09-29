@@ -54,6 +54,10 @@ export class Simulator {
   ticks = 0;
   /** Gate evaluations since construction. */
   evaluations = 0;
+  /** Full clock cycles run by `cycle`, carried across `adopt`. */
+  cycles = 0;
+  /** The level the clocks were last driven to. */
+  private clockLevel: 0 | 1 = 0;
 
   private readonly stamp: Uint32Array;
   private epoch = 0;
@@ -100,9 +104,42 @@ export class Simulator {
 
   /** Drives every clock. Takes effect on the next tick. */
   setClock(value: 0 | 1): void {
+    this.clockLevel = value;
     for (const net of this.netlist.clocks) {
       this.drive(net, value);
     }
+  }
+
+  /**
+   * Takes over the state of a simulator for an earlier version of the
+   * same circuit, so an edit does not reset what the circuit remembers.
+   *
+   * Nets are renumbered on every compile, so values are matched by pin:
+   * every pin that exists in both netlists carries its old value onto
+   * its new net. A latch's Q and Q̅ are pins, so a latch keeps its bit,
+   * and an input keeps what a person last set it to. Constants take the
+   * document's value, which the edit may have changed. Every gate is
+   * then due on the next tick: where the edit changed nothing the
+   * values already agree and nothing moves, and where it changed
+   * something the new gates settle from there.
+   */
+  adopt(previous: Simulator): void {
+    for (const [pin, net] of this.netlist.pinNet) {
+      const old = previous.netlist.pinNet.get(pin);
+      if (old !== undefined) {
+        this.value[net] = previous.value[old];
+      }
+    }
+    for (const { net, value } of this.netlist.constants.values()) {
+      this.value[net] = value;
+    }
+    this.clockLevel = previous.clockLevel;
+    for (const net of this.netlist.clocks) {
+      this.value[net] = this.clockLevel;
+    }
+    this.cycles = previous.cycles;
+    this.changedCount = 0;
+    this.everything = true;
   }
 
   /** Whether a tick would do anything: a net changed and its readers have not seen it yet. */
@@ -194,6 +231,7 @@ export class Simulator {
     const rise = this.settle(limit);
     this.setClock(0);
     const fall = this.settle(limit);
+    this.cycles++;
     return { settled: rise.settled && fall.settled, rise, fall };
   }
 
