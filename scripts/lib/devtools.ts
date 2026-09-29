@@ -1,7 +1,8 @@
 /**
  * Driving headless Chrome over the DevTools protocol.
  *
- * Copied from gessosheet's `scripts/lib/devtools.ts`, with `args` added, itself a
+ * Copied from gessosheet's `scripts/lib/devtools.ts`, with `args` added and
+ * `--disable-frame-rate-limit` taken out (see `openPage`), itself a
  * trimmed copy of the launcher in the Gesso repository. `scripts/bench.ts`
  * has an older client of its own, from Phase 0, and is left alone. Node has a `WebSocket` built
  * in, so driving the protocol directly costs a dependency less than a
@@ -202,7 +203,12 @@ export async function openPage(
       '--no-default-browser-check',
       '--hide-scrollbars',
       '--force-device-scale-factor=1',
-      '--disable-frame-rate-limit',
+      // Not `--disable-frame-rate-limit`, which gessosheet's copy passes.
+      // Under it, Chrome drives a software-composited worker's animation
+      // frames from the page's main thread, so blocking the page stops a
+      // render worker no real browser would stop, and the proof's freeze
+      // measured the flag. Frames are paced by the display instead, which
+      // is what anyone watching gets.
       `--window-size=${options.windowSize[0]},${options.windowSize[1]}`,
       ...(options.args ?? []),
       `--user-data-dir=${options.profileDir}`,

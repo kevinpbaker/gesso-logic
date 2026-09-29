@@ -682,30 +682,37 @@ typecheck, the specs and the proof.
   "Full speed" and "100 Hz" buttons to the canvas. Its clock and cycle
   readouts are live regions there, so the script reads them from the
   accessibility tree.
-- **Blocking the main thread needs a GPU process to prove anything.**
-  With a GPU process, the display compositor drives the render worker's
-  animation frames, and the worker draws straight through a 5 s block:
-  921 frames by hand in a real browser, 719 headless on this machine's
-  GPU. With software compositing (a CI runner, headless or headed
-  under xvfb; CI's first run tried the latter), Chrome drives them from
-  the page's main thread, and the worker draws nothing. The sheet's
-  proof passes this check without a GPU only because it counts every
-  frame in the recording, including those drawn just before and after
-  the block. Here the strip records the block's window on the render
-  worker's clock, and only frames inside it count. The freeze runs in a
-  second browser with SwiftShader, a GPU process on any machine. It's
-  checked as the longest stretch of the block without a frame, at most
-  1.5 s: SwiftShader draws about 40 frames in the block here and about 5
-  on a CI runner, while a stopped worker shows a 5 s gap anywhere. The budgets run in plain software
-  rendering, which is the stricter test and too fast a picture for
-  SwiftShader to keep up with. The simulator running through the
-  freeze is checked too: 2,000 to 3,000 cycles in 5 s.
-- **Gesso needed no change.** A watchdog on the worker's own
-  `requestAnimationFrame` path looked like the fix until the GPU
-  measurement. Gesso's spec forbidding one is right where there's a
-  GPU process. Without one, a worker's frames still stop with its page,
-  which is worth telling Gesso: the hosted path's watchdog would cover
-  it, and the local path has none.
+- **The freeze, and the bug it found.** Blocking the main thread for
+  5 s must leave the render worker drawing. It's checked twice, by
+  frames stamped inside the block's own window (the strip records it on
+  the render worker's clock) and by the longest silence in it, at most
+  1.5 s: once in the software browser the budgets use, and once in a
+  second browser with SwiftShader, a GPU process on any machine. The
+  simulator running through it is checked too, about 3,000 cycles.
+  Getting there took a wrong turn worth recording. The first runs drew
+  nothing in software rendering, and it looked like Chrome's limit. It
+  was two things stacked:
+  - **A bug in Gesso, from Phase 3's d3b0040.** A live layer was
+    rasterised on every frame it happened not to change, because the
+    readout's changing text draws frames between publishes, and each
+    bitmap was thrown away at the next publish: 1.4 fresh canvases a
+    frame. In software compositing, allocating a canvas's pixels can
+    wait on the page's main thread, so a blocked page stalled the render
+    worker outright (a profile had it stuck in `ctx.scale` on a new
+    canvas). Fixed in gesso `00e2efd`: a picture settles for four frames
+    first. Rasterisations went to 0 a frame and median frame work from
+    about 2.2 ms to 1.2 ms.
+  - **A flag in the launcher.** `--disable-frame-rate-limit`, copied
+    from the sheet, makes Chrome drive a software-composited worker's
+    animation frames from the main thread, which no real browser does.
+    Taken out.
+
+  Now: 291 frames inside the block in software rendering (longest
+  silence 65 ms) and 45 with SwiftShader. A watchdog on Gesso's frame
+  clock, and the xvfb and GPU-only detours in CI's first runs, were
+  both answers to the wrong question. The sheet's proof counted frames
+  either side of the block as drawn during it, which hid the same
+  symptom there; its counting is fixed too.
 - **Copying the sheet's pieces:** the strip came over nearly unchanged
   (its layout heatmap and re-measure count taken out, frame work put
   in), and the DevTools client unchanged. The budget script couldn't
@@ -907,6 +914,7 @@ shipped in.
 | 3     | On Canvas2D a painted node's new recording is replayed onto the frame, and rasterised into a bitmap only once it holds still (`PaintPictureCache.draw`) | gesso `d3b0040` |
 | 3     | …except a picture seen for the first time or resized, which is rasterised at once rather than drawn twice | gesso `74c24c4` |
 | 3     | Scroll layers: a scroll container whose offset is the frame's only change is shifted and its exposed strip redrawn, not redrawn whole. Built for this canvas, not used by it (it pans tiles, not a container), and kept for apps that scroll | gesso `62ef127` |
+| 7     | A picture settles for four frames before it's rasterised, so a layer that changes on most frames is never rasterised (`PaintPictureCache.draw`, `SETTLE_FRAMES`). Found by the proof's freeze: the wasted canvases stalled the render worker in software compositing | gesso `00e2efd` |
 
 ---
 

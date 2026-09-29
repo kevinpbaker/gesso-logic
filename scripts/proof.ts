@@ -23,18 +23,21 @@
  * saturated, running five times as many cycles. If any of that reached
  * the render thread, it would show as the difference.
  *
- * **The freeze needs a GPU process.** Blocking the main thread for five
- * seconds must leave the render worker drawing. With software
- * compositing — what a CI machine without a GPU gets, headless or
- * headed under xvfb, both tried — Chrome drives a worker's animation
- * frames from its page's main thread, and a blocked page means a
- * worker that draws nothing. With a GPU process the display compositor
- * drives them, and the worker draws straight through: 921 frames by
- * hand in a real browser, 719 headless on this machine's GPU. So the
- * freeze runs in a second browser with SwiftShader, which is a GPU
- * process on any machine — too slow to measure frames in, which is why
- * the budgets above run without it, and quite fast enough to show the
- * worker drawing at all. `PROOF_GPU=1` uses the real GPU instead.
+ * **The freeze runs twice.** Blocking the main thread for five seconds
+ * must leave the render worker drawing: once in the software browser the
+ * budgets use, and once in a second browser with SwiftShader, a GPU
+ * process on any machine, since the two composite differently. The
+ * software run is the one that found a bug: Gesso's picture cache
+ * rasterised a live layer on every frame it happened not to change,
+ * each a fresh canvas, and allocating a canvas's pixels in software
+ * compositing can wait on the page's main thread — so a blocked page
+ * stalled the render worker outright. Gesso now lets a picture settle
+ * for a few frames before rasterising it. The other thing it found was
+ * this script's: Chrome's `--disable-frame-rate-limit`, which the
+ * launcher had, stops a software-composited worker's animation frames
+ * whenever the page's main thread is blocked, which no real browser
+ * does. `PROOF_GPU=1` uses the real GPU for the second browser instead
+ * of SwiftShader.
  *
  *   pnpm proof
  *   SKIP_BUILD=1 pnpm proof     # against an existing dist/
@@ -168,61 +171,15 @@ async function main(): Promise<void> {
     // way of the shell's requestAnimationFrame, so its frames spread
     // out to its own timer. It draws the whole time.
     //
-    // A second browser, with a GPU process; see the top of the file.
+    // Twice: first in this browser, in software rendering, then in a
+    // second browser with a GPU process. See the top of the file.
+    await freeze(page, 'software rendering', failures);
     await closeBrowser(devtools, browser);
     ({ browser, devtools } = await openProof(url, secondProfile, FREEZE_ARGS));
     const frozenPage = devtools;
     await press(frozenPage, 'Full speed');
     await settleClock(frozenPage, hz => hz > 0);
-    const before = (await readout(frozenPage)).cycles;
-    await frozenPage.evaluate('globalThis.gessologicProof.reset()');
-    const block = await frozenPage.evaluate<{ x: number; y: number }>(
-      `(() => { const b = document.getElementById('block').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`
-    );
-    await frozenPage.click(block.x, block.y);
-    let frozenMs = 0;
-    const deadline = Date.now() + 12_000;
-    while (Date.now() < deadline && frozenMs < BUDGET.frozenMs) {
-      const askedAt = Date.now();
-      await frozenPage.evaluate('1');
-      frozenMs = Math.max(frozenMs, Date.now() - askedAt);
-    }
-    await sleep(500);
-    const recorded = await frozenPage.evaluate<ProofFrame[]>('globalThis.gessologicProof.frames()');
-    const window = await frozenPage.evaluate<{ start: number; end: number } | null>('globalThis.gessologicProof.lastBlock()');
-    if (window === null) throw new Error('The block button did not record a block.');
-    // Inside the block, and clear of its edges by a frame's worth, so
-    // the frames drawn as it began and ended do not count.
-    const inside = recorded.filter(f => f.at > window.start + 50 && f.at < window.end - 50);
-    const after = await settleReadout(frozenPage, r => r.cycles > before);
-    // Gaps from the block's start, through each frame, to its end.
-    const stamps = [window.start, ...inside.map(f => f.at), window.end];
-    let worstGap = 0;
-    for (let i = 1; i < stamps.length; i++) worstGap = Math.max(worstGap, stamps[i]! - stamps[i - 1]!);
-    console.log(
-      `  blocking the main thread for five seconds…\n` +
-        `    frozen for ${frozenMs}ms · ${inside.length} frames drawn inside it · quietest ${worstGap.toFixed(0)}ms` +
-        ` · ${(after.cycles - before).toLocaleString('en')} cycles run`
-    );
-    check(failures, `the block froze the page for only ${frozenMs}ms`, frozenMs >= BUDGET.frozenMs, BUDGET.frozenMs);
-    check(
-      failures,
-      `only ${inside.length} frames were drawn while the main thread was blocked`,
-      inside.length >= BUDGET.framesDuringFreeze,
-      BUDGET.framesDuringFreeze
-    );
-    check(
-      failures,
-      `the render worker went ${worstGap.toFixed(0)}ms without a frame while the main thread was blocked`,
-      worstGap <= BUDGET.quietestFreezeMs,
-      BUDGET.quietestFreezeMs
-    );
-    check(
-      failures,
-      `only ${after.cycles - before} cycles ran across the freeze`,
-      after.cycles - before >= BUDGET.cyclesDuringFreeze,
-      BUDGET.cyclesDuringFreeze
-    );
+    await freeze(frozenPage, 'a GPU process', failures);
   } finally {
     if (process.env.PROOF_KEEP === undefined) {
       await closeBrowser(devtools, browser);
@@ -243,6 +200,63 @@ async function main(): Promise<void> {
     return;
   }
   console.log('OK — the canvas held its budget with 10,000 gates simulating flat out behind it.\n');
+}
+
+/**
+ * Five seconds with no main thread at all, at full speed, and what
+ * went on behind it: frames drawn inside the block, by the block's own
+ * window on the render worker's clock, and cycles run.
+ */
+async function freeze(page: DevTools, what: string, failures: string[]): Promise<void> {
+  const before = (await readout(page)).cycles;
+  await page.evaluate('globalThis.gessologicProof.reset()');
+  const block = await page.evaluate<{ x: number; y: number }>(
+    `(() => { const b = document.getElementById('block').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`
+  );
+  await page.click(block.x, block.y);
+  let frozenMs = 0;
+  const deadline = Date.now() + 12_000;
+  while (Date.now() < deadline && frozenMs < BUDGET.frozenMs) {
+    const askedAt = Date.now();
+    await page.evaluate('1');
+    frozenMs = Math.max(frozenMs, Date.now() - askedAt);
+  }
+  await sleep(500);
+  const recorded = await page.evaluate<ProofFrame[]>('globalThis.gessologicProof.frames()');
+  const window = await page.evaluate<{ start: number; end: number } | null>('globalThis.gessologicProof.lastBlock()');
+  if (window === null) throw new Error('The block button did not record a block.');
+  // Inside the block, and clear of its edges by a frame's worth, so
+  // the frames drawn as it began and ended do not count.
+  const inside = recorded.filter(f => f.at > window.start + 50 && f.at < window.end - 50);
+  const after = await settleReadout(page, r => r.cycles > before);
+  // Gaps from the block's start, through each frame, to its end.
+  const stamps = [window.start, ...inside.map(f => f.at), window.end];
+  let worstGap = 0;
+  for (let i = 1; i < stamps.length; i++) worstGap = Math.max(worstGap, stamps[i]! - stamps[i - 1]!);
+  console.log(
+    `  blocking the main thread for five seconds, in ${what}…\n` +
+      `    frozen for ${frozenMs}ms · ${inside.length} frames drawn inside it · quietest ${worstGap.toFixed(0)}ms` +
+      ` · ${(after.cycles - before).toLocaleString('en')} cycles run`
+  );
+  check(failures, `${what}: the block froze the page for only ${frozenMs}ms`, frozenMs >= BUDGET.frozenMs, BUDGET.frozenMs);
+  check(
+    failures,
+    `${what}: only ${inside.length} frames were drawn while the main thread was blocked`,
+    inside.length >= BUDGET.framesDuringFreeze,
+    BUDGET.framesDuringFreeze
+  );
+  check(
+    failures,
+    `${what}: the render worker went ${worstGap.toFixed(0)}ms without a frame while the main thread was blocked`,
+    worstGap <= BUDGET.quietestFreezeMs,
+    BUDGET.quietestFreezeMs
+  );
+  check(
+    failures,
+    `${what}: only ${after.cycles - before} cycles ran across the freeze`,
+    after.cycles - before >= BUDGET.cyclesDuringFreeze,
+    BUDGET.cyclesDuringFreeze
+  );
 }
 
 /** The freeze's browser: SwiftShader, a GPU process on any machine, or with `PROOF_GPU` the real one. */
