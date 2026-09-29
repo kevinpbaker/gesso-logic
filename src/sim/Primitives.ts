@@ -11,7 +11,7 @@
 export type GateKind = 'not' | 'and' | 'or' | 'nand' | 'nor' | 'xor' | 'xnor';
 export type SourceKind = 'clock' | 'constant' | 'input' | 'button';
 /** Parts that only read: they show a value and drive nothing. */
-export type DisplayKind = 'output' | 'probe' | 'hex' | 'seg7';
+export type DisplayKind = 'output' | 'probe' | 'hex' | 'seg7' | 'matrix';
 /** A chip: a circuit used as a part. Its pins are its definition's switches and LEDs; see `Chips.ts`. */
 export type ChipKind = 'chip';
 /**
@@ -32,6 +32,11 @@ export type Kind = GateKind | SourceKind | DisplayKind | ChipKind | BusKind | Me
 
 /** A ROM's size in words, and its ports' widths. */
 export const ROM_WORDS = 256;
+
+/** The LED matrix: 32 × 16 pixels, fed a row a pin, pixel x of row y on `r{y}[x]`. */
+export const MATRIX_WIDTH = 32;
+export const MATRIX_HEIGHT = 16;
+const MATRIX_ROWS = Array.from({ length: MATRIX_HEIGHT }, (_, y) => `r${y}`);
 
 export const GATE_KINDS: readonly GateKind[] = ['not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor'];
 
@@ -83,6 +88,9 @@ export const PINS: Readonly<Record<Kind, PinSpec>> = {
   // One input per segment, lettered as the standard does: a across the
   // top, then clockwise, g across the middle.
   seg7: { inputs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], outputs: [] },
+  // The LED matrix: a row of pixels a pin, top row first, the leftmost
+  // pixel the least significant bit.
+  matrix: { inputs: MATRIX_ROWS, outputs: [], widths: Object.fromEntries(MATRIX_ROWS.map(row => [row, MATRIX_WIDTH])) },
   // A chip's pins depend on its definition, so none are listed here:
   // ask `pinsOf` in `Chips.ts`, which knows the definitions.
   chip: { inputs: [], outputs: [] },

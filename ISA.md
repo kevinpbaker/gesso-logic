@@ -36,12 +36,20 @@ initialised.
 
 | Port | In | Out |
 | ---- | -- | --- |
-| 0 | the buttons | the left score display |
-| 1 | the frame tick | the right score display |
+| 0 | the buttons: bit 0 up, bit 1 down | the left score display |
+| 1 | the frame tick, in bit 0 | the right score display |
 | 2 | nothing (reads 0) | nothing |
 | 3 | nothing (reads 0) | nothing: the test suite logs its checkpoints here |
 
 A port number is 0–3; the assembler refuses anything else.
+
+**The frame tick** is the top bit of a 10-bit count of clock cycles
+since reset. It turns over every 512 cycles, 256 instructions, so a
+program paces a frame by waiting for it to change.
+
+**The framebuffer's pixels:** pixel (x, y), x from 0 to 31 left to
+right and y from 0 to 15 top to bottom, is bit `x mod 8` of the byte at
+`0x40 + 4y + x div 8`.
 
 ## Instructions
 

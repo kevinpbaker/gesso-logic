@@ -171,7 +171,6 @@ describe('the computer scene', () => {
     const sim = new Simulator(compile(computerScene()));
     sim.settle();
     sim.cycle();
-    sim.set('rst', 0);
     let cycles = 0;
     while (sim.read('halted', 'in') === 0 && cycles < 100) {
       expect(sim.cycle().settled).toBe(true);

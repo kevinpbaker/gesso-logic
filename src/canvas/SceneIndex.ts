@@ -1,7 +1,7 @@
 import { type ComponentGeometry, type Geometry, type WireGeometry } from '../app/CircuitContract';
 import { boundsOf, boxOf, LAYOUT, pinAt, route, sizeOf, slotOf, type Box, type KindLayout, type Point, type Shape } from '../app/Layout';
 import type { PinRef, Rotation } from '../sim/Circuit';
-import { GATE_KINDS, isGate, PINS, type Kind } from '../sim/Primitives';
+import { GATE_KINDS, isGate, MATRIX_HEIGHT, MATRIX_WIDTH, PINS, type Kind } from '../sim/Primitives';
 
 /**
  * The render worker's picture of the circuit: `geometry` turned into
@@ -36,9 +36,10 @@ export const KIND_INDEX: Readonly<Record<Kind, number>> = {
   chip: 15,
   split: 16,
   join: 17,
-  rom: 18
+  rom: 18,
+  matrix: 19
 };
-export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7', 'chip', 'split', 'join', 'rom'];
+export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7', 'chip', 'split', 'join', 'rom', 'matrix'];
 
 export class SceneIndex {
   readonly componentCount: number;
@@ -539,7 +540,9 @@ function placeOf(id: string, c: ComponentGeometry, build: number): Placed {
         ? Int32Array.from({ length: c.width }, (_, i) => c.nets[`${busPin}[${i}]`] ?? -1)
         : c.kind === 'hex' || c.kind === 'seg7'
           ? Int32Array.from(PINS[c.kind].inputs, pin => c.nets[pin] ?? -1)
-          : null,
+          : c.kind === 'matrix'
+            ? Int32Array.from({ length: MATRIX_WIDTH * MATRIX_HEIGHT }, (_, i) => c.nets[`r${Math.floor(i / MATRIX_WIDTH)}[${i % MATRIX_WIDTH}]`] ?? -1)
+            : null,
     label: isGate(c.kind) ? null : (c.label ?? id),
     born: build,
     used: 0

@@ -58,6 +58,13 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
   // Placeholders too: a split's or join's shape depends on its width; see `busShape`.
   split: { width: 2, height: 9, pins: { in: { x: 0, y: 1 } } },
   join: { width: 2, height: 9, pins: { out: { x: 2, y: 1 } } },
+  // The LED matrix: a unit a pixel, in a frame a unit wide; a row's pin
+  // on the left edge beside it.
+  matrix: {
+    width: 34,
+    height: 18,
+    pins: Object.fromEntries(Array.from({ length: 16 }, (_, y) => [`r${y}`, { x: 0, y: 1 + y }]))
+  },
   // The ROM: an instruction port and a table port, each an address in
   // on the left and its word out on the right.
   rom: { width: 8, height: 6, pins: { A: { x: 0, y: 1 }, T: { x: 0, y: 3 }, D: { x: 8, y: 1 }, Q: { x: 8, y: 3 } } },

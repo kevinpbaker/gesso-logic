@@ -217,6 +217,9 @@ export const ROW_BYTES = 16;
 
 export const ramName = (bytes: number) => `RAM ${bytes}`;
 
+/** The framebuffer's size: 32 × 16 pixels, a bit each. */
+export const SCREEN_BYTES = 64;
+
 /**
  * An N-byte RAM, N a power of two from 16 to 256.
  *
@@ -242,7 +245,7 @@ export const ramName = (bytes: number) => `RAM ${bytes}`;
  *     for each, the rows, and an OR tree across the rows. `D` is ANDed
  *     with `¬rst`, so a reset writes zeros.
  */
-export function ram(bytes = 128): Generated {
+export function ram(bytes = 128, screenFrom?: number): Generated {
   const rows = bytes / ROW_BYTES;
   const rowBits = Math.log2(rows);
   if (!Number.isInteger(rowBits) || rowBits < 0 || rowBits > 4) {
@@ -260,13 +263,17 @@ export function ram(bytes = 128): Generated {
     const sel = b.input('sel');
     const enable = b.or(b.and(sel, b.input('we'), 'write'), b.input('rst'), 'enable');
     const q = b.join('Q bits', 8);
+    const p = b.join('P bits', 8);
     for (let bit = 0; bit < 8; bit++) {
       const latch = b.chip(`bit ${bit}`, 'D latch');
       b.connect({ component: d, pin: `b${bit}` }, { component: latch, pin: 'd' });
       b.connect(enable, { component: latch, pin: 'en' });
       b.connect(b.and({ component: latch, pin: 'q' }, sel, `read ${bit}`), { component: q, pin: `b${bit}` });
+      b.connect({ component: latch, pin: 'q' }, { component: p, pin: `b${bit}` });
     }
     b.output('Q', { component: q, pin: 'out' }, 8);
+    // The latches themselves, always: what a framebuffer's pixels are.
+    b.output('P', { component: p, pin: 'out' }, 8);
     chips['RAM byte'] = b.build();
   }
 
@@ -283,6 +290,7 @@ export function ram(bytes = 128): Generated {
     const we = b.input('we');
     const rst = b.input('rst');
     const tree = b.chip('read', rowTree);
+    const bytesOfRow: string[] = [];
     for (let n = 0; n < ROW_BYTES; n++) {
       const byte = b.chip(`byte ${n}`, 'RAM byte');
       b.connect(d, { component: byte, pin: 'D' });
@@ -290,8 +298,19 @@ export function ram(bytes = 128): Generated {
       b.connect(we, { component: byte, pin: 'we' });
       b.connect(rst, { component: byte, pin: 'rst' });
       b.connect({ component: byte, pin: 'Q' }, { component: tree, pin: `I${n}` });
+      bytesOfRow.push(byte);
     }
     b.output('Q', { component: tree, pin: 'Y' }, 8);
+    // Four bytes at a time, as 32-bit buses: a framebuffer's rows.
+    for (let group = 0; group < ROW_BYTES / 4; group++) {
+      const pixels = b.join(`P${group} bits`, 32);
+      for (let k = 0; k < 4; k++) {
+        const split = b.split(`byte ${group * 4 + k} bits`, 8);
+        b.connect({ component: bytesOfRow[group * 4 + k]!, pin: 'P' }, { component: split, pin: 'in' });
+        for (let bit = 0; bit < 8; bit++) b.connect({ component: split, pin: `b${bit}` }, { component: pixels, pin: `b${k * 8 + bit}` });
+      }
+      b.output(`P${group}`, { component: pixels, pin: 'out' }, 32);
+    }
     chips['RAM row'] = b.build();
   }
 
@@ -331,8 +350,10 @@ export function ram(bytes = 128): Generated {
   }
   const tree = rows > 1 ? b.chip('read', orTree(rows, 8, chips)) : null;
   let only: PinRef | null = null;
+  const rowChips: string[] = [];
   for (let r = 0; r < rows; r++) {
     const row = b.chip(`row ${r}`, 'RAM row');
+    rowChips.push(row);
     b.connect({ component: columnDecoder, pin: 'Y' }, { component: row, pin: 'C' });
     b.connect(rowLine(r), { component: row, pin: 'row' });
     b.connect({ component: d, pin: 'out' }, { component: row, pin: 'D' });
@@ -342,6 +363,17 @@ export function ram(bytes = 128): Generated {
     else only = { component: row, pin: 'Q' };
   }
   b.output('Q', tree !== null ? { component: tree, pin: 'Y' } : only!, 8);
+  if (screenFrom !== undefined) {
+    // The framebuffer: from `screenFrom`, four bytes a row of pixels,
+    // sixteen rows, straight off the latches.
+    if (screenFrom % 4 !== 0 || screenFrom + SCREEN_BYTES > bytes) {
+      throw new Error(`A screen of ${SCREEN_BYTES} bytes can't start at 0x${screenFrom.toString(16)} in ${bytes} bytes.`);
+    }
+    for (let y = 0; y < SCREEN_BYTES / 4; y++) {
+      const first = screenFrom + 4 * y;
+      b.output(`F${y}`, { component: rowChips[Math.floor(first / ROW_BYTES)]!, pin: `P${(first % ROW_BYTES) / 4}` }, 32);
+    }
+  }
   return laidOut(b.build(), chips, new Set(Object.keys(chips).filter(name => name !== 'D latch')));
 }
 
@@ -830,12 +862,157 @@ export function cpu(): Generated {
   return { ...done, chips: { ...done.chips, ...Object.fromEntries(Object.entries(dataChips)), datapath: dp as Circuit } };
 }
 
+// ---------------------------------------------------------------------------
+// Memory and devices
+// ---------------------------------------------------------------------------
+
+/** The frame timer's width: its top bit, the frame tick, toggles every 2⁹ = 512 cycles. */
+export const TIMER_BITS = 10;
+
+/**
+ * A binary counter of clock cycles: bit i toggles when every bit below
+ * it is 1. A flip-flop, an XOR and two ANDs a bit — the library's
+ * `counter 8` would do, with a load and a clear it doesn't need. Reset
+ * clears it.
+ */
+function timer(bits: number, chips: Record<string, Circuit>): string {
+  const name = `timer ${bits}`;
+  if (chips[name] !== undefined) return name;
+  Object.assign(chips, libraryWithDependencies('D flip-flop'));
+  const b = new CircuitBuilder();
+  const rst = b.input('rst');
+  const clk = b.input('clk');
+  const keep = b.not(rst, 'not rst');
+  let carry: PinRef = b.constant(1, 'count');
+  const q: PinRef[] = [];
+  for (let i = 0; i < bits; i++) {
+    const ff = b.chip(`bit ${i}`, 'D flip-flop');
+    const bit = { component: ff, pin: 'q' };
+    b.connect(b.and(b.xor(bit, carry, `toggle ${i}`), keep, `next ${i}`), { component: ff, pin: 'd' });
+    b.connect(clk, { component: ff, pin: 'clk' });
+    q.push(bit);
+    if (i < bits - 1) carry = b.and(carry, bit, `carry ${i}`);
+  }
+  b.output('Q', bus(b, 'Q bits', q), bits);
+  chips[name] = b.build();
+  return name;
+}
+
+/**
+ * Everything on the CPU's buses but the ROM: what `ISA.md`'s memory map
+ * and ports say is there.
+ *
+ *   - **RAM** — `RAM 128 + screen`: 0x00–0x7F, its top 64 bytes also the
+ *     screen's pixels, out on `F0`…`F15` a row each. An address from 0x80
+ *     up reads 0 and doesn't write.
+ *   - **`M`** — what the CPU reads: a RAM byte, the ROM's table byte on
+ *     `table`, or the input port on `port`.
+ *   - **The input port** — `IN 0` the buttons, `up` in bit 0 and `down`
+ *     in bit 1; `IN 1` the frame tick in bit 0; ports 2 and 3 read 0.
+ *   - **The output ports** — `OUT 0` and `OUT 1` into a latch each, open
+ *     while the `out` strobe is high for that port; `S0` and `S1`.
+ *   - **The frame timer** — a counter of cycles since reset, whose top
+ *     bit is the frame tick.
+ *
+ * Reset clears the RAM, the port latches and the timer.
+ */
+export function memoryAndPorts(): Generated {
+  const { chips: ramChips, ...memory } = ram(128, 0x40);
+  const chips: Record<string, Circuit> = {
+    ...ramChips,
+    'RAM 128 + screen': memory as Circuit,
+    ...libraryWithDependencies('mux 4 ×8'),
+    ...libraryWithDependencies('D latch')
+  };
+  const before = new Set(Object.keys(chips));
+  const ticker = timer(TIMER_BITS, chips);
+  // latch 8: a byte of D latches, for a port's output.
+  {
+    const b = new CircuitBuilder();
+    const d = bitsOf(b, 'D bits', b.input('D', 0, 8));
+    const en = b.input('en');
+    b.output('Q', bus(b, 'Q bits', d.map((bit, i) => {
+      const latch = b.chip(`bit ${i}`, 'D latch');
+      b.connect(bit, { component: latch, pin: 'd' });
+      b.connect(en, { component: latch, pin: 'en' });
+      return { component: latch, pin: 'q' };
+    })), 8);
+    chips['latch 8'] = b.build();
+  }
+  const generated = new Set(Object.keys(chips).filter(name => !before.has(name)));
+
+  const b = new CircuitBuilder();
+  const address = bitsOf(b, 'ADDR bits', b.input('ADDR', 0, 8));
+  const d = b.input('D', 0, 8);
+  const k = bitsOf(b, 'K bits', b.input('K', 0, 8));
+  const we = b.input('we');
+  const out = b.input('out');
+  const table = b.input('table');
+  const port = b.input('port');
+  const romByte = b.input('T', 0, 8);
+  const up = b.input('up');
+  const down = b.input('down');
+  const rst = b.input('rst');
+  const clk = b.input('clk');
+
+  // RAM, below 0x80.
+  const inRam = b.not(address[7]!, 'below 0x80');
+  const store = b.and(we, inRam, 'store');
+  const theRam = b.chip('RAM', 'RAM 128 + screen');
+  b.connect(bus(b, 'RAM address', address.slice(0, 7)), { component: theRam, pin: 'A' });
+  b.connect(d, { component: theRam, pin: 'D' });
+  b.connect(store, { component: theRam, pin: 'we' });
+  b.connect(rst, { component: theRam, pin: 'rst' });
+  const ramBits = bitsOf(b, 'RAM Q bits', { component: theRam, pin: 'Q' });
+  const ramByte = bus(b, 'RAM byte', ramBits.map((bit, i) => b.and(bit, inRam, `RAM ${i}`)));
+
+  // The timer and the input port.
+  const theTimer = b.chip('frame timer', ticker);
+  b.connect(rst, { component: theTimer, pin: 'rst' });
+  b.connect(clk, { component: theTimer, pin: 'clk' });
+  const tick = bitsOf(b, 'timer bits', { component: theTimer, pin: 'Q' }, TIMER_BITS)[TIMER_BITS - 1]!;
+  const low = b.not(k[1]!, 'port 0 or 1');
+  const port0 = b.and(low, b.not(k[0]!, 'even port'), 'port 0');
+  const port1 = b.and(low, k[0]!, 'port 1');
+  const zero = b.constant(0, 'nothing');
+  const portByte = bus(b, 'port byte', [
+    b.or(b.and(port0, up, 'up read'), b.and(port1, tick, 'tick read'), 'bit 0'),
+    b.and(port0, down, 'down read'),
+    ...Array.from({ length: 6 }, () => zero)
+  ]);
+
+  // M
+  const source = b.chip('M source', 'mux 4 ×8');
+  b.connect(ramByte, { component: source, pin: 'A' });
+  b.connect(romByte, { component: source, pin: 'B' });
+  b.connect(portByte, { component: source, pin: 'C' });
+  b.connect(b.constant(0, 'unused', 8), { component: source, pin: 'D' });
+  b.connect(bus(b, 'M select', [table, port]), { component: source, pin: 'S' });
+  b.output('M', { component: source, pin: 'Y' }, 8);
+
+  // The output ports: open while `out` is high for the port, and on reset.
+  const keep = b.not(rst, 'not rst');
+  const written = bus(b, 'port data', bitsOf(b, 'D bits', d).map((bit, i) => b.and(bit, keep, `port data ${i}`)));
+  const scores = [port0, port1].map((selected, n) => {
+    const latch = b.chip(`port ${n}`, 'latch 8');
+    b.connect(written, { component: latch, pin: 'D' });
+    b.connect(b.or(b.and(out, selected, `OUT ${n}`), rst, `port ${n} open`), { component: latch, pin: 'en' });
+    return { component: latch, pin: 'Q' };
+  });
+  for (let y = 0; y < 16; y++) b.output(`F${y}`, { component: theRam, pin: `F${y}` }, 32);
+  b.output('S0', scores[0]!, 8);
+  b.output('S1', scores[1]!, 8);
+  const done = laidOut(b.build(), chips, generated);
+  return { ...done, chips: { ...done.chips, ...ramChips, 'RAM 128 + screen': memory as Circuit } };
+}
+
 /** What `scripts/generate.ts` writes, file name by file name, under `circuits/`. */
 export function generatedFiles(): Record<string, Generated> {
   return {
     'ram-128.gessologic.json': ram(128),
     'register-file.gessologic.json': registerFile(),
     'datapath.gessologic.json': datapath(),
-    'cpu.gessologic.json': cpu()
+    'cpu.gessologic.json': cpu(),
+    'memory-and-ports.gessologic.json': memoryAndPorts()
   };
 }

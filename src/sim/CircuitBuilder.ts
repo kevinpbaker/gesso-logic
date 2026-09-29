@@ -94,7 +94,7 @@ export class CircuitBuilder {
     return { component: this.add('button', label), pin: 'out' };
   }
   /** A probe, a hex or a seven-segment display, fed pin by pin. */
-  display(kind: 'probe' | 'hex' | 'seg7', label: string, from: Readonly<Record<string, PinRef>>, width?: number): string {
+  display(kind: 'probe' | 'hex' | 'seg7' | 'matrix', label: string, from: Readonly<Record<string, PinRef>>, width?: number): string {
     const id = this.add(kind, label, width === undefined ? {} : { width });
     for (const [pin, source] of Object.entries(from)) {
       this.connect(source, { component: id, pin });

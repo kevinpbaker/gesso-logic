@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 16 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 17 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -21,8 +21,8 @@ save to files and come back after a reload. Chips, buses, a standard
 library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
-and a CPU of 1,666 gates runs programs from a ROM. Memory and devices,
-Phase 17 on, are not wired to it yet.
+and a computer of 8,559 gates runs programs from a ROM, drawing on a
+32 × 16 LED matrix. Lockstep and Pong, Phase 18 on, are not built.
 
 ---
 
@@ -1290,6 +1290,54 @@ on `IN 1`, and two 7-segment displays on the `OUT` ports.
 
 **Exit:** a program that draws a diagonal line on the matrix, bit by
 bit, visible at a slow clock.
+
+**Done.** The toolbar's **Diagonal** button loads the computer running
+a 26-instruction program at 60 Hz. In Chrome, Run, and the diagonal
+grows a pixel at a time, six pixels by cycle 303. At the halt it is all
+sixteen, (0, 0) to (15, 15), and A is 0x10. The spec runs it headless:
+one pixel more at a time from none to sixteen, each row matching the
+emulator's framebuffer, halting in exactly twice the emulator's
+instruction count in cycles.
+
+- **The computer is 8,559 gates**, a little under the showpiece's
+  9,000–11,000:
+  - the CPU, 1,666;
+  - memory and ports, 6,883;
+  - a power-on reset, 10.
+
+  The ROM, the matrix, the buttons and the displays aren't counted.
+- **The framebuffer is the RAM's latches.** `RAM byte` puts its latches
+  out on `P` as well as its gated `Q`, `RAM row` gathers them four bytes
+  to a 32-bit bus, and `RAM 128 + screen` puts rows 0x40–0x7F out as
+  `F0`…`F15`, a row of pixels each. It's wiring only, so the count is
+  unchanged. Pixel (x, y) is bit x mod 8 of byte 0x40 + 4y + x div 8;
+  `ISA.md` now says so.
+- **The LED matrix is a new display kind** (`matrix`): sixteen 32-bit row
+  pins, drawn in the live layer as a unit a pixel.
+- **Memory and ports** (`memoryAndPorts`, written to
+  `circuits/memory-and-ports.gessologic.json`):
+  - RAM below 0x80; above, reads are 0 and writes go nowhere.
+  - `M` from a `mux 4 ×8`: RAM, the ROM's table byte, or the input
+    port.
+  - `IN 0`: the up and down buttons in bits 0 and 1. `IN 1`: the frame
+    tick in bit 0.
+  - `OUT 0` and `OUT 1`: a byte of D latches each, open while the `out`
+    strobe is up for that port, shown on hex displays.
+  - The frame timer: ten toggle flip-flops. Its top bit is the tick,
+    turning over every 512 cycles; `ISA.md` now says so.
+  - Reset clears the RAM, the latches and the timer.
+- **Power-on reset.** A flip-flop fed 0 wakes set, as every flip-flop
+  here does by the order power-on settles latches in. It holds reset
+  through the first clock edge, then lets go, so the computer starts its
+  program by itself. The `rst` switch still resets by hand. This closes
+  Phase 16's "not yet".
+- **Timing held, and was checked.** A program doing `IN 0`, `OUT 0`,
+  `OUT 1` and then changing A at once reads the button and latches both
+  values through the real strobes. Two unit specs first failed by
+  changing a port's data or number on the very tick its strobe moved, a
+  race the CPU never makes; they now change them in order.
+- **Speed:** the computer runs a loop with RAM and screen writes at
+  about 80 kHz headless, 2,027 evaluations a cycle.
 
 ## Phase 18 — Lockstep
 

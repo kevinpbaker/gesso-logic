@@ -41,7 +41,7 @@ import {
   sameConnectivity,
   type Fragment
 } from './DocumentEdits';
-import { adderScene, benchScene, busAdderScene, computerScene, counterScene, datapathScene, ramScene } from './Scenes';
+import { adderScene, benchScene, busAdderScene, computerScene, counterScene, datapathScene, DIAGONAL, ramScene } from './Scenes';
 import { isLibraryName, LIBRARY_PALETTE, libraryPart } from './LibraryParts';
 import { truthTable } from './TruthTable';
 import { boundsOf, boxOf, intersects, pinAt, route, shapeOf, slotOf, type KindLayout } from './Layout';
@@ -362,7 +362,9 @@ export class CircuitService {
                   ? datapathScene()
                   : name === 'computer'
                     ? computerScene()
-                    : { version: CIRCUIT_VERSION, components: [], wires: [] }
+                    : name === 'diagonal'
+                      ? computerScene(DIAGONAL, 60)
+                      : { version: CIRCUIT_VERSION, components: [], wires: [] }
     );
   }
 

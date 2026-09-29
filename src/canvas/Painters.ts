@@ -2,6 +2,7 @@ import type { PaintSurface } from 'gesso-core';
 
 import type { Box } from '../app/Layout';
 import { signalOf } from '../app/SignalPacking';
+import { MATRIX_WIDTH } from '../sim/Primitives';
 import type { SceneIndex } from './SceneIndex';
 
 /**
@@ -320,7 +321,7 @@ function drawDisplays(
   const dark: [number, number][] = [];
   for (const c of displays) {
     const nets = scene.displayNets[c]!;
-    if (scene.kindOf(c) === 'seg7') {
+    if (scene.kindOf(c) === 'seg7' || scene.kindOf(c) === 'matrix') {
       nets.forEach((net, s) => (valueOf(net) === 1 ? lit : dark).push([c, s]));
     }
   }
@@ -332,6 +333,11 @@ function drawDisplays(
     surface.beginPath();
     for (const [c, s] of items) {
       turned(surface, scene, c, (x, y) => {
+        if (scene.kindOf(c) === 'matrix') {
+          // A pixel a unit, inset a little so neighbours read as dots.
+          surface.rect(x + 1.1 + (s % MATRIX_WIDTH), y + 1.1 + Math.floor(s / MATRIX_WIDTH), 0.8, 0.8);
+          return;
+        }
         const [sx, sy, w, h] = SEGMENTS[s]!;
         surface.rect(x + sx, y + sy, w, h);
       });
@@ -347,7 +353,7 @@ function drawDisplays(
   const valueStyle = { fontSize: 1.1, align: 'center' as const, fontWeight: 700, fontFamily: 'monospace' };
   for (const c of displays) {
     const kind = scene.kindOf(c);
-    if (kind === 'seg7') continue;
+    if (kind === 'seg7' || kind === 'matrix') continue;
     const nets = scene.displayNets[c]!;
     const value = busValue(nets, chunks);
     const text = busHex(value, nets.length);

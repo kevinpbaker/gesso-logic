@@ -6,7 +6,7 @@ import { chipInterface, pinsOf } from '../sim/Chips';
 import { PINS, type GateKind } from '../sim/Primitives';
 import { shapeOf, sizeOf } from './Layout';
 import { assemble } from '../cpu/Assembler';
-import { cpu, datapath, ram } from './Generators';
+import { cpu, datapath, memoryAndPorts, ram } from './Generators';
 
 /**
  * Circuits the application starts with, until Phase 6 opens files.
@@ -433,38 +433,89 @@ export const THREE_INSTRUCTIONS = `
         HLT
 `;
 
+/** Phase 17's exit: a diagonal drawn on the matrix a pixel at a time, x = y from 0 to 15. */
+export const DIAGONAL = `
+I    = 0x00             ; the pixel being drawn
+T    = 0x01
+        LDA #0
+        STA I
+loop:   LDA I           ; B = the pixel's bit in its byte
+        AND #7
+        TAX
+        LDT masks,X
+        TAB
+        LDA I           ; X = its byte: 4 a row, and x / 8
+        SHL
+        SHL
+        STA T
+        LDA I
+        SHR
+        SHR
+        SHR
+        ADD T
+        TAX
+        LDA 0x40,X      ; set the bit
+        OR B
+        STA 0x40,X
+        LDA I
+        ADD #1
+        STA I
+        CMP #16
+        JNZ loop
+        HLT
+masks:  .byte 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80
+`;
+
 /**
- * Phase 16's exit, as a scene: the CPU chip, a ROM holding a program,
- * and the clock. `M` carries the ROM's table port when the CPU asks for
- * a table byte, and 0 otherwise — RAM and devices come with Phase 17.
- * `rst` starts on: flip it off and the program runs, then halts.
+ * The computer: the CPU chip, a ROM holding a program, memory and ports,
+ * the LED matrix on the framebuffer, the buttons on `IN 0`, a hex display
+ * on each `OUT` port, and a clock. It resets itself on the first clock
+ * edge, and the program runs from there.
  */
-export function computerScene(program = THREE_INSTRUCTIONS): Circuit {
-  const { chips, ...definition } = cpu();
+export function computerScene(program = THREE_INSTRUCTIONS, rate = 4): Circuit {
+  const { chips: cpuChips, ...processorDefinition } = cpu();
+  const { chips: ioChips, ...ioDefinition } = memoryAndPorts();
   const b = new CircuitBuilder();
   const processor = b.chip('cpu', 'CPU');
-  const rom = b.rom('rom', [...assemble(program).rom.slice(0, assemble(program).size)]);
+  const io = b.chip('memory', 'memory and ports');
+  const assembled = assemble(program);
+  const rom = b.rom('rom', [...assembled.rom.slice(0, assembled.size)]);
   const clock = b.clock('clk');
-  const rst = b.input('rst', 1);
-  b.connect(clock, { component: processor, pin: 'clk' });
-  b.connect(rst, { component: processor, pin: 'rst' });
+  // Power-on reset: a flip-flop fed 0 wakes set — every flip-flop here
+  // does, by the order power-on settles latches in — and holds reset
+  // through the first clock edge, then lets go for good. The switch
+  // resets by hand.
+  const powerOn = b.chip('power-on', 'D flip-flop');
+  b.connect(b.constant(0, 'settled'), { component: powerOn, pin: 'd' });
+  b.connect(clock, { component: powerOn, pin: 'clk' });
+  const rst = b.or({ component: powerOn, pin: 'q' }, b.input('rst'), 'reset');
+  const up = b.button('up');
+  const down = b.button('down');
+  for (const target of [processor, io]) {
+    b.connect(clock, { component: target, pin: 'clk' });
+    b.connect(rst, { component: target, pin: 'rst' });
+  }
   b.connect({ component: processor, pin: 'PC' }, { component: rom, pin: 'A' });
   b.connect({ component: rom, pin: 'D' }, { component: processor, pin: 'I' });
   b.connect({ component: processor, pin: 'ADDR' }, { component: rom, pin: 'T' });
-  const m = b.chip('M', 'mux 2 ×8');
-  b.connect(b.constant(0, 'no memory', 8), { component: m, pin: 'A' });
-  b.connect({ component: rom, pin: 'Q' }, { component: m, pin: 'B' });
-  b.connect({ component: processor, pin: 'table' }, { component: m, pin: 's' });
-  b.connect({ component: m, pin: 'Y' }, { component: processor, pin: 'M' });
+  b.connect({ component: rom, pin: 'Q' }, { component: io, pin: 'T' });
+  b.connect({ component: processor, pin: 'ADDR' }, { component: io, pin: 'ADDR' });
+  b.connect({ component: processor, pin: 'D' }, { component: io, pin: 'D' });
+  b.connect({ component: processor, pin: 'K' }, { component: io, pin: 'K' });
+  for (const line of ['we', 'out', 'table', 'port']) b.connect({ component: processor, pin: line }, { component: io, pin: line });
+  b.connect(up, { component: io, pin: 'up' });
+  b.connect(down, { component: io, pin: 'down' });
+  b.connect({ component: io, pin: 'M' }, { component: processor, pin: 'M' });
+  b.display('matrix', 'screen', Object.fromEntries(Array.from({ length: 16 }, (_, y) => [`r${y}`, { component: io, pin: `F${y}` }])));
+  b.display('hex', 'left', { in: { component: io, pin: 'S0' } }, 8);
+  b.display('hex', 'right', { in: { component: io, pin: 'S1' } }, 8);
   b.display('hex', 'PC', { in: { component: processor, pin: 'PC' } }, 8);
   b.display('hex', 'A', { in: { component: processor, pin: 'A' } }, 8);
-  b.display('hex', 'B', { in: { component: processor, pin: 'B' } }, 8);
-  b.display('hex', 'X', { in: { component: processor, pin: 'X' } }, 8);
   b.output('halted', { component: processor, pin: 'halted' });
   const built = b.build();
   return layOut({
     ...built,
-    components: built.components.map(c => (c.kind === 'clock' ? { ...c, rate: 4 } : c)),
-    chips: { ...chips, CPU: definition as Circuit }
+    components: built.components.map(c => (c.kind === 'clock' ? { ...c, rate } : c)),
+    chips: { ...cpuChips, ...ioChips, CPU: processorDefinition as Circuit, 'memory and ports': ioDefinition as Circuit }
   });
 }
