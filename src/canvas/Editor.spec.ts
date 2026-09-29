@@ -217,6 +217,16 @@ describe('the editor', () => {
     ]);
   });
 
+  it('stops panning with the right button once no button is held, with no release reported', () => {
+    const { editor, sent } = setup();
+    editor.pointerDown({ x: 100, y: 100 }, 2, false);
+    editor.pointerMove({ x: 90, y: 80 }, 2);
+    editor.pointerMove({ x: 80, y: 60 }, 0);
+    editor.pointerMove({ x: 70, y: 40 }, 0);
+
+    expect(sent).toEqual([['panBy', 10, 20]]);
+  });
+
   it('holds a selected push button down for as long as the press lasts', () => {
     const { editor, sent, at } = setup();
     editor.pointerDown(at(1, 11), 1, false);

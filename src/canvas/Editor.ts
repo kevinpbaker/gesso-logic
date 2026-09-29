@@ -176,9 +176,15 @@ export class Editor {
     this.mode = { kind: 'pressing', screen, hit, additive: shift, ...(holding !== undefined ? { holding } : {}) };
   }
 
-  pointerMove(screen: Point): void {
+  pointerMove(screen: Point, buttons?: number): void {
     const world = this.deps.toWorld(screen);
     this.pointer = world;
+    // A right or middle press never reports its release — the surface
+    // takes a secondary press for a context menu and holds no press to
+    // release — so a pan ends when a move finds no button still down.
+    if (this.mode.kind === 'panning' && buttons === 0) {
+      this.mode = { kind: 'idle' };
+    }
     const mode = this.mode;
     switch (mode.kind) {
       case 'panning':

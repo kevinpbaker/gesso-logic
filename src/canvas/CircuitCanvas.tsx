@@ -594,7 +594,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       }}
       focusable
       onPointerDown={(event: UiPointerEvent) => editor.pointerDown({ x: event.x, y: event.y }, event.buttons, event.modifiers.shift)}
-      onPointerMove={(event: UiPointerEvent) => editor.pointerMove({ x: event.x, y: event.y })}
+      onPointerMove={(event: UiPointerEvent) => editor.pointerMove({ x: event.x, y: event.y }, event.buttons)}
       onPointerUp={(event: UiPointerEvent) => editor.pointerUp({ x: event.x, y: event.y })}
       onKeyDown={(event: UiKeyboardEvent) => {
         const ctrl = event.modifiers.ctrl || event.modifiers.meta;
