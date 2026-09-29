@@ -5,6 +5,7 @@ import { paintPictures, percent } from 'gesso-core';
 import { FrameService, internalState, type ComponentContext, type Inputs } from 'gesso-framework';
 
 import { Circuit, type ClockRate } from './app/CircuitContract';
+import type { Kind } from './sim/Primitives';
 import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, type Motion } from './canvas/Bench';
 import { circuitCanvas } from './canvas/CircuitCanvas';
 import { paintTiming } from './canvas/Painters';
@@ -24,6 +25,21 @@ import { paintTiming } from './canvas/Painters';
 
 const PAN_SPEED = 1500;
 const RATES: readonly ClockRate[] = [1, 10, 100, 1000, 'max'];
+
+/** The palette: every part, with the key that picks it up (see `Editor.ts`). */
+const PALETTE: readonly (readonly [Kind, string, string])[] = [
+  ['input', 'Switch', 'I'],
+  ['output', 'LED', 'L'],
+  ['clock', 'Clock', 'C'],
+  ['constant', 'Const', 'K'],
+  ['not', 'NOT', 'N'],
+  ['and', 'AND', 'A'],
+  ['or', 'OR', 'O'],
+  ['xor', 'XOR', 'X'],
+  ['nand', 'NAND', '⇧A'],
+  ['nor', 'NOR', '⇧O'],
+  ['xnor', 'XNOR', '⇧X']
+];
 
 interface Readout {
   fps: number;
@@ -77,6 +93,11 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
   let snapshots = 0;
   ctx.effect(circuit.view.signals, () => snapshots++);
 
+  // The bench measures Phase 0's ten thousand gates; everyone else starts
+  // with an empty canvas.
+  if (isBench()) {
+    circuit.send.loadScene('bench');
+  }
   const bench = isBench()
     ? new BenchDriver(benchFilter(benchMatrix()), {
         apply: run => {
@@ -206,6 +227,16 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
           {button('Zoom', () => startMotion('zoom'))}
           {button('Stop', () => startMotion('still'))}
         </row>
+        <row gap={6} y="center">
+          {PALETTE.map(([kind, label, key]) => button(`${label} ${key}`, () => canvas.editor.startPlacing(kind)))}
+        </row>
+        <row gap={6} y="center">
+          {button('Undo', () => circuit.send.undo(), document.pipe(map(d => d.canUndo)))}
+          {button('Redo', () => circuit.send.redo(), document.pipe(map(d => d.canRedo)))}
+          {button('New', () => circuit.send.loadScene('empty'))}
+          {button('Bench scene', () => circuit.send.loadScene('bench'))}
+          <text text={canvas.editorChanged.pipe(map(() => canvas.editor.status))} fontSize={12} color="textMuted" />
+        </row>
       </column>
     </stack>
   );
@@ -220,10 +251,11 @@ function stat(label: string, value: Observable<string>) {
   );
 }
 
-function button(label: string | Observable<string>, onClick: () => void) {
+function button(label: string | Observable<string>, onClick: () => void, enabled?: Observable<boolean>) {
   return (
     <button
       onClick={onClick}
+      opacity={enabled === undefined ? 1 : enabled.pipe(map(on => (on ? 1 : 0.4)))}
       paddingLeft={10}
       paddingRight={10}
       paddingTop={5}

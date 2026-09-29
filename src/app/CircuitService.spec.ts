@@ -214,3 +214,80 @@ describe('CircuitService', () => {
     expect(revision).toBe(2);
   });
 });
+
+describe('CircuitService history', () => {
+  const pin = (component: string, name: string) => ({ component, pin: name });
+
+  it('undoes to empty and redoes back, edit by edit', () => {
+    const h = new Harness();
+    const service = h.service;
+    service.place('input', 0, 0, 'a');
+    service.place('not', 4, 0, 'n');
+    service.connect(pin('a', 'out'), pin('n', 'a'), 'w1');
+    const count = () => service['circuit'].components.length + service['circuit'].wires.length;
+    expect(count()).toBe(3);
+
+    service.undo();
+    service.undo();
+    service.undo();
+    expect(count()).toBe(0);
+    service.undo();
+    expect(count()).toBe(0);
+
+    service.redo();
+    service.redo();
+    service.redo();
+    expect(count()).toBe(3);
+    expect(service['circuit'].wires[0]!.id).toBe('w1');
+  });
+
+  it('folds a drag into one undo step by its gesture', () => {
+    const h = new Harness();
+    const service = h.service;
+    service.place('and', 0, 0, 'g');
+    for (let i = 0; i < 20; i++) {
+      service.moveBy(['g'], 1, 0, 'drag-1');
+    }
+    expect(service['circuit'].components[0]).toMatchObject({ x: 20 });
+
+    service.undo();
+    expect(service['circuit'].components[0]).toMatchObject({ x: 0 });
+    // A second drag is its own step.
+    service.redo();
+    service.moveBy(['g'], 0, 5, 'drag-2');
+    service.undo();
+    expect(service['circuit'].components[0]).toMatchObject({ x: 20, y: 0 });
+  });
+
+  it('records nothing for an edit that changes nothing, and a new edit clears redo', () => {
+    const h = new Harness();
+    const service = h.service;
+    let summary = { canUndo: false, canRedo: false };
+    service.document.subscribe(d => (summary = d));
+    service.place('and', 0, 0, 'g');
+    service.place('and', 4, 4, 'g');
+    service.moveBy(['g'], 0, 0);
+    service.undo();
+    expect(summary).toMatchObject({ canUndo: false, canRedo: true });
+
+    service.place('or', 0, 0, 'o');
+    expect(summary).toMatchObject({ canUndo: true, canRedo: false });
+  });
+
+  it('keeps the running simulator through a move, and recompiles for a change of wiring', () => {
+    const h = new Harness();
+    const service = h.service;
+    service.load(counter());
+    service.step();
+    service.step();
+    const simulator = service['simulator'];
+
+    service.moveBy(['bit0.loop'], 3, 3);
+    service.rotate(['bit1.loop']);
+    expect(service['simulator']).toBe(simulator);
+
+    service.remove(['q2']);
+    expect(service['simulator']).not.toBe(simulator);
+    expect(h.status.cycles).toBe(2);
+  });
+});

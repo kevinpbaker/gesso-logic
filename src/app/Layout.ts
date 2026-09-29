@@ -1,3 +1,4 @@
+import type { Rotation } from '../sim/Circuit';
 import type { Kind } from '../sim/Primitives';
 
 /**
@@ -49,14 +50,44 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
   output: { width: 2, height: 2, pins: { in: { x: 0, y: 1 } } }
 };
 
-export function boxOf(kind: Kind, x: number, y: number): Box {
+/** A component's size once turned: a quarter turn swaps width and height. */
+export function sizeOf(kind: Kind, rotation: Rotation = 0): { width: number; height: number } {
   const layout = LAYOUT[kind];
-  return { left: x, top: y, right: x + layout.width, bottom: y + layout.height };
+  return rotation === 90 || rotation === 270
+    ? { width: layout.height, height: layout.width }
+    : { width: layout.width, height: layout.height };
 }
 
-export function pinAt(kind: Kind, x: number, y: number, pin: string): Point {
-  const offset = LAYOUT[kind].pins[pin] ?? { x: 0, y: 0 };
-  return { x: x + offset.x, y: y + offset.y };
+/** A component's box. `x` and `y` are the turned box's top-left corner, whatever the rotation. */
+export function boxOf(kind: Kind, x: number, y: number, rotation: Rotation = 0): Box {
+  const size = sizeOf(kind, rotation);
+  return { left: x, top: y, right: x + size.width, bottom: y + size.height };
+}
+
+/**
+ * Where a pin is, with the component turned clockwise about its box.
+ * Pins stay on grid points under every rotation, because every box has
+ * whole-number sides.
+ */
+export function pinAt(kind: Kind, x: number, y: number, pin: string, rotation: Rotation = 0): Point {
+  const layout = LAYOUT[kind];
+  const offset = layout.pins[pin] ?? { x: 0, y: 0 };
+  const turned = turn(offset, layout.width, layout.height, rotation);
+  return { x: x + turned.x, y: y + turned.y };
+}
+
+/** A point in a `width` × `height` box, turned clockwise about the box so the result is in the turned box. */
+export function turn(p: Point, width: number, height: number, rotation: Rotation): Point {
+  switch (rotation) {
+    case 90:
+      return { x: height - p.y, y: p.x };
+    case 180:
+      return { x: width - p.x, y: height - p.y };
+    case 270:
+      return { x: p.y, y: width - p.x };
+    default:
+      return p;
+  }
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { Geometry } from '../app/CircuitContract';
-import { boundsOf, boxOf, LAYOUT, pinAt, route, slotOf, type Box } from '../app/Layout';
+import { boundsOf, boxOf, LAYOUT, pinAt, route, sizeOf, slotOf, type Box, type Point } from '../app/Layout';
+import type { PinRef, Rotation } from '../sim/Circuit';
 import { GATE_KINDS, isGate, type Kind } from '../sim/Primitives';
 
 /**
@@ -39,6 +40,14 @@ export class SceneIndex {
   /** The net a component shows: a gate's or source's output, an output's input. -1 while it does not compile. */
   readonly valueNet: Int32Array;
   readonly labels: readonly (string | null)[];
+  /** Each component's id, and its index by id. */
+  readonly ids: readonly string[];
+  readonly indexOf: ReadonlyMap<string, number>;
+  /** Quarter turns clockwise, 0–3. */
+  readonly turns: Uint8Array;
+  /** Each wire's id and its two ends. */
+  readonly wireIds: readonly string[];
+  readonly wireEnds: readonly { readonly from: PinRef; readonly to: PinRef }[];
 
   readonly wireCount: number;
   /** Each wire's route, flattened: points `wireStart[w] .. wireStart[w + 1]`, x then y. */
@@ -64,6 +73,9 @@ export class SceneIndex {
   constructor(geometry: Geometry) {
     const ids = Object.keys(geometry.components);
     const indexOf = new Map(ids.map((id, n) => [id, n]));
+    this.ids = ids;
+    this.indexOf = indexOf;
+    this.turns = new Uint8Array(ids.length);
     this.componentCount = ids.length;
     this.kind = new Uint8Array(ids.length);
     this.x = new Float32Array(ids.length);
@@ -76,9 +88,10 @@ export class SceneIndex {
       this.kind[n] = KIND_INDEX[c.kind];
       this.x[n] = c.x;
       this.y[n] = c.y;
+      this.turns[n] = c.rotation / 90;
       this.valueNet[n] = (c.kind === 'output' ? c.nets.in : c.nets.out) ?? -1;
       labels.push(isGate(c.kind) ? null : (c.label ?? id));
-      boxes.push(boxOf(c.kind, c.x, c.y));
+      boxes.push(boxOf(c.kind, c.x, c.y, c.rotation));
     });
     this.labels = labels;
 
@@ -86,15 +99,17 @@ export class SceneIndex {
     const points: number[] = [];
     const nets: number[] = [];
     const wireBoxes: Box[] = [];
-    for (const wire of Object.values(geometry.wires)) {
+    const wireIds: string[] = [];
+    const wireEnds: { from: PinRef; to: PinRef }[] = [];
+    for (const [wireId, wire] of Object.entries(geometry.wires)) {
       const from = geometry.components[wire.from.component];
       const to = geometry.components[wire.to.component];
       if (from === undefined || to === undefined || !indexOf.has(wire.from.component)) {
         continue;
       }
       const path = route(
-        pinAt(from.kind, from.x, from.y, wire.from.pin),
-        pinAt(to.kind, to.x, to.y, wire.to.pin),
+        pinAt(from.kind, from.x, from.y, wire.from.pin, from.rotation),
+        pinAt(to.kind, to.x, to.y, wire.to.pin, to.rotation),
         slotOf(wire.to.pin)
       );
       for (const p of path) {
@@ -102,12 +117,16 @@ export class SceneIndex {
       }
       starts.push(points.length);
       nets.push(wire.net);
+      wireIds.push(wireId);
+      wireEnds.push({ from: wire.from, to: wire.to });
       wireBoxes.push(boundsOf(path));
     }
     this.wireCount = nets.length;
     this.wireStart = Int32Array.from(starts);
     this.wirePoints = Float32Array.from(points);
     this.wireNet = Int32Array.from(nets);
+    this.wireIds = wireIds;
+    this.wireEnds = wireEnds;
 
     // A loop rather than `Math.min(...boxes)`: thirty thousand arguments
     // is past what a call can take.
@@ -140,12 +159,105 @@ export class SceneIndex {
     return this.kind[component]! < GATE_KINDS.length;
   }
 
+  kindOf(component: number): Kind {
+    return KINDS[this.kind[component]!]!;
+  }
+
+  rotationOf(component: number): Rotation {
+    return (this.turns[component]! * 90) as Rotation;
+  }
+
+  /** Width and height as drawn: a quarter turn swaps them. */
   width(component: number): number {
-    return LAYOUT[KINDS[this.kind[component]!]!].width;
+    return sizeOf(this.kindOf(component), this.rotationOf(component)).width;
   }
 
   height(component: number): number {
-    return LAYOUT[KINDS[this.kind[component]!]!].height;
+    return sizeOf(this.kindOf(component), this.rotationOf(component)).height;
+  }
+
+  /** The pins a component has, where they are now. */
+  pins(component: number): { readonly pin: string; readonly at: Point }[] {
+    const kind = this.kindOf(component);
+    return Object.keys(LAYOUT[kind].pins).map(pin => ({
+      pin,
+      at: pinAt(kind, this.x[component]!, this.y[component]!, pin, this.rotationOf(component))
+    }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Hit testing, in grid units
+  // -------------------------------------------------------------------------
+
+  /** The topmost component whose box holds a point, or -1. */
+  componentAt(p: Point): number {
+    let found = -1;
+    this.forEach(
+      { left: p.x, top: p.y, right: p.x, bottom: p.y },
+      c => {
+        const x = this.x[c]!;
+        const y = this.y[c]!;
+        if (p.x >= x && p.x <= x + this.width(c) && p.y >= y && p.y <= y + this.height(c)) {
+          found = Math.max(found, c);
+        }
+      },
+      null
+    );
+    return found;
+  }
+
+  /** The pin nearest a point within `radius` units, or null. */
+  pinNear(p: Point, radius: number): PinRef | null {
+    let best: PinRef | null = null;
+    let bestDistance = radius;
+    this.forEach(
+      { left: p.x - radius, top: p.y - radius, right: p.x + radius, bottom: p.y + radius },
+      c => {
+        for (const { pin, at } of this.pins(c)) {
+          const d = Math.hypot(at.x - p.x, at.y - p.y);
+          if (d <= bestDistance) {
+            bestDistance = d;
+            best = { component: this.ids[c]!, pin };
+          }
+        }
+      },
+      null
+    );
+    return best;
+  }
+
+  /** The wire whose route passes within `tolerance` units of a point, or -1. */
+  wireNear(p: Point, tolerance: number): number {
+    let best = -1;
+    let bestDistance = tolerance;
+    this.forEach({ left: p.x - tolerance, top: p.y - tolerance, right: p.x + tolerance, bottom: p.y + tolerance }, null, w => {
+      const pts = this.wirePoints;
+      for (let i = this.wireStart[w]!; i + 3 < this.wireStart[w + 1]!; i += 2) {
+        const d = distanceToSegment(p, pts[i]!, pts[i + 1]!, pts[i + 2]!, pts[i + 3]!);
+        if (d <= bestDistance) {
+          bestDistance = d;
+          best = w;
+        }
+      }
+    });
+    return best;
+  }
+
+  /** Every component whose box lies wholly inside a rectangle: what a marquee selects. */
+  componentsIn(area: Box): number[] {
+    const found: number[] = [];
+    this.forEach(
+      area,
+      c => {
+        const x = this.x[c]!;
+        const y = this.y[c]!;
+        if (x >= area.left && y >= area.top && x + this.width(c) <= area.right && y + this.height(c) <= area.bottom) {
+          found.push(c);
+        }
+      },
+      null
+    );
+    return found;
   }
 
   /**
@@ -237,4 +349,72 @@ export class SceneIndex {
     boxes.forEach((box, n) => each(box, cell => (items[fill[cell]!++] = n)));
     return { start: counts, items };
   }
+}
+
+function distanceToSegment(p: Point, x0: number, y0: number, x1: number, y1: number): number {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const length = dx * dx + dy * dy;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - x0) * dx + (p.y - y0) * dy) / length));
+  return Math.hypot(p.x - (x0 + t * dx), p.y - (y0 + t * dy));
+}
+
+/**
+ * Where an edit changed the drawing: the old and new boxes of every
+ * component that moved, turned, changed kind, appeared or went, and the
+ * old and new bounds of every wire whose route changed. Tiles outside
+ * these are left alone, so moving one gate redraws the tiles around it
+ * and not the other ten thousand gates' worth.
+ */
+export function changedAreas(before: SceneIndex, after: SceneIndex): Box[] {
+  const areas: Box[] = [];
+  const boxOf = (s: SceneIndex, c: number): Box => ({
+    left: s.x[c]!,
+    top: s.y[c]!,
+    right: s.x[c]! + s.width(c),
+    bottom: s.y[c]! + s.height(c)
+  });
+  for (let c = 0; c < after.componentCount; c++) {
+    const was = before.indexOf.get(after.ids[c]!);
+    if (
+      was === undefined ||
+      before.x[was] !== after.x[c] ||
+      before.y[was] !== after.y[c] ||
+      before.kind[was] !== after.kind[c] ||
+      before.turns[was] !== after.turns[c]
+    ) {
+      areas.push(boxOf(after, c));
+      if (was !== undefined) areas.push(boxOf(before, was));
+    }
+  }
+  for (let c = 0; c < before.componentCount; c++) {
+    if (!after.indexOf.has(before.ids[c]!)) areas.push(boxOf(before, c));
+  }
+  const routes = (s: SceneIndex) => {
+    const byId = new Map<string, { key: string; box: Box }>();
+    for (let w = 0; w < s.wireCount; w++) {
+      const points = Array.from(s.wirePoints.subarray(s.wireStart[w]!, s.wireStart[w + 1]!));
+      const xs = points.filter((_, i) => i % 2 === 0);
+      const ys = points.filter((_, i) => i % 2 === 1);
+      byId.set(s.wireIds[w]!, {
+        key: points.join(','),
+        box: { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) }
+      });
+    }
+    return byId;
+  };
+  const old = routes(before);
+  const now = routes(after);
+  for (const [id, route] of now) {
+    const was = old.get(id);
+    if (was === undefined || was.key !== route.key) {
+      areas.push(route.box);
+      if (was !== undefined) areas.push(was.box);
+    }
+  }
+  for (const [id, route] of old) {
+    if (!now.has(id)) areas.push(route.box);
+  }
+  // Half a unit of margin: strokes and bubbles reach past their boxes.
+  return areas.map(a => ({ left: a.left - 0.5, top: a.top - 0.5, right: a.right + 0.5, bottom: a.bottom + 0.5 }));
 }

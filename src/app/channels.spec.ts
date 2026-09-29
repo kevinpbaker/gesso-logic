@@ -36,7 +36,17 @@ describe('the circuit channel', () => {
     circuit.send.connect({ component: 'gate', pin: 'out' }, { component: 'led', pin: 'in' });
     await served.settle(() => circuit.view.document.value.revision === 7);
 
-    expect(circuit.view.document.value).toEqual({ revision: 7, components: 4, gates: 1, wires: 3, nets: 3, error: null });
+    expect(circuit.view.document.value).toEqual({
+      revision: 7,
+      opened: 0,
+      components: 4,
+      gates: 1,
+      wires: 3,
+      nets: 3,
+      error: null,
+      canUndo: true,
+      canRedo: false
+    });
     const led = () => {
       const net = circuit.view.geometry.value.components.led?.nets.in;
       return net === undefined ? -1 : signalOf(circuit.view.signals.value.chunks, net);

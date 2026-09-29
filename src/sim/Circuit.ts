@@ -17,6 +17,8 @@ import type { Kind } from './Primitives';
 
 export const CIRCUIT_VERSION = 1;
 
+export type Rotation = 0 | 90 | 180 | 270;
+
 export interface Circuit {
   readonly version: typeof CIRCUIT_VERSION;
   readonly components: readonly Component[];
@@ -32,6 +34,12 @@ export interface Component {
   readonly y: number;
   /** What the component is called on screen and in reports; its id when absent. */
   readonly label?: string;
+  /**
+   * Quarter turns clockwise, in degrees. Absent is 0. Rotation is where
+   * the pins are, which is layout's business (`src/app/Layout.ts`); the
+   * netlist does not care which way a gate faces.
+   */
+  readonly rotation?: Rotation;
   /**
    * The value a `constant` drives, or an `input` starts at. Ignored by
    * every other kind.

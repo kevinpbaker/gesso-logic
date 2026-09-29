@@ -1,6 +1,7 @@
 import { channel } from 'gesso-framework';
 
-import type { PinRef } from '../sim/Circuit';
+import type { PinRef, Rotation } from '../sim/Circuit';
+import type { Fragment } from './DocumentEdits';
 import type { Kind } from '../sim/Primitives';
 
 /**
@@ -29,18 +30,29 @@ import type { Kind } from '../sim/Primitives';
 export interface DocumentSummary {
   /** Bumped on every edit that changed the document. */
   readonly revision: number;
+  /**
+   * Bumped when a document is opened — a scene loaded, and from Phase 6 a
+   * file — and not by edits. The canvas frames the view on this, and
+   * only this: framing on the first component placed fitted one switch
+   * to the window.
+   */
+  readonly opened: number;
   readonly components: number;
   readonly gates: number;
   readonly wires: number;
   readonly nets: number;
   /** Why the document does not compile, or null when it does. While it does not, nothing runs. */
   readonly error: string | null;
+  /** Whether there is an edit to undo, or an undone one to redo. */
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
 }
 
 export interface ComponentGeometry {
   readonly kind: Kind;
   readonly x: number;
   readonly y: number;
+  readonly rotation: Rotation;
   readonly label: string | null;
   /** The net each pin is on, by pin name. Empty while the document does not compile. */
   readonly nets: Readonly<Record<string, number>>;
@@ -67,6 +79,9 @@ export interface Signals {
 
 export type ClockRate = number | 'max';
 
+/** The documents the application can open by name, until Phase 6 opens files. */
+export type SceneName = 'empty' | 'bench';
+
 export interface Status {
   readonly running: boolean;
   /** Clock cycles a second asked for, or `max` for as fast as the machine allows. */
@@ -78,12 +93,33 @@ export interface Status {
   readonly ringing: readonly string[];
 }
 
+/**
+ * Every command that creates something takes the id to give it, so the
+ * render worker can select what it just made without waiting to be told
+ * its name. A command whose id is already taken does nothing.
+ *
+ * Edits that belong to one gesture — the moves of a single drag — carry
+ * the same `gesture` string, and undo takes the whole gesture back at
+ * once rather than one pointer event at a time.
+ */
 export interface CircuitCommands {
   /** Adds a component. With no id, one is made from the kind. */
-  place(kind: Kind, x: number, y: number, id?: string): void;
-  /** Joins two pins with a wire. */
-  connect(from: PinRef, to: PinRef): void;
+  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation): void;
+  /** Joins two pins with a wire. With no id, one is made. */
+  connect(from: PinRef, to: PinRef, id?: string): void;
   move(id: string, x: number, y: number): void;
+  /** Moves components by an offset: a selection dragged. */
+  moveBy(ids: readonly string[], dx: number, dy: number, gesture?: string): void;
+  /** Turns components a quarter turn clockwise. */
+  rotate(ids: readonly string[]): void;
+  /** Removes components and wires; wires left with an end on nothing go too. */
+  remove(ids: readonly string[]): void;
+  /** Adds components and wires whose ids are already fresh: paste, duplicate. */
+  insert(fragment: Fragment): void;
+  undo(): void;
+  redo(): void;
+  /** Replaces the document with a named one, and forgets its history. */
+  loadScene(name: SceneName): void;
   /** Drives an input component, as a person flipping a switch does. */
   setInput(id: string, value: 0 | 1): void;
   run(): void;
@@ -102,7 +138,17 @@ export interface CircuitView {
   readonly status: Status;
 }
 
-export const EMPTY_SUMMARY: DocumentSummary = { revision: 0, components: 0, gates: 0, wires: 0, nets: 0, error: null };
+export const EMPTY_SUMMARY: DocumentSummary = {
+  revision: 0,
+  opened: 0,
+  components: 0,
+  gates: 0,
+  wires: 0,
+  nets: 0,
+  error: null,
+  canUndo: false,
+  canRedo: false
+};
 export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {} };
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [] };

@@ -122,11 +122,13 @@ export function paintLive(
         if (scene.isGate(c)) {
           // Inside every symbol: clear of an XOR's second curve, a NOR's
           // pointed front and a NOT's narrowing triangle.
-          if (scene.kind[c] === 0) {
-            surface.rect(scene.x[c]! + 0.9, scene.y[c]! + 1.6, 1.0, 0.8);
-          } else {
-            surface.rect(scene.x[c]! + 1.4, scene.y[c]! + 1.3, 1.0, 1.4);
-          }
+          turned(surface, scene, c, (x, y) => {
+            if (scene.kind[c] === 0) {
+              surface.rect(x + 0.9, y + 1.6, 1.0, 0.8);
+            } else {
+              surface.rect(x + 1.4, y + 1.3, 1.0, 1.4);
+            }
+          });
         } else {
           surface.roundRect(scene.x[c]! + 0.2, scene.y[c]! + 0.2, scene.width(c) - 0.4, scene.height(c) - 0.4, 0.3);
         }
@@ -241,7 +243,7 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
 
   surface.beginPath();
   for (const g of gates) {
-    traceGateBody(surface, scene.kind[g]!, scene.x[g]!, scene.y[g]!);
+    turned(surface, scene, g, (x, y) => traceGateBody(surface, scene.kind[g]!, x, y));
   }
   surface.fillColor('surface');
   surface.fill();
@@ -252,7 +254,7 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
   // Pin stubs and the XOR's second curve: lines, never filled.
   surface.beginPath();
   for (const g of gates) {
-    traceGateLines(surface, scene.kind[g]!, scene.x[g]!, scene.y[g]!);
+    turned(surface, scene, g, (x, y) => traceGateLines(surface, scene.kind[g]!, x, y));
   }
   surface.stroke();
 
@@ -274,6 +276,36 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
       }
     }
   }
+}
+
+/**
+ * Draws a component's unturned shape so it lands turned in place.
+ *
+ * `trace` is given the corner to draw the unturned shape from. For a
+ * component that is not turned that is simply its position, with no
+ * transform at all, which keeps the common case — every gate in the
+ * bench scene — as cheap as it was. For one that is, the surface is
+ * turned about the component's box and the shape is drawn from the
+ * origin. A canvas applies the transform as each point is added to the
+ * path, so turned and unturned shapes share one path and one fill.
+ */
+export function turned(surface: PaintSurface, scene: SceneIndex, c: number, trace: (x: number, y: number) => void): void {
+  const turns = scene.turns[c]!;
+  if (turns === 0) {
+    trace(scene.x[c]!, scene.y[c]!);
+    return;
+  }
+  const width = scene.width(c);
+  const height = scene.height(c);
+  // The unturned box: a quarter turn had swapped its sides.
+  const across = turns % 2 === 1 ? height : width;
+  const down = turns % 2 === 1 ? width : height;
+  surface.save();
+  surface.translate(scene.x[c]! + width / 2, scene.y[c]! + height / 2);
+  surface.rotate((turns * Math.PI) / 2);
+  surface.translate(-across / 2, -down / 2);
+  trace(0, 0);
+  surface.restore();
 }
 
 function traceWire(surface: PaintSurface, scene: SceneIndex, w: number): void {

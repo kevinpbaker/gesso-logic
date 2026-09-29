@@ -20,9 +20,16 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         status: service.status
       },
       commands: {
-        place: (kind, x, y, id) => service.place(kind, x, y, id),
-        connect: (from, to) => service.connect(from, to),
+        place: (kind, x, y, id, rotation) => service.place(kind, x, y, id, rotation),
+        connect: (from, to, id) => service.connect(from, to, id),
         move: (id, x, y) => service.move(id, x, y),
+        moveBy: (ids, dx, dy, gesture) => service.moveBy(ids, dx, dy, gesture),
+        rotate: ids => service.rotate(ids),
+        remove: ids => service.remove(ids),
+        insert: fragment => service.insert(fragment),
+        undo: () => service.undo(),
+        redo: () => service.redo(),
+        loadScene: name => service.loadScene(name),
         setInput: (id, value) => service.setInput(id, value),
         run: () => service.run(),
         pause: () => service.pause(),

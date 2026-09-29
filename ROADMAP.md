@@ -11,11 +11,12 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 3 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 4 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
-the circuit running. Nothing past Phase 3 is built.
+the circuit running, and circuits can be built on it by hand. Nothing
+past Phase 4 is built.
 
 ---
 
@@ -478,6 +479,55 @@ usual shortcuts, plus a key per gate type.
 
 **Exit:** a circuit built by hand in the browser — a full adder from
 scratch — in under a minute, then undone to empty and redone.
+
+**Done.** A full adder was built by hand in a desktop Chrome, all with
+real input: three switches, two XORs, two ANDs, an OR, two LEDs and
+eleven wires, dragged pin to pin. Flipping the switches added correctly,
+twenty-five Ctrl+Z took it to an empty canvas, and Ctrl+Shift+Z rebuilt
+it. Move with wires following, rotate, duplicate, delete, marquee, and
+copy and paste through the system clipboard were each checked the same
+way. `Editor.spec.ts` holds the gestures to it headlessly: 70 specs in
+all. How it's built:
+
+- **The render worker owns selection and every gesture**
+  (`src/canvas/Editor.ts`). The document changes only through commands:
+  `place`, `connect`, `moveBy`, `rotate`, `remove`, `insert`, `undo`,
+  `redo`. Commands that create something carry the id to give it, made
+  in the render worker, so a new part is selected without a round trip.
+- **Undo lives in the application worker.** A drag's moves carry one
+  gesture id and fold into one step, and an edit that changes nothing
+  records nothing. Documents share structure, so a step costs what it
+  changed.
+- **A move or a rotation keeps the netlist and the running simulator.**
+  Connectivity is unchanged, so only geometry is published: dragging
+  through a running circuit doesn't recompile it per pointer event.
+- **An edit redraws only the tiles it touched.** Tiles outlive edits.
+  The scene index diffs the old geometry against the new (components
+  moved, turned, added or removed, and wires whose routes changed), and
+  only tiles meeting those areas redraw their static layers. Every live
+  layer refreshes once, because a recompile renumbers nets.
+- **Keys:** Delete, R to rotate, arrows to nudge (shift for 4),
+  Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, Ctrl+A, Ctrl+C / X / V / D, Escape.
+  A key per part: A, O, N and X for AND, OR, NOT and XOR, shift for
+  NAND, NOR and XNOR, I for a switch, L for an LED, C for a clock and
+  K for a constant. Middle or right drag pans, and so does a drag with
+  space held.
+- **A switch is flipped by clicking it once it's selected.** The first
+  click selects it so it can be moved; Phase 5 may want a dedicated
+  handle.
+- **The canvas opens empty.** The bench loads its scene with the new
+  `loadScene` command, and so does a readout button. Tiles now cover
+  the whole view, not the scene's bounds, so a gate can be dropped
+  anywhere; empty ground costs nothing. The view frames itself when a
+  document is opened (`DocumentSummary.opened`), never on an edit:
+  framing on the first part placed fitted one switch to the window.
+- **A release far from its press finishes a drag**, even with no move
+  reported between them: a fast flick can arrive as down then up.
+
+Not done: dragging from the palette (clicking a part then the canvas
+works), and routing that avoids other components (wires still take the
+three-segment route). The readout's "worst gap" also counts idle time,
+since Gesso draws only on change.
 
 ## Phase 5 — Things you can touch
 

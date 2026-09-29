@@ -1,11 +1,21 @@
 import { BehaviorSubject, type Observable } from 'rxjs';
 
-import { CIRCUIT_VERSION, type Circuit, type PinRef } from '../sim/Circuit';
+import { CIRCUIT_VERSION, type Circuit, type PinRef, type Rotation } from '../sim/Circuit';
 import { CircuitError, compile, type Netlist } from '../sim/Netlist';
 import { isGate, PINS, type Kind } from '../sim/Primitives';
 import { Simulator } from '../sim/Simulator';
-import type { ClockRate, ComponentGeometry, DocumentSummary, Geometry, Signals, Status, WireGeometry } from './CircuitContract';
-import { connect, freshId, move, place } from './DocumentEdits';
+import type {
+  ClockRate,
+  ComponentGeometry,
+  DocumentSummary,
+  Geometry,
+  SceneName,
+  Signals,
+  Status,
+  WireGeometry
+} from './CircuitContract';
+import { connect, freshId, insert, move, moveBy, place, remove, rotate, sameConnectivity, type Fragment } from './DocumentEdits';
+import { benchScene } from './Scenes';
 import { boundsOf, boxOf, intersects, pinAt, route, slotOf } from './Layout';
 import { CHUNK, packChunk } from './SignalPacking';
 
@@ -61,6 +71,9 @@ interface Rect {
  */
 const CATCH_UP_CYCLES = 10_000;
 
+/** Edits kept for undo. Documents share structure, so each is the size of what changed. */
+const HISTORY = 500;
+
 export class CircuitService {
   readonly document: Observable<DocumentSummary>;
   readonly geometry: Observable<Geometry>;
@@ -78,7 +91,12 @@ export class CircuitService {
   private readonly publishIntervalMs: number;
 
   private circuit: Circuit = { version: CIRCUIT_VERSION, components: [], wires: [] };
+  private readonly undoStack: { circuit: Circuit; gesture: string | null }[] = [];
+  private readonly redoStack: Circuit[] = [];
+  /** The gesture of the last edit, which the next one folds into if it carries the same. */
+  private lastGesture: string | null = null;
   private revision = 0;
+  private opened = 0;
   private netlist: Netlist | null = null;
   private simulator: Simulator | null = null;
   private error: string | null = null;
@@ -111,22 +129,66 @@ export class CircuitService {
     this.status = this.statusSubject;
   }
 
-  /** Replaces the document, as opening a file does. The simulator starts fresh. */
+  /** Replaces the document, as opening a file does. The simulator starts fresh and the history is forgotten. */
   load(circuit: Circuit): void {
+    this.opened++;
     this.simulator = null;
-    this.edit(circuit);
+    this.undoStack.length = 0;
+    this.redoStack.length = 0;
+    this.lastGesture = null;
+    this.apply(circuit);
   }
 
-  place(kind: Kind, x: number, y: number, id?: string): void {
-    this.edit(place(this.circuit, id ?? freshId(this.circuit, kind), kind, x, y));
+  loadScene(name: SceneName): void {
+    this.load(name === 'bench' ? benchScene() : { version: CIRCUIT_VERSION, components: [], wires: [] });
   }
 
-  connect(from: PinRef, to: PinRef): void {
-    this.edit(connect(this.circuit, freshId(this.circuit, 'w'), from, to));
+  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation): void {
+    this.edit(place(this.circuit, id ?? freshId(this.circuit, kind), kind, x, y, rotation));
+  }
+
+  connect(from: PinRef, to: PinRef, id?: string): void {
+    this.edit(connect(this.circuit, id ?? freshId(this.circuit, 'w'), from, to));
   }
 
   move(id: string, x: number, y: number): void {
     this.edit(move(this.circuit, id, x, y));
+  }
+
+  moveBy(ids: readonly string[], dx: number, dy: number, gesture?: string): void {
+    this.edit(moveBy(this.circuit, ids, dx, dy), gesture);
+  }
+
+  rotate(ids: readonly string[]): void {
+    this.edit(rotate(this.circuit, ids));
+  }
+
+  remove(ids: readonly string[]): void {
+    this.edit(remove(this.circuit, ids));
+  }
+
+  insert(fragment: Fragment): void {
+    this.edit(insert(this.circuit, fragment));
+  }
+
+  undo(): void {
+    const previous = this.undoStack.pop();
+    if (previous === undefined) {
+      return;
+    }
+    this.redoStack.push(this.circuit);
+    this.lastGesture = null;
+    this.apply(previous.circuit);
+  }
+
+  redo(): void {
+    const next = this.redoStack.pop();
+    if (next === undefined) {
+      return;
+    }
+    this.undoStack.push({ circuit: this.circuit, gesture: null });
+    this.lastGesture = null;
+    this.apply(next);
   }
 
   setInput(id: string, value: 0 | 1): void {
@@ -192,19 +254,50 @@ export class CircuitService {
   // -------------------------------------------------------------------------
 
   /**
-   * Takes a new document: compiles it and, when that works, moves the
-   * running state onto the new netlist so the circuit keeps what it
-   * remembered. A document that does not compile is kept — the person is
-   * halfway through drawing it — and says why; nothing runs until it
-   * compiles again.
+   * An edit: the new document, recorded for undo.
+   *
+   * An edit that changed nothing is not recorded. Edits carrying the
+   * gesture of the edit before them are folded into it, so a drag of
+   * fifty pointer moves is one step back, not fifty. Any edit clears
+   * what could be redone, as it does everywhere.
    */
-  private edit(next: Circuit): void {
-    if (next === this.circuit && this.revision > 0) {
+  private edit(next: Circuit, gesture?: string): void {
+    if (next === this.circuit) {
       return;
     }
+    const folds = gesture !== undefined && gesture === this.lastGesture && this.undoStack.length > 0;
+    if (!folds) {
+      this.undoStack.push({ circuit: this.circuit, gesture: gesture ?? null });
+      if (this.undoStack.length > HISTORY) {
+        this.undoStack.shift();
+      }
+    }
+    this.lastGesture = gesture ?? null;
+    this.redoStack.length = 0;
+    this.apply(next);
+  }
+
+  /**
+   * Takes a new document. When it joins the same pins as the last one —
+   * a move, a rotation — the netlist and the running simulator are kept
+   * exactly as they are, and only geometry is published: a drag through
+   * a running CPU does not recompile it fifty times. Otherwise it is
+   * compiled and, when that works, the running state moves onto the new
+   * netlist so the circuit keeps what it remembered. A document that
+   * does not compile is kept — the person is halfway through drawing it
+   * — and says why; nothing runs until it compiles again.
+   */
+  private apply(next: Circuit): void {
+    const previous = this.circuit;
     this.circuit = next;
     this.revision++;
     this.visibleChunks = null;
+    if (this.netlist !== null && this.simulator !== null && sameConnectivity(previous, next)) {
+      this.documentSubject.next(this.summary());
+      this.geometrySubject.next(this.geometryNow());
+      this.publish(true);
+      return;
+    }
     try {
       const netlist = compile(next);
       const simulator = new Simulator(netlist);
@@ -347,11 +440,14 @@ export class CircuitService {
     const netlist = this.netlist;
     return {
       revision: this.revision,
+      opened: this.opened,
       components: this.circuit.components.length,
       gates: this.circuit.components.filter(c => isGate(c.kind)).length,
       wires: this.circuit.wires.length,
       nets: netlist?.netCount ?? 0,
-      error: this.error
+      error: this.error,
+      canUndo: this.undoStack.length > 0,
+      canRedo: this.redoStack.length > 0
     };
   }
 
@@ -370,6 +466,7 @@ export class CircuitService {
         kind: component.kind,
         x: component.x,
         y: component.y,
+        rotation: component.rotation ?? 0,
         label: component.label ?? null,
         nets
       };
@@ -429,7 +526,7 @@ export class CircuitService {
     } else {
       const byId = new Map(this.circuit.components.map(c => [c.id, c]));
       for (const component of this.circuit.components) {
-        if (intersects(boxOf(component.kind, component.x, component.y), viewport)) {
+        if (intersects(boxOf(component.kind, component.x, component.y, component.rotation), viewport)) {
           const spec = PINS[component.kind];
           for (const pin of [...spec.inputs, ...spec.outputs]) {
             add(component.id, pin);
@@ -443,8 +540,8 @@ export class CircuitService {
           continue;
         }
         const path = route(
-          pinAt(from.kind, from.x, from.y, wire.from.pin),
-          pinAt(to.kind, to.x, to.y, wire.to.pin),
+          pinAt(from.kind, from.x, from.y, wire.from.pin, from.rotation),
+          pinAt(to.kind, to.x, to.y, wire.to.pin, to.rotation),
           slotOf(wire.to.pin)
         );
         if (intersects(boundsOf(path), viewport)) {

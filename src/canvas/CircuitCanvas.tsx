@@ -10,16 +10,19 @@ import {
   type UiChild,
   type UiPaint,
   type UiPinchEvent,
+  type UiKeyboardEvent,
+  type UiPasteEvent,
   type UiPointerEvent,
   type UiWheelEvent
 } from 'gesso-core';
-import { each, FrameService, internalState, type ComponentContext } from 'gesso-framework';
+import { each, FrameService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type Signals } from '../app/CircuitContract';
-import type { Box } from '../app/Layout';
+import { intersects, type Box } from '../app/Layout';
 import { signalOf } from '../app/SignalPacking';
+import { Editor } from './Editor';
 import { paintLive, paintOver, paintUnder } from './Painters';
-import { CELL, SceneIndex } from './SceneIndex';
+import { CELL, changedAreas, SceneIndex } from './SceneIndex';
 
 /**
  * The circuit, drawn: a pannable, zoomable surface of tiles.
@@ -78,6 +81,10 @@ export interface CanvasHandle {
   missed(): number;
   /** The scene's bounds in grid units. */
   bounds(): Box;
+  /** Selection, gestures and the keys that drive them. */
+  readonly editor: Editor;
+  /** Bumped whenever the editor has something new to show. */
+  readonly editorChanged: BehaviorSubject<number>;
 }
 
 const TILE = 256;
@@ -102,12 +109,14 @@ interface Tile {
   /** Grid units per side. */
   readonly world: number;
   readonly area: Box;
-  /** The chunks this tile's nets are in. */
-  readonly chunks: readonly number[];
+  /** The chunks this tile's nets are in. Recomputed on every edit: a recompile renumbers nets. */
+  chunks: readonly number[];
   /** The scale the tile's bitmaps were last drawn at; see settle zoom above. */
   readonly drawnAt: BehaviorSubject<number>;
-  readonly under: UiPaint;
-  readonly over: UiPaint;
+  /** Bumped when an edit touches this tile's ground, which redraws its static layers. */
+  readonly version: BehaviorSubject<number>;
+  readonly drawUnder: (surface: PaintSurface, box: PaintBox) => void;
+  readonly drawOver: (surface: PaintSurface, box: PaintBox) => void;
   readonly drawLive: (surface: PaintSurface, box: PaintBox) => void;
 }
 
@@ -122,10 +131,12 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
 
   let scene = new SceneIndex(circuit.view.geometry.value);
   const revision = internalState(0);
-  ctx.effect(circuit.view.geometry, geometry => {
-    scene = new SceneIndex(geometry);
-    revision.value++;
-  });
+  /**
+   * Bumped on every edit, because a recompile renumbers nets and every
+   * tile's live layer reads them. Static layers do not, and are redrawn
+   * only where the edit happened: see `changedAreas`.
+   */
+  const netVersion = internalState(0);
 
   let chunks: Readonly<Record<string, string>> = circuit.view.signals.value.chunks;
   ctx.effect(circuit.view.signals, (signals: Signals) => (chunks = signals.chunks));
@@ -196,7 +207,6 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
    */
   let previousOctave: number | null = null;
   let lastOctave = gridOctave.value;
-  let lastRevision = -1;
   let ready = new Set<string>();
   let pending: { key: string; tx: number; ty: number; world: number }[] = [];
   /** Of the tiles the view wants, how many have nothing on their ground, and out of how many. */
@@ -214,43 +224,63 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
   /** When the camera's scale last changed, for telling a zoom in progress from a view at rest. */
   let scaleChangedAt = 0;
   let tilesMade = 0;
+  const chunksIn = (area: Box) => [...new Set(scene.netsIn(area).map(net => Math.floor(net / 256)))];
   const makeTile = (key: string, tx: number, ty: number, world: number, scale: number): Tile => {
     tilesMade++;
     const area: Box = { left: tx * world, top: ty * world, right: (tx + 1) * world, bottom: (ty + 1) * world };
-    const nets = scene.netsIn(area);
     const place = (surface: PaintSurface, box: PaintBox) => {
       const s = box.width / world;
       surface.scale(s, s);
       surface.translate(-area.left, -area.top);
       return s;
     };
-    const owner = scene;
+    // The painters read `scene` when they run, not when the tile was
+    // made: a tile outlives edits, and draws the circuit as it is now.
     return {
       key,
       tx,
       ty,
       world,
       area,
-      chunks: [...new Set(nets.map(net => Math.floor(net / 256)))],
+      chunks: chunksIn(area),
       drawnAt: new BehaviorSubject(scale),
-      under: { draw: (surface, box) => paintUnder(surface, owner, area, place(surface, box)), inputs: [key] },
-      over: { draw: (surface, box) => paintOver(surface, owner, area, place(surface, box)), inputs: [key] },
-      drawLive: (surface, box) => paintLive(surface, owner, area, place(surface, box), chunks)
+      version: new BehaviorSubject(0),
+      drawUnder: (surface, box) => paintUnder(surface, scene, area, place(surface, box)),
+      drawOver: (surface, box) => paintOver(surface, scene, area, place(surface, box)),
+      drawLive: (surface, box) => paintLive(surface, scene, area, place(surface, box), chunks)
     };
   };
 
+  // Placed after the tile machinery it uses: the view emits its current
+  // value the moment this subscribes.
+  ctx.effect(circuit.view.geometry, geometry => {
+    const before = scene;
+    scene = new SceneIndex(geometry);
+    const changed = changedAreas(before, scene);
+    for (const tile of tiles.values()) {
+      tile.chunks = chunksIn(tile.area);
+      if (changed.some(area => intersects(area, tile.area))) {
+        tile.version.next(tile.version.value + 1);
+      }
+    }
+    netVersion.value++;
+    revision.value++;
+  });
+
   /** The grid cells an octave cuts the view into, clipped to the scene. */
-  const cells = (octave: number, c: Camera, s: { width: number; height: number }, rev: number) => {
+  // The whole view, not the scene's bounds: a gate can be placed anywhere,
+  // and ground with nothing on it costs nothing, because an empty layer
+  // makes no bitmap.
+  const cells = (octave: number, c: Camera, s: { width: number; height: number }) => {
     const world = TILE / octave;
-    const b = scene.bounds;
-    const x0 = Math.max(Math.floor(b.left / world), Math.floor(c.x / world));
-    const y0 = Math.max(Math.floor(b.top / world), Math.floor(c.y / world));
-    const x1 = Math.min(Math.floor(b.right / world), Math.floor((c.x + s.width / c.scale) / world));
-    const y1 = Math.min(Math.floor(b.bottom / world), Math.floor((c.y + s.height / c.scale) / world));
+    const x0 = Math.floor(c.x / world);
+    const y0 = Math.floor(c.y / world);
+    const x1 = Math.floor((c.x + s.width / c.scale) / world);
+    const y1 = Math.floor((c.y + s.height / c.scale) / world);
     const out: { key: string; tx: number; ty: number; world: number }[] = [];
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
-        out.push({ key: `${rev}:${world}:${tx}:${ty}`, tx, ty, world });
+        out.push({ key: `${world}:${tx}:${ty}`, tx, ty, world });
       }
     }
     return out;
@@ -272,22 +302,14 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
   };
 
   const visibleTiles: Observable<readonly Tile[]> = combineLatest([camera, size.changes, revision, gridOctave, promoted]).pipe(
-    map(([c, s, rev, octave]) => {
+    map(([c, s, _rev, octave]) => {
       if (s.width <= 0) {
         return [];
       }
-      const current = cells(octave, c, s, rev);
-      if (rev !== lastRevision) {
-        // An edit, or the scene arriving: every tile is new, and the old
-        // ones describe a circuit that no longer exists.
-        lastRevision = rev;
-        previousOctave = null;
-        ready = new Set(current.map(cell => cell.key));
-      } else {
-        // Forget what has left the view, so a tile coming back is queued
-        // again: its layers were dropped with it and are drawn afresh.
-        ready = new Set(current.filter(cell => ready.has(cell.key)).map(cell => cell.key));
-      }
+      const current = cells(octave, c, s);
+      // Forget what has left the view, so a tile coming back is queued
+      // again: its layers were dropped with it and are drawn afresh.
+      ready = new Set(current.filter(cell => ready.has(cell.key)).map(cell => cell.key));
       pending = current.filter(cell => !ready.has(cell.key));
       // The old grid's tiles stay only over ground whose new tile is not
       // ready: drawing both grids everywhere for a whole change doubled
@@ -300,7 +322,7 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
       const old =
         previousOctave === null
           ? []
-          : cells(previousOctave, c, s, rev)
+          : cells(previousOctave, c, s)
               .flatMap(cell => tiles.get(cell.key) ?? [])
               .filter(tile => pending.some(cell => covers(tile, cell)));
       let list = [...old, ...current.filter(cell => ready.has(cell.key)).map(cell => made(cell, c.scale))];
@@ -331,8 +353,13 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
   ctx.effect(visibleTiles, list => (shown = list));
 
   const renderTile = (tile: Tile) => {
-    const live = circuit.view.signals.pipe(
-      map((s): UiPaint => ({ draw: tile.drawLive, inputs: [tile.key, ...tile.chunks.map(chunk => s.chunks[chunk])] }))
+    const under = tile.version.pipe(map((v): UiPaint => ({ draw: tile.drawUnder, inputs: [tile.key, v] })));
+    const over = tile.version.pipe(map((v): UiPaint => ({ draw: tile.drawOver, inputs: [tile.key, v] })));
+    const live = combineLatest([circuit.view.signals, tile.version, netVersion]).pipe(
+      map(([s, v, nets]): UiPaint => ({
+        draw: tile.drawLive,
+        inputs: [tile.key, v, nets, ...tile.chunks.map(chunk => s.chunks[chunk])]
+      }))
     );
     const box = combineLatest([camera, tile.drawnAt]).pipe(
       map(([c, drawnAt]) => ({ side: tile.world * drawnAt, scale: c.scale / drawnAt }))
@@ -350,9 +377,9 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
         width={box.pipe(map(b => b.side))}
         height={box.pipe(map(b => b.side))}
         transform={box.pipe(map(b => (b.scale === 1 ? undefined : { scaleX: b.scale, scaleY: b.scale })))}>
-        <paint width={percent(100)} height={percent(100)} paint={tile.under} />
+        <paint width={percent(100)} height={percent(100)} paint={under} />
         <paint width={percent(100)} height={percent(100)} paint={live} />
-        <paint width={percent(100)} height={percent(100)} paint={tile.over} />
+        <paint width={percent(100)} height={percent(100)} paint={over} />
       </stack>
     );
   };
@@ -430,15 +457,55 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
     const c = camera.value;
     camera.value = { ...c, x: c.x + dx / c.scale, y: c.y + dy / c.scale };
   };
-  let dragFrom: { x: number; y: number } | null = null;
+  // ---------------------------------------------------------------------
+  // Editing
+  // ---------------------------------------------------------------------
+
+  const editorChanged = new BehaviorSubject(0);
+  const shell = ctx.inject(ShellService);
+  const editor = new Editor({
+    scene: () => scene,
+    toWorld: p => {
+      const c = camera.value;
+      return { x: c.x + p.x / c.scale, y: c.y + p.y / c.scale };
+    },
+    scale: () => camera.value.scale,
+    send: circuit.send,
+    panBy,
+    value: net => (net < 0 ? -1 : signalOf(chunks, net)),
+    copyText: text => shell.copyText(text),
+    changed: () => editorChanged.next(editorChanged.value + 1)
+  });
+  // Geometry arriving can move what the overlay outlines.
+  ctx.effect(revision, () => editorChanged.next(editorChanged.value + 1));
+
+  /**
+   * The editor's overlay: one `Paint` over every tile, in screen space.
+   * Its inputs are the camera and the editor's change count, so it is
+   * redrawn when either moves, and with nothing selected and no gesture
+   * under way it records nothing and costs nothing.
+   */
+  const drawOverlay = (surface: PaintSurface) => {
+    const c = camera.value;
+    surface.scale(c.scale, c.scale);
+    surface.translate(-c.x, -c.y);
+    editor.drawOverlay(surface);
+  };
+  const overlay = combineLatest([camera, editorChanged]).pipe(
+    map(([c, version]): UiPaint => ({ draw: drawOverlay, inputs: [c.x, c.y, c.scale, version] }))
+  );
 
   const show = (preset: ZoomPreset) => {
     const s = size.current;
     const b = scene.bounds;
-    // Nothing to frame until the scene has arrived: fitting an empty
-    // scene gave a scale of a hundred pixels a unit, which the bench
-    // then zoomed around.
-    if (scene.componentCount === 0 || s.width <= 0) {
+    if (s.width <= 0) {
+      return;
+    }
+    // An empty document has nothing to fit. It opens at a working zoom —
+    // a gate 64 pixels wide — with the origin near the top-left corner,
+    // rather than at the hundred pixels a unit that fitting nothing gave.
+    if (scene.componentCount === 0) {
+      camera.value = { scale: 16, x: -4, y: -4 };
       return;
     }
     const fit = Math.min(s.width / (b.right - b.left + 8), s.height / (b.bottom - b.top + 8));
@@ -448,11 +515,15 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
     camera.value = { scale, x: cx - s.width / scale / 2, y: cy - s.height / scale / 2 };
   };
 
-  // Frame the scene the first time there is both a size and a scene.
-  let framed = false;
-  ctx.effect(combineLatest([size.changes, revision]), ([s]) => {
-    if (!framed && s.width > 0 && scene.componentCount > 0) {
-      framed = true;
+  // Frame the view when a document is opened, once there is a size to
+  // frame it in: not on an edit, however much it changes.
+  let framedFor = -1;
+  ctx.effect(combineLatest([size.changes, circuit.view.document, revision]), ([s, document]) => {
+    // Wait for the opened document's geometry: the summary and the
+    // geometry are separate keys, and the summary can arrive first.
+    const waiting = document.components > 0 && scene.componentCount === 0;
+    if (s.width > 0 && document.opened !== framedFor && !waiting) {
+      framedFor = document.opened;
       show('all');
     }
   });
@@ -472,16 +543,20 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
           panBy(event.deltaX, event.deltaY);
         }
       }}
-      onPointerDown={(event: UiPointerEvent) => (dragFrom = { x: event.x, y: event.y })}
-      onPointerMove={(event: UiPointerEvent) => {
-        if (dragFrom !== null && event.buttons !== 0) {
-          panBy(dragFrom.x - event.x, dragFrom.y - event.y);
-          dragFrom = { x: event.x, y: event.y };
+      focusable
+      onPointerDown={(event: UiPointerEvent) => editor.pointerDown({ x: event.x, y: event.y }, event.buttons, event.modifiers.shift)}
+      onPointerMove={(event: UiPointerEvent) => editor.pointerMove({ x: event.x, y: event.y })}
+      onPointerUp={(event: UiPointerEvent) => editor.pointerUp({ x: event.x, y: event.y })}
+      onKeyDown={(event: UiKeyboardEvent) => {
+        if (editor.keyDown(event.key, event.modifiers.ctrl || event.modifiers.meta, event.modifiers.shift)) {
+          event.preventDefault();
         }
       }}
-      onPointerUp={() => (dragFrom = null)}
+      onKeyUp={(event: UiKeyboardEvent) => editor.keyUp(event.key)}
+      onPaste={(event: UiPasteEvent) => editor.paste(event.text)}
       onPinchMove={(event: UiPinchEvent) => zoomAt(event.x, event.y, event.scaleDelta)}>
       {each(visibleTiles, 'key', renderTile)}
+      <paint position="absolute" left={0} top={0} width={percent(100)} height={percent(100)} paint={overlay} />
     </box>
   );
 
@@ -503,6 +578,8 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
       }
       return missing / visibleNets.length;
     },
-    bounds: () => scene.bounds
+    bounds: () => scene.bounds,
+    editor,
+    editorChanged
   };
 }
