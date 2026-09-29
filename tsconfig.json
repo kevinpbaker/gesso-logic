@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "esnext",
+    "lib": ["ES2023", "DOM"],
+    "types": ["vite/client"],
+
+    /* The packages ship `exports` maps, so this is the line that has to be right. */
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "strict": true,
+    "noEmit": true,
+
+    /* The two lines that let you write elements as markup. */
+    "jsx": "react-jsx",
+    "jsxImportSource": "gesso-framework"
+  },
+  "include": ["src"]
+}

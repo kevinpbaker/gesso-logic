@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>gessologic</title>
+    <style>
+      /*
+        The canvas is sized to its host, so the host needs a size. This
+        is the whole of the CSS a Gesso application needs; everything
+        else on the page is painted, not styled.
+      */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      #app {
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
