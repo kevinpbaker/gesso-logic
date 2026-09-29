@@ -12,10 +12,13 @@ import type {
   SceneName,
   Signals,
   Status,
+  TableView,
   WireGeometry
 } from './CircuitContract';
+import { NO_TABLE } from './CircuitContract';
 import { connect, freshId, insert, move, moveBy, place, remove, rotate, sameConnectivity, type Fragment } from './DocumentEdits';
-import { benchScene } from './Scenes';
+import { benchScene, counterScene } from './Scenes';
+import { truthTable } from './TruthTable';
 import { boundsOf, boxOf, intersects, pinAt, route, slotOf } from './Layout';
 import { CHUNK, packChunk } from './SignalPacking';
 
@@ -79,11 +82,13 @@ export class CircuitService {
   readonly geometry: Observable<Geometry>;
   readonly signals: Observable<Signals>;
   readonly status: Observable<Status>;
+  readonly table: Observable<TableView>;
 
   private readonly documentSubject: BehaviorSubject<DocumentSummary>;
   private readonly geometrySubject: BehaviorSubject<Geometry>;
   private readonly signalsSubject: BehaviorSubject<Signals>;
   private readonly statusSubject: BehaviorSubject<Status>;
+  private readonly tableSubject = new BehaviorSubject<TableView>(NO_TABLE);
 
   private readonly schedule: Schedule;
   private readonly now: () => number;
@@ -127,6 +132,7 @@ export class CircuitService {
     this.geometry = this.geometrySubject;
     this.signals = this.signalsSubject;
     this.status = this.statusSubject;
+    this.table = this.tableSubject;
   }
 
   /** Replaces the document, as opening a file does. The simulator starts fresh and the history is forgotten. */
@@ -136,15 +142,31 @@ export class CircuitService {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.lastGesture = null;
+    // The document's clocks carry its rate.
+    this.clockHz = circuit.components.find(c => c.kind === 'clock')?.rate ?? 'max';
+    this.running = false;
+    this.samples.length = 0;
+    this.tableSubject.next(NO_TABLE);
     this.apply(circuit);
   }
 
   loadScene(name: SceneName): void {
-    this.load(name === 'bench' ? benchScene() : { version: CIRCUIT_VERSION, components: [], wires: [] });
+    this.load(
+      name === 'bench'
+        ? benchScene()
+        : name === 'counter'
+          ? counterScene()
+          : { version: CIRCUIT_VERSION, components: [], wires: [] }
+    );
   }
 
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation): void {
-    this.edit(place(this.circuit, id ?? freshId(this.circuit, kind), kind, x, y, rotation));
+    const placed = place(this.circuit, id ?? freshId(this.circuit, kind), kind, x, y, rotation);
+    this.edit(kind === 'clock' ? withRate(placed, this.clockHz) : placed);
+  }
+
+  tabulate(ids: readonly string[]): void {
+    this.tableSubject.next(ids.length === 0 ? NO_TABLE : this.tableOf(ids));
   }
 
   connect(from: PinRef, to: PinRef, id?: string): void {
@@ -237,6 +259,9 @@ export class CircuitService {
       return;
     }
     this.clockHz = rate;
+    // Kept on the document's clocks, outside the history: a rate is a
+    // setting, not an edit, and undoing a wire should not change it.
+    this.circuit = withRate(this.circuit, rate);
     this.restartPacing();
     this.publish(true);
   }
@@ -321,7 +346,19 @@ export class CircuitService {
     }
     this.documentSubject.next(this.summary());
     this.geometrySubject.next(this.geometryNow());
+    const table = this.tableSubject.value;
+    if (table.ids.length > 0) {
+      const ids = table.ids.filter(id => next.components.some(c => c.id === id));
+      this.tableSubject.next(ids.length === 0 ? NO_TABLE : this.tableOf(ids));
+    }
     this.publish(true);
+  }
+
+  private tableOf(ids: readonly string[]): TableView {
+    const result = truthTable(this.circuit, ids);
+    return 'table' in result
+      ? { ids, ...result.table, error: null }
+      : { ids, inputs: [], outputs: [], rows: [], error: result.error };
   }
 
   // -------------------------------------------------------------------------
@@ -568,4 +605,20 @@ export class CircuitService {
       ringing: this.ringing
     };
   }
+}
+
+/** A document whose clocks all run at a rate; the same document when they already do. */
+function withRate(circuit: Circuit, rate: ClockRate): Circuit {
+  const wanted = rate === 'max' ? undefined : rate;
+  if (!circuit.components.some(c => c.kind === 'clock' && c.rate !== wanted)) {
+    return circuit;
+  }
+  return {
+    ...circuit,
+    components: circuit.components.map(c => {
+      if (c.kind !== 'clock' || c.rate === wanted) return c;
+      const { rate: _, ...rest } = c;
+      return wanted === undefined ? rest : { ...rest, rate: wanted };
+    })
+  };
 }

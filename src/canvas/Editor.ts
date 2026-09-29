@@ -4,7 +4,7 @@ import type { CircuitCommands } from '../app/CircuitContract';
 import { relabel, type Fragment } from '../app/DocumentEdits';
 import { pinAt, route, sizeOf, slotOf, type Box, type Point } from '../app/Layout';
 import type { Component, PinRef, Wire } from '../sim/Circuit';
-import type { Kind } from '../sim/Primitives';
+import { PINS, type Kind } from '../sim/Primitives';
 import type { SceneIndex } from './SceneIndex';
 
 /**
@@ -32,7 +32,7 @@ export interface EditorDeps {
   scale(): number;
   send: Pick<
     CircuitCommands,
-    'place' | 'connect' | 'moveBy' | 'rotate' | 'remove' | 'insert' | 'undo' | 'redo' | 'setInput'
+    'place' | 'connect' | 'moveBy' | 'rotate' | 'remove' | 'insert' | 'undo' | 'redo' | 'setInput' | 'tabulate'
   >;
   panBy(dx: number, dy: number): void;
   /** A net's value as last published: 0, 1, or -1 when it has not arrived. */
@@ -51,7 +51,7 @@ type Hit =
 type Mode =
   | { readonly kind: 'idle' }
   | { readonly kind: 'placing'; readonly what: Kind; readonly again: boolean }
-  | { readonly kind: 'pressing'; readonly screen: Point; readonly hit: Hit; readonly additive: boolean }
+  | { readonly kind: 'pressing'; readonly screen: Point; readonly hit: Hit; readonly additive: boolean; readonly holding?: string }
   | { readonly kind: 'moving'; readonly gesture: string; last: Point }
   | { readonly kind: 'wiring'; readonly from: PinRef; readonly fromAt: Point }
   | { readonly kind: 'marquee'; readonly from: Point; readonly additive: boolean }
@@ -75,7 +75,11 @@ const PART_KEYS: Readonly<Record<string, Kind>> = {
   i: 'input',
   l: 'output',
   c: 'clock',
-  k: 'constant'
+  k: 'constant',
+  b: 'button',
+  p: 'probe',
+  h: 'hex',
+  '7': 'seg7'
 };
 
 /** What copy puts on the clipboard: marked, so a paste can tell a circuit from any other text. */
@@ -125,13 +129,24 @@ export class Editor {
     }
     if (this.mode.kind === 'placing') {
       const what = this.mode.what;
-      const id = this.placeAt(what, this.pointer);
+      const id = what === 'probe' ? this.probeAt(this.pointer) : this.placeAt(what, this.pointer);
       this.select([id], false);
       this.mode = shift || this.mode.again ? { kind: 'placing', what, again: this.mode.again } : { kind: 'idle' };
       this.deps.changed();
       return;
     }
-    this.mode = { kind: 'pressing', screen, hit: this.hitAt(this.pointer), additive: shift };
+    const hit = this.hitAt(this.pointer);
+    // A selected push button is held down for as long as the press lasts.
+    const scene = this.deps.scene();
+    const c = hit.kind === 'component' ? scene.indexOf.get(hit.id) : undefined;
+    const holding =
+      hit.kind === 'component' && c !== undefined && scene.kindOf(c) === 'button' && !shift && this.selection.has(hit.id)
+        ? hit.id
+        : undefined;
+    if (holding !== undefined) {
+      this.deps.send.setInput(holding, 1);
+    }
+    this.mode = { kind: 'pressing', screen, hit, additive: shift, ...(holding !== undefined ? { holding } : {}) };
   }
 
   pointerMove(screen: Point): void {
@@ -148,6 +163,10 @@ export class Editor {
           return;
         }
         const hit = mode.hit;
+        // A held button dragged is a button being moved: let it go.
+        if (mode.holding !== undefined) {
+          this.deps.send.setInput(mode.holding, 0);
+        }
         if (hit.kind === 'pin') {
           this.mode = { kind: 'wiring', from: hit.pin, fromAt: hit.at };
         } else if (hit.kind === 'component') {
@@ -199,7 +218,9 @@ export class Editor {
     switch (mode.kind) {
       case 'pressing': {
         const hit = mode.hit;
-        if (hit.kind === 'component') {
+        if (mode.holding !== undefined) {
+          this.deps.send.setInput(mode.holding, 0);
+        } else if (hit.kind === 'component') {
           this.clickComponent(hit.id, mode.additive);
         } else if (hit.kind === 'wire') {
           this.select([hit.id], mode.additive);
@@ -274,6 +295,11 @@ export class Editor {
       case 'Backspace':
         this.deleteSelection();
         return true;
+      case 't': {
+        // The truth table of the selection; with nothing selected, none.
+        this.deps.send.tabulate(this.selectedComponents());
+        return true;
+      }
       case 'r':
       case 'R': {
         const ids = this.selectedComponents();
@@ -526,6 +552,27 @@ export class Editor {
       }
     });
     return { components, wires };
+  }
+
+  /**
+   * A probe dropped on a wire clips onto it: placed just above the
+   * point, and wired to the pin that drives the wire, so it shows that
+   * wire's value. Dropped anywhere else it is placed as any part is,
+   * to be wired by hand.
+   */
+  private probeAt(world: Point): string {
+    const scene = this.deps.scene();
+    const w = scene.wireNear(world, WIRE_REACH / this.deps.scale());
+    const id = this.fresh('probe');
+    const at = w < 0 ? placement('probe', world) : { x: Math.round(world.x) + 1, y: Math.round(world.y) - 3 };
+    this.deps.send.place('probe', at.x, at.y, id);
+    if (w >= 0) {
+      const ends = scene.wireEnds[w]!;
+      const from = scene.indexOf.get(ends.from.component);
+      const driver = from !== undefined && PINS[scene.kindOf(from)].outputs.includes(ends.from.pin) ? ends.from : ends.to;
+      this.deps.send.connect(driver, { component: id, pin: 'in' }, this.fresh('w'));
+    }
+    return id;
   }
 
   private placeAt(what: Kind, world: Point): string {

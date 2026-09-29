@@ -111,7 +111,8 @@ export function paintLive(
     // a CPU fills a rectangle far faster than a curve — Phase 3's bench
     // had mid zoom at 25 ms a frame in software rendering filling two
     // thousand curved bodies. Low is left unfilled; unknown is marked.
-    scene.forEach(area, c => sort(scene.valueNet[c]!, c), null);
+    const displays: number[] = [];
+    scene.forEach(area, c => (scene.displayNets[c] !== null ? displays.push(c) : sort(scene.valueNet[c]!, c)), null);
     for (const [items, color] of [
       [unknown, 'placeholder'],
       [high, 'primary']
@@ -130,12 +131,13 @@ export function paintLive(
             }
           });
         } else {
-          surface.roundRect(scene.x[c]! + 0.2, scene.y[c]! + 0.2, scene.width(c) - 0.4, scene.height(c) - 0.4, 0.3);
+          traceInside(surface, scene, c);
         }
       }
       surface.fillColor(color);
       surface.fill();
     }
+    drawDisplays(surface, scene, displays, chunks, scale);
     paintTiming.recordMs += performance.now() - started;
     return;
   }
@@ -176,14 +178,16 @@ export function paintLive(
     surface.stroke();
   }
 
-  // The insides of switches, clocks, constants and LEDs.
+  // The insides of switches, buttons, clocks, constants, LEDs and probes.
   high.length = 0;
   low.length = 0;
   unknown.length = 0;
+  const displays: number[] = [];
   scene.forEach(
     area,
     c => {
-      if (!scene.isGate(c)) sort(scene.valueNet[c]!, c);
+      if (scene.displayNets[c] !== null) displays.push(c);
+      else if (!scene.isGate(c)) sort(scene.valueNet[c]!, c);
     },
     null
   );
@@ -195,12 +199,124 @@ export function paintLive(
     if (items.length === 0) continue;
     surface.beginPath();
     for (const c of items) {
-      surface.roundRect(scene.x[c]! + 0.2, scene.y[c]! + 0.2, scene.width(c) - 0.4, scene.height(c) - 0.4, 0.3);
+      traceInside(surface, scene, c);
     }
     surface.fillColor(color);
     surface.fill();
   }
+  drawDisplays(surface, scene, displays, chunks, scale);
+  if (scale >= LABELS_FROM) {
+    // A probe says its value in so many words, on top of its colour.
+    const style = { fontSize: 1.3, align: 'center' as const, fontWeight: 600 };
+    for (const [items, text, color] of [
+      [low, '0', 'text'],
+      [high, '1', 'surface'],
+      [unknown, '?', 'text']
+    ] as const) {
+      for (const c of items) {
+        if (scene.kindOf(c) !== 'probe') continue;
+        surface.fillColor(color);
+        surface.text(text, scene.x[c]! + scene.width(c) / 2, scene.y[c]! + scene.height(c) / 2 + 0.45, style);
+      }
+    }
+  }
   paintTiming.recordMs += performance.now() - started;
+}
+
+/** The part of a switch, button, clock, LED or probe that shows its value: a push button's is round. */
+function traceInside(surface: PaintSurface, scene: SceneIndex, c: number): void {
+  const x = scene.x[c]!;
+  const y = scene.y[c]!;
+  const width = scene.width(c);
+  const height = scene.height(c);
+  if (scene.kindOf(c) === 'button') {
+    const r = Math.min(width, height) / 2 - 0.3;
+    surface.moveTo(x + width / 2 + r, y + height / 2);
+    surface.arc(x + width / 2, y + height / 2, r, 0, Math.PI * 2);
+    surface.closePath();
+  } else {
+    surface.roundRect(x + 0.2, y + 0.2, width - 0.4, height - 0.4, 0.3);
+  }
+}
+
+/**
+ * Segments of a seven-segment display in its unturned 5 × 8 box, as
+ * rectangles `[x, y, width, height]`, in pin order: a across the top,
+ * then clockwise, g across the middle.
+ */
+const T = 0.55;
+const L = 1.5;
+const R = 4.3;
+const TOP = 1;
+const MID = 4;
+const BOTTOM = 7;
+const G = 0.25;
+const SEGMENTS: readonly (readonly [number, number, number, number])[] = [
+  [L + G, TOP, R - L - 2 * G, T], // a
+  [R - T, TOP + G, T, MID - TOP - G], // b
+  [R - T, MID + G / 2, T, BOTTOM - MID - G / 2], // c
+  [L + G, BOTTOM - T, R - L - 2 * G, T], // d
+  [L, MID + G / 2, T, BOTTOM - MID - G / 2], // e
+  [L, TOP + G, T, MID - TOP - G], // f
+  [L + G, MID - T / 2, R - L - 2 * G, T] // g
+];
+
+/**
+ * Hex and seven-segment displays, which read several nets rather than
+ * one. Drawn in the live layer at every level but blocks, because a
+ * display's whole point is to be read from across the room: a 5 × 8
+ * display is twenty pixels tall at the gates level, and legible.
+ */
+function drawDisplays(
+  surface: PaintSurface,
+  scene: SceneIndex,
+  displays: readonly number[],
+  chunks: Readonly<Record<string, string>>,
+  scale: number
+): void {
+  if (displays.length === 0) return;
+  const valueOf = (net: number) => (net < 0 ? -1 : signalOf(chunks, net));
+  const lit: [number, number][] = [];
+  const dark: [number, number][] = [];
+  for (const c of displays) {
+    const nets = scene.displayNets[c]!;
+    if (scene.kindOf(c) === 'seg7') {
+      nets.forEach((net, s) => (valueOf(net) === 1 ? lit : dark).push([c, s]));
+    }
+  }
+  for (const [items, color] of [
+    [dark, 'controlBackground'],
+    [lit, 'primary']
+  ] as const) {
+    if (items.length === 0) continue;
+    surface.beginPath();
+    for (const [c, s] of items) {
+      turned(surface, scene, c, (x, y) => {
+        const [sx, sy, w, h] = SEGMENTS[s]!;
+        surface.rect(x + sx, y + sy, w, h);
+      });
+    }
+    surface.fillColor(color);
+    surface.fill();
+  }
+  // A hex display's digit. Text is not worth drawing below a few pixels
+  // a unit, where a digit would be a smudge; the face stays blank.
+  if (scale < BLOCKS_BELOW) return;
+  surface.fillColor('primary');
+  const style = { fontSize: 3.6, align: 'center' as const, fontWeight: 700, fontFamily: 'monospace' };
+  for (const c of displays) {
+    if (scene.kindOf(c) !== 'hex') continue;
+    let digit = 0;
+    let known = true;
+    scene.displayNets[c]!.forEach((net, bit) => {
+      const v = valueOf(net);
+      if (v < 0) known = false;
+      digit |= (v === 1 ? 1 : 0) << bit;
+    });
+    turned(surface, scene, c, (x, y) => {
+      surface.text(known ? digit.toString(16).toUpperCase() : '?', x + 2.4, y + 4.3, style);
+    });
+  }
 }
 
 export function paintOver(surface: PaintSurface, scene: SceneIndex, area: Box, scale: number): void {

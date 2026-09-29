@@ -38,3 +38,30 @@ describe('the bench scene', () => {
     expect(benchScene()).toEqual(circuit);
   });
 });
+
+describe('the counter scene', () => {
+  it('counts through sixteen digits at 2 Hz, lighting the right segments', async () => {
+    const { counterScene, SEGMENTS_LIT } = await import('./Scenes');
+    const circuit = counterScene();
+    expect(circuit.components.find(c => c.kind === 'clock')?.rate).toBe(2);
+    const sim = new Simulator(compile(circuit));
+    expect(sim.settle().settled).toBe(true);
+    const shown = () => {
+      const segments = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].filter(s => sim.value[sim.net('digit', s)] === 1).join('');
+      const hex = [0, 1, 2, 3].reduce((n, bit) => n | (sim.value[sim.net('hex', `b${bit}`)]! << bit), 0);
+      return { segments, hex };
+    };
+    // Power-on leaves the flip-flops wherever the latches fell; reset first.
+    sim.set('reset', 1);
+    sim.cycle();
+    sim.set('reset', 0);
+    for (let n = 0; n < 20; n++) {
+      expect(shown()).toEqual({ segments: SEGMENTS_LIT[n % 16], hex: n % 16 });
+      expect(sim.cycle().settled).toBe(true);
+    }
+    // Holding reset clears the count on the next edge.
+    sim.set('reset', 1);
+    sim.cycle();
+    expect(shown().hex).toBe(0);
+  });
+});

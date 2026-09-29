@@ -1,7 +1,7 @@
 import type { Geometry } from '../app/CircuitContract';
 import { boundsOf, boxOf, LAYOUT, pinAt, route, sizeOf, slotOf, type Box, type Point } from '../app/Layout';
 import type { PinRef, Rotation } from '../sim/Circuit';
-import { GATE_KINDS, isGate, type Kind } from '../sim/Primitives';
+import { GATE_KINDS, isGate, PINS, type Kind } from '../sim/Primitives';
 
 /**
  * The render worker's picture of the circuit: `geometry` turned into
@@ -28,9 +28,13 @@ export const KIND_INDEX: Readonly<Record<Kind, number>> = {
   input: 7,
   clock: 8,
   constant: 9,
-  output: 10
+  output: 10,
+  button: 11,
+  probe: 12,
+  hex: 13,
+  seg7: 14
 };
-export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output'];
+export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7'];
 
 export class SceneIndex {
   readonly componentCount: number;
@@ -39,6 +43,8 @@ export class SceneIndex {
   readonly y: Float32Array;
   /** The net a component shows: a gate's or source's output, an output's input. -1 while it does not compile. */
   readonly valueNet: Int32Array;
+  /** A hex or seven-segment display's input nets, in pin order; null for everything else. */
+  readonly displayNets: readonly (Int32Array | null)[];
   readonly labels: readonly (string | null)[];
   /** Each component's id, and its index by id. */
   readonly ids: readonly string[];
@@ -82,6 +88,7 @@ export class SceneIndex {
     this.y = new Float32Array(ids.length);
     this.valueNet = new Int32Array(ids.length);
     const labels: (string | null)[] = [];
+    const displayNets: (Int32Array | null)[] = [];
     const boxes: Box[] = [];
     ids.forEach((id, n) => {
       const c = geometry.components[id]!;
@@ -89,11 +96,15 @@ export class SceneIndex {
       this.x[n] = c.x;
       this.y[n] = c.y;
       this.turns[n] = c.rotation / 90;
-      this.valueNet[n] = (c.kind === 'output' ? c.nets.in : c.nets.out) ?? -1;
+      this.valueNet[n] = (c.kind === 'output' || c.kind === 'probe' ? c.nets.in : c.nets.out) ?? -1;
+      displayNets.push(
+        c.kind === 'hex' || c.kind === 'seg7' ? Int32Array.from(PINS[c.kind].inputs, pin => c.nets[pin] ?? -1) : null
+      );
       labels.push(isGate(c.kind) ? null : (c.label ?? id));
       boxes.push(boxOf(c.kind, c.x, c.y, c.rotation));
     });
     this.labels = labels;
+    this.displayNets = displayNets;
 
     const starts: number[] = [0];
     const points: number[] = [];
@@ -312,6 +323,9 @@ export class SceneIndex {
       c => {
         const net = this.valueNet[c]!;
         if (net >= 0) nets.add(net);
+        for (const n of this.displayNets[c] ?? []) {
+          if (n >= 0) nets.add(n);
+        }
       },
       w => {
         const net = this.wireNet[w]!;

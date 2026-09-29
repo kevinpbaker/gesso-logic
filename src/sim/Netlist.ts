@@ -1,5 +1,5 @@
 import { pinName, type Circuit, type Component, type PinRef } from './Circuit';
-import { GATE_KINDS, isGate, PINS } from './Primitives';
+import { GATE_KINDS, isGate, isSettable, PINS } from './Primitives';
 
 /**
  * A circuit compiled for running: nets as integers, gates as rows of
@@ -160,14 +160,16 @@ export function compile(circuit: Circuit): Netlist {
       outs.push(netOf(id, 'out'));
       read[a] = 1;
       read[b] = 1;
-    } else if (kind === 'input') {
+    } else if (isSettable(kind)) {
       inputs.set(id, { net: netOf(id, 'out'), value: component.value ?? 0 });
     } else if (kind === 'constant') {
       constants.set(id, { net: netOf(id, 'out'), value: component.value ?? 0 });
     } else if (kind === 'clock') {
       clocks.push(netOf(id, 'out'));
     } else {
-      read[netOf(id, 'in')] = 1;
+      for (const pin of PINS[kind].inputs) {
+        read[netOf(id, pin)] = 1;
+      }
     }
   }
   const gateCount = types.length;

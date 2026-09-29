@@ -2,9 +2,9 @@ import { combineLatest, interval, type Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 import { paintPictures, percent } from 'gesso-core';
-import { FrameService, internalState, type ComponentContext, type Inputs } from 'gesso-framework';
+import { each, FrameService, internalState, type ComponentContext, type Inputs } from 'gesso-framework';
 
-import { Circuit, type ClockRate } from './app/CircuitContract';
+import { Circuit, type ClockRate, type TableView } from './app/CircuitContract';
 import type { Kind } from './sim/Primitives';
 import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, type Motion } from './canvas/Bench';
 import { circuitCanvas } from './canvas/CircuitCanvas';
@@ -24,14 +24,18 @@ import { paintTiming } from './canvas/Painters';
  */
 
 const PAN_SPEED = 1500;
-const RATES: readonly ClockRate[] = [1, 10, 100, 1000, 'max'];
+const RATES: readonly ClockRate[] = [1, 2, 10, 100, 1000, 'max'];
 
 /** The palette: every part, with the key that picks it up (see `Editor.ts`). */
 const PALETTE: readonly (readonly [Kind, string, string])[] = [
   ['input', 'Switch', 'I'],
-  ['output', 'LED', 'L'],
+  ['button', 'Button', 'B'],
   ['clock', 'Clock', 'C'],
   ['constant', 'Const', 'K'],
+  ['output', 'LED', 'L'],
+  ['probe', 'Probe', 'P'],
+  ['hex', 'Hex', 'H'],
+  ['seg7', '7-seg', '7'],
   ['not', 'NOT', 'N'],
   ['and', 'AND', 'A'],
   ['or', 'OR', 'O'],
@@ -234,11 +238,72 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
           {button('Undo', () => circuit.send.undo(), document.pipe(map(d => d.canUndo)))}
           {button('Redo', () => circuit.send.redo(), document.pipe(map(d => d.canRedo)))}
           {button('New', () => circuit.send.loadScene('empty'))}
+          {button('Counter', () => circuit.send.loadScene('counter'))}
           {button('Bench scene', () => circuit.send.loadScene('bench'))}
+          {button('Truth table T', () => circuit.send.tabulate([...canvas.editor.selection]))}
           <text text={canvas.editorChanged.pipe(map(() => canvas.editor.status))} fontSize={12} color="textMuted" />
         </row>
       </column>
+      {truthTablePanel(circuit.view.table, () => circuit.send.tabulate([]))}
     </stack>
+  );
+}
+
+/**
+ * The truth table of the selection, over the canvas's right-hand side:
+ * a header naming inputs and outputs, then a row per combination, in
+ * monospace so the columns line up without a grid. Hidden while no
+ * table is open.
+ */
+function truthTablePanel(table: Observable<TableView>, close: () => void) {
+  const width = (names: readonly string[]) => names.map(n => n.length);
+  const lines = table.pipe(
+    map(t => {
+      if (t.ids.length === 0) return [];
+      if (t.error !== null) return [{ key: 'error', text: t.error, head: false }];
+      const inWidths = width(t.inputs);
+      const outWidths = width(t.outputs);
+      const cell = (value: string, w: number) => value.padStart(Math.ceil(w / 2)).padEnd(w);
+      const header = `${t.inputs.join(' ')} │ ${t.outputs.join(' ')}`;
+      const rows = t.rows.map((outputs, n) => {
+        const bits = t.inputs.map((_, i) => String((n >> (t.inputs.length - 1 - i)) & 1));
+        const text = `${bits.map((b, i) => cell(b, inWidths[i]!)).join(' ')} │ ${[...outputs]
+          .map((o, i) => cell(o, outWidths[i]!))
+          .join(' ')}`;
+        return { key: `r${n}`, text, head: false };
+      });
+      return [{ key: 'head', text: header, head: true }, ...rows];
+    })
+  );
+  return (
+    <column
+      position="absolute"
+      right={12}
+      top={172}
+      gap={2}
+      padding={10}
+      borderRadius={8}
+      backgroundColor="surface"
+      borderColor="border"
+      borderWidth={1}
+      opacity={table.pipe(map(t => (t.ids.length === 0 ? 0 : 0.96)))}
+      pointerEvents={table.pipe(map(t => (t.ids.length === 0 ? 'none' : 'auto')))}
+      maxHeight={percent(70)}
+      overflow="auto">
+      <row gap={10} y="center">
+        <text text={table.pipe(map(t => `Truth table · ${t.ids.length} parts`))} fontSize={12} fontWeight={600} color="text" />
+        {button('Close', close)}
+      </row>
+      {each(lines, 'key', line => (
+        <text
+          text={line.text}
+          fontSize={12}
+          fontFamily="monospace"
+          fontWeight={line.head ? 600 : 400}
+          color={line.head ? 'text' : 'textMuted'}
+        />
+      ))}
+    </column>
   );
 }
 

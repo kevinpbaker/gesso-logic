@@ -9,8 +9,10 @@
  */
 
 export type GateKind = 'not' | 'and' | 'or' | 'nand' | 'nor' | 'xor' | 'xnor';
-export type SourceKind = 'clock' | 'constant' | 'input';
-export type Kind = GateKind | SourceKind | 'output';
+export type SourceKind = 'clock' | 'constant' | 'input' | 'button';
+/** Parts that only read: they show a value and drive nothing. */
+export type DisplayKind = 'output' | 'probe' | 'hex' | 'seg7';
+export type Kind = GateKind | SourceKind | DisplayKind;
 
 export const GATE_KINDS: readonly GateKind[] = ['not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor'];
 
@@ -33,8 +35,22 @@ export const PINS: Readonly<Record<Kind, PinSpec>> = {
   clock: SOURCE,
   constant: SOURCE,
   input: SOURCE,
-  output: { inputs: ['in'], outputs: [] }
+  // A push button drives its net like a switch; it differs only in how a
+  // person works it — held, not flipped — which is the editor's business.
+  button: SOURCE,
+  output: { inputs: ['in'], outputs: [] },
+  probe: { inputs: ['in'], outputs: [] },
+  // Four bits, least significant first, shown as one hex digit.
+  hex: { inputs: ['b0', 'b1', 'b2', 'b3'], outputs: [] },
+  // One input per segment, lettered as the standard does: a across the
+  // top, then clockwise, g across the middle.
+  seg7: { inputs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], outputs: [] }
 };
+
+/** Parts a person drives: switches and push buttons. */
+export function isSettable(kind: Kind): boolean {
+  return kind === 'input' || kind === 'button';
+}
 
 export function isGate(kind: Kind): kind is GateKind {
   return (GATE_KINDS as readonly string[]).includes(kind);

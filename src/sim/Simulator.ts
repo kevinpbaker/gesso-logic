@@ -225,8 +225,23 @@ export class Simulator {
     return { settled: true, ticks };
   }
 
-  /** One full clock cycle: rise and settle, fall and settle. */
+  /**
+   * One full clock cycle: rise and settle, fall and settle.
+   *
+   * An input set since the last cycle settles first, before the edge. A
+   * switch flipped while the circuit runs is flipped between cycles, and
+   * a circuit expects its inputs steady at the edge; raising the clock
+   * in the same tick as the input changes is a setup-time violation the
+   * person did not commit, and a counter's reset released that way is
+   * missed or not by a race of gate delays.
+   */
   cycle(limit = SETTLE_LIMIT): CycleResult {
+    if (this.pending) {
+      const inputs = this.settle(limit);
+      if (!inputs.settled) {
+        return { settled: false, rise: inputs, fall: inputs };
+      }
+    }
     this.setClock(1);
     const rise = this.settle(limit);
     this.setClock(0);

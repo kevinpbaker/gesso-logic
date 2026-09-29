@@ -11,12 +11,13 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 4 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 5 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
-the circuit running, and circuits can be built on it by hand. Nothing
-past Phase 4 is built.
+the circuit running, circuits can be built on it by hand, and they
+have switches, buttons, probes and displays to work them with. Nothing
+past Phase 5 is built.
 
 ---
 
@@ -538,6 +539,54 @@ inputs, show the outputs.
 
 **Exit:** a 4-bit counter driving a 7-segment display, clocked at 2 Hz,
 visibly counting.
+
+**Done.** The **Counter** button loads the exit circuit (`counterScene`
+in `src/app/Scenes.ts`, 110 gates): four D flip-flops counting through
+XORs, a 4-to-16 decoder, and a seven-segment display beside a hex
+display and four LEDs showing the same count. Run it and it counts at
+2 Hz. A spec runs it through twenty digits and checks every segment,
+and it was watched counting in Chrome.
+
+- **New parts:** push button (B), probe (P), hex display (H) and
+  seven-segment display (7). The displays read four and seven nets, so
+  the scene index keeps each display's nets, and they're drawn in the
+  live layer at the gates level as well as full detail. A 5 × 8 display
+  is readable at 2.5 px/u.
+- **A push button is held**, for as long as the press lasts, once
+  it's selected, the same rule as a switch. Dragging a held button
+  lets it go and moves it.
+- **A probe dropped on a wire clips onto it.** It's placed just above
+  the wire and connected to the pin that drives it. Dropped on empty
+  ground, it's a part to wire by hand. At 10 px/u and up it prints
+  0, 1 or ?.
+- **The clock's rate is on the document** (`Component.rate`). There's
+  one rate for every clock, because the simulator has one clock domain.
+  Loading a document takes its rate; changing the rate writes it back
+  onto the clocks, outside the undo history. 2 Hz is now one of the
+  rates.
+- **Inputs work while running**, and now a cycle settles any input set
+  since the last one before it raises the clock (`Simulator.cycle`).
+  Without that, releasing `reset` in the same tick as the edge was a
+  setup-time violation, and the counter's first count was a race.
+- **The truth table** (T, or the readout button) sweeps the selection
+  (`src/app/TruthTable.ts`). It works on nets, not wires:
+  - inputs are the selection's switches and buttons, plus every net a
+    selected gate reads that no selected gate drives;
+  - outputs are what the selection drives outward or shows on its own
+    LEDs.
+
+  The selected gates are copied into a circuit of their own and swept
+  up to 8 inputs. The table follows edits while it's open. A row that
+  rings shows `~`. A latch shows what it settles to from the row
+  before.
+- **`layOut`** places a circuit made in code in columns, by distance
+  from a source. That's enough until Phase 6 opens circuits drawn by
+  hand.
+
+Not done: a clock rate per clock (it needs several clock domains), and
+a one-click way to work a switch that isn't selected. Power-on leaves
+the counter's flip-flops wherever the latches fell, so it can start on
+any digit; `reset` clears it.
 
 ## Phase 6 — Files
 

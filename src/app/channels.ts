@@ -17,7 +17,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         document: service.document,
         geometry: service.geometry,
         signals: service.signals,
-        status: service.status
+        status: service.status,
+        table: service.table
       },
       commands: {
         place: (kind, x, y, id, rotation) => service.place(kind, x, y, id, rotation),
@@ -35,7 +36,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         pause: () => service.pause(),
         step: () => service.step(),
         setClockHz: rate => service.setClockHz(rate),
-        setViewport: (left, top, right, bottom) => service.setViewport(left, top, right, bottom)
+        setViewport: (left, top, right, bottom) => service.setViewport(left, top, right, bottom),
+        tabulate: ids => service.tabulate(ids)
       }
     })
   ];

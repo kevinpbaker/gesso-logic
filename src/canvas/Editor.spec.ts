@@ -18,13 +18,20 @@ const SCALE = 16;
 function setup() {
   const b = new CircuitBuilder();
   b.input('a');
+  b.button('push');
   b.gate('and', 'g');
   b.output('led', { component: 'g', pin: 'out' });
   const circuit = b.build();
   const placed = {
     ...circuit,
     components: circuit.components.map(c =>
-      c.id === 'a' ? { ...c, x: 0, y: 0 } : c.id === 'g' ? { ...c, x: 6, y: 0 } : { ...c, x: 14, y: 1 }
+      c.id === 'a'
+        ? { ...c, x: 0, y: 0 }
+        : c.id === 'push'
+          ? { ...c, x: 0, y: 10 }
+          : c.id === 'g'
+            ? { ...c, x: 6, y: 0 }
+            : { ...c, x: 14, y: 1 }
     )
   };
   const service = new CircuitService({ schedule: () => {}, now: () => 0 });
@@ -52,7 +59,8 @@ function setup() {
       insert: record('insert'),
       undo: record('undo'),
       redo: record('redo'),
-      setInput: record('setInput')
+      setInput: record('setInput'),
+      tabulate: record('tabulate')
     },
     panBy: record('panBy'),
     value: () => 0,
@@ -157,7 +165,7 @@ describe('the editor', () => {
     expect(editor.paste(clipboard())).toBe(true);
 
     const inserted = sent.find(s => s[0] === 'insert')![1] as { components: { id: string; x: number }[]; wires: unknown[] };
-    expect(inserted.components.map(c => c.id).sort()).toEqual(['and1', 'input1', 'output1']);
+    expect(inserted.components.map(c => c.id).sort()).toEqual(['and1', 'button1', 'input1', 'output1']);
     expect(Math.min(...inserted.components.map(c => c.x))).toBe(30);
     expect(inserted.wires).toHaveLength(1);
     expect(editor.paste('not a circuit')).toBe(false);
@@ -176,5 +184,41 @@ describe('the editor', () => {
       ['panBy', 10, 20],
       ['panBy', -10, 0]
     ]);
+  });
+
+  it('holds a selected push button down for as long as the press lasts', () => {
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(1, 11), 1, false);
+    editor.pointerUp(at(1, 11));
+    expect(sent).toEqual([]);
+
+    editor.pointerDown(at(1, 11), 1, false);
+    expect(sent).toEqual([['setInput', 'push', 1]]);
+    editor.pointerUp(at(1, 11));
+    expect(sent).toEqual([
+      ['setInput', 'push', 1],
+      ['setInput', 'push', 0]
+    ]);
+  });
+
+  it('clips a probe dropped on a wire to the pin driving it', () => {
+    const { editor, sent, at } = setup();
+    // The AND's output wire runs from (10, 2) to the LED at (14, 2).
+    editor.keyDown('p', false, false);
+    editor.pointerDown(at(12, 2), 1, false);
+
+    expect(sent).toEqual([
+      ['place', 'probe', 13, -1, 'probe1'],
+      ['connect', { component: 'g', pin: 'out' }, { component: 'probe1', pin: 'in' }, 'w1']
+    ]);
+  });
+
+  it('asks for the truth table of the selection', () => {
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(8, 2), 1, false);
+    editor.pointerUp(at(8, 2));
+    editor.keyDown('t', false, false);
+
+    expect(sent).toEqual([['tabulate', ['g']]]);
   });
 });

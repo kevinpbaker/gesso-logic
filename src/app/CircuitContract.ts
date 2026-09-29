@@ -80,7 +80,7 @@ export interface Signals {
 export type ClockRate = number | 'max';
 
 /** The documents the application can open by name, until Phase 6 opens files. */
-export type SceneName = 'empty' | 'bench';
+export type SceneName = 'empty' | 'bench' | 'counter';
 
 export interface Status {
   readonly running: boolean;
@@ -102,6 +102,20 @@ export interface Status {
  * the same `gesture` string, and undo takes the whole gesture back at
  * once rather than one pointer event at a time.
  */
+/**
+ * The truth table of the selection the person asked about, kept up to
+ * date as they edit. Small by construction — at most 256 rows — so
+ * arrays rather than keyed records.
+ */
+export interface TableView {
+  /** The components tabulated, or none when no table is open. */
+  readonly ids: readonly string[];
+  readonly inputs: readonly string[];
+  readonly outputs: readonly string[];
+  readonly rows: readonly string[];
+  readonly error: string | null;
+}
+
 export interface CircuitCommands {
   /** Adds a component. With no id, one is made from the kind. */
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation): void;
@@ -129,6 +143,8 @@ export interface CircuitCommands {
   setClockHz(rate: ClockRate): void;
   /** The world rectangle on screen. Until the first one, every net is published. */
   setViewport(left: number, top: number, right: number, bottom: number): void;
+  /** Opens the truth table of these components; an empty list closes it. */
+  tabulate(ids: readonly string[]): void;
 }
 
 export interface CircuitView {
@@ -136,6 +152,7 @@ export interface CircuitView {
   readonly geometry: Geometry;
   readonly signals: Signals;
   readonly status: Status;
+  readonly table: TableView;
 }
 
 export const EMPTY_SUMMARY: DocumentSummary = {
@@ -151,11 +168,13 @@ export const EMPTY_SUMMARY: DocumentSummary = {
 };
 export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {} };
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
+export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [] };
 
 export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   document: EMPTY_SUMMARY,
   geometry: EMPTY_GEOMETRY,
   signals: EMPTY_SIGNALS,
-  status: INITIAL_STATUS
+  status: INITIAL_STATUS,
+  table: NO_TABLE
 });

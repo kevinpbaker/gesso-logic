@@ -47,7 +47,23 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
   input: SOURCE,
   clock: SOURCE,
   constant: SOURCE,
-  output: { width: 2, height: 2, pins: { in: { x: 0, y: 1 } } }
+  button: SOURCE,
+  output: { width: 2, height: 2, pins: { in: { x: 0, y: 1 } } },
+  probe: { width: 2, height: 2, pins: { in: { x: 0, y: 1 } } },
+  hex: { width: 4, height: 6, pins: { b0: { x: 0, y: 1 }, b1: { x: 0, y: 2 }, b2: { x: 0, y: 3 }, b3: { x: 0, y: 4 } } },
+  seg7: {
+    width: 5,
+    height: 8,
+    pins: {
+      a: { x: 0, y: 1 },
+      b: { x: 0, y: 2 },
+      c: { x: 0, y: 3 },
+      d: { x: 0, y: 4 },
+      e: { x: 0, y: 5 },
+      f: { x: 0, y: 6 },
+      g: { x: 0, y: 7 }
+    }
+  }
 };
 
 /** A component's size once turned: a quarter turn swaps width and height. */

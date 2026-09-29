@@ -45,6 +45,13 @@ export interface Component {
    * every other kind.
    */
   readonly value?: 0 | 1;
+  /**
+   * A `clock`'s rate in cycles a second; absent is as fast as it will go.
+   * One rate drives every clock — the simulator has one clock domain —
+   * so a document's clocks agree, and the rate travels with the circuit
+   * when it is saved or pasted.
+   */
+  readonly rate?: number;
 }
 
 export interface PinRef {
