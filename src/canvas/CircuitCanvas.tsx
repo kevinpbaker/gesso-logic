@@ -26,7 +26,7 @@ import { Editor } from './Editor';
 import type { Kind } from '../sim/Primitives';
 import type { FileActions } from './Files';
 import { paintLive, paintOver, paintUnder } from './Painters';
-import { CELL, changedAreas, SceneIndex } from './SceneIndex';
+import { CELL, SceneIndex } from './SceneIndex';
 
 /**
  * The circuit, drawn: a pannable, zoomable surface of tiles.
@@ -142,7 +142,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
   /**
    * Bumped on every edit, because a recompile renumbers nets and every
    * tile's live layer reads them. Static layers do not, and are redrawn
-   * only where the edit happened: see `changedAreas`.
+   * only where the edit happened: see `SceneIndex.changed`.
    */
   const netVersion = internalState(0);
 
@@ -262,9 +262,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
   // Placed after the tile machinery it uses: the view emits its current
   // value the moment this subscribes.
   ctx.effect(circuit.view.geometry, geometry => {
-    const before = scene;
-    scene = new SceneIndex(geometry);
-    const changed = changedAreas(before, scene);
+    scene = new SceneIndex(geometry, scene);
+    const changed = scene.changed;
     for (const tile of tiles.values()) {
       tile.chunks = chunksIn(tile.area);
       if (changed.some(area => intersects(area, tile.area))) {

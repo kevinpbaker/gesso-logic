@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { DocumentSummary, Geometry } from './CircuitContract';
 import { CircuitService } from './CircuitService';
 import { libraryChips } from './LibraryParts';
+import { entriesOf, entryOf } from './CircuitContract';
 
 describe('the library in a document', () => {
   it('places a part the document lacks by bringing it in, with the parts it is made of, and opens it', () => {
@@ -18,7 +19,7 @@ describe('the library in a document', () => {
     expect(summary.chips.map(c => c.name)).toEqual(['D flip-flop', 'counter 8', 'half adder', 'mux 2']);
     expect(summary.error).toBeNull();
     expect(summary.gates).toBe(129);
-    expect(geometry.components['pc']).toMatchObject({ kind: 'chip', chip: 'counter 8' });
+    expect(entryOf(geometry.components, 'pc')).toMatchObject({ kind: 'chip', chip: 'counter 8' });
 
     // A second is the same chip, not another copy of it.
     service.place('chip', 0, 30, 'pc2', undefined, 'counter 8');
@@ -27,8 +28,8 @@ describe('the library in a document', () => {
 
     // Openable like anything else, and laid out.
     service.openChip('pc');
-    expect(Object.keys(geometry.components)).toContain('ff0');
-    const xs = Object.values(geometry.components).map(c => c.x);
+    expect(entriesOf(geometry.components).map(([id]) => id)).toContain('ff0');
+    const xs = entriesOf(geometry.components).map(([, entry]) => entry).map(c => c.x);
     expect(new Set(xs).size).toBeGreaterThan(3);
   });
 

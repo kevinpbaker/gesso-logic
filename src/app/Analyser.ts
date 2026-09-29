@@ -63,7 +63,11 @@ export class Analyser {
   private startSlot = 0;
   private trigger: Trigger | null = null;
 
-  constructor(readonly capacity = DEFAULT_CAPACITY) {}
+  readonly capacity: number;
+
+  constructor(capacity = DEFAULT_CAPACITY) {
+    this.capacity = capacity;
+  }
 
   /**
    * Says what to trace. The same traces on the same nets keep their

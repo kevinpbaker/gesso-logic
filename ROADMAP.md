@@ -11,14 +11,16 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 11 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 12 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
 the circuit running, circuits can be built on it by hand, and they
 have switches, buttons, probes and displays to work them with. They
-save to files and come back after a reload. Nothing past Phase 6 is
-built.
+save to files and come back after a reload. Chips, buses, a standard
+library and a logic analyser are built, and a 10,000-gate circuit runs
+at over 100 kHz and takes an edit mid-run inside a frame. The CPU,
+Phase 13 on, is not built.
 
 ---
 
@@ -978,6 +980,83 @@ with an edit applied mid-run in under one frame. Phase 0's baseline is
 6× improvement. Evaluations per cycle (clock fan-out into flip-flops
 whose D has not moved, the control plane) are probably worth more than
 evaluations per second.
+
+**Done.** `pnpm speed` builds the benchmark (`src/sim/Benchmark.ts`,
+Phase 0's synthetic CPU as a real document: exactly 10,000 gates, with
+seeded RAM), checks its program counter counts, runs it flat out, and
+then times edits applied to a running service. On this machine:
+
+- **111 kHz**, 3,915 evaluations and 23 ticks a cycle, 438 million
+  evaluations a second. It started at 17 kHz and 64 million.
+- **Edits, median over 30 each** (application worker, then render
+  worker):
+  - remove a wire: 8.4 ms and 9.0 ms;
+  - undo: 7.7 ms and 8.9 ms;
+  - move a gate: 0.6 ms and 8.7 ms.
+
+  Worst cases were 13 ms and 14 ms. The two workers run on separate
+  threads, so each has its own frame. They started at about 26 ms and
+  90 ms.
+
+What it took, and what was decided:
+
+- **Unit delay stays exact.** Evaluations a cycle weren't cut: of
+  3,780, about 1,660 change something. The rest are gates reached
+  through a controlling input, and the PLA's literals glitching under
+  unit delay. Skipping any of them exactly costs as much as doing
+  them. Collapsing gate trees, or modelling flip-flops as primitives,
+  would change what a racy circuit does, and the decision above is
+  unit delay. So the speed came from the kernel.
+- **Gates are evaluated from fan-out edges.** Each edge is two words:
+  the gate's other input net, and its output net with its type above.
+  Every gate is symmetric, so a gate reached through the net that
+  changed needs nothing else, and there are no per-gate records to
+  fetch. A gate whose two inputs both changed is evaluated twice, and
+  the second result is dropped when it's applied, so no stamps are
+  needed. A change is always written and kept only if it moved,
+  because a branch there mispredicts about half the time. That took
+  the JavaScript from 64 to 130 million evaluations a second (32 kHz),
+  where it stopped: the rest was bounds checks and tagged integers.
+- **So the loop is WebAssembly** (`src/sim/Kernel.ts`), as this phase
+  allowed. It's assembled from opcodes in TypeScript, a few hundred
+  bytes with no toolchain, and compiled once per process. Each
+  simulator instantiates it over its own memory, and `Simulator.value`
+  is a view of that memory. `evaluate`, `apply` and a `settle` loop
+  run inside the module. The same loop runs 3.4× faster there.
+  `Kernel.spec.ts` checks it tick by tick against unit delay by its
+  definition (every gate, every tick): 40 random circuits with
+  feedback, and a thousand clock edges of the benchmark.
+- **Recompiles are stable, not incremental.** `compile(circuit,
+  previous)` numbers nets against the last netlist: a net keeps its
+  number through any pin that existed before, so an edit renumbers
+  only what it touched. The running state moves across as an array
+  copy (`carriedFrom`). The compile reports which components' pins
+  moved, and a component that is the same document object copies its
+  old nets by index. A warm compile of 10,000 gates takes about 5 ms,
+  and re-flattening turned out cheap enough once nothing else was
+  O(everything).
+- **Geometry is published in 64 buckets by a hash of the id**
+  (`GEOMETRY_BUCKETS`). The service patches it: it tracks new and
+  removed parts and wires by object identity, and which pins moved
+  from the compile. An edit publishes only the buckets it touched, so
+  the channel diff takes 0.1 ms instead of 12 ms, and the render worker
+  copies a few hundred entries instead of thirty thousand.
+- **The render worker's scene reuses the last one's work.** It routes
+  only wires whose ends changed. Long wires go in a coarse second
+  grid: the benchmark's RAM wires filled one grid with a million cells.
+  Changed areas are found from what the build reused, not by
+  comparing every route as a string, which alone took 60 ms.
+- **The visible chunks** are extended with the nets an edit
+  moved, instead of searching the viewport again.
+- **The proof's scene is busier.** `/proof`'s 10,000 gates do about
+  58,000 evaluations a cycle, against the benchmark's 3,900. It runs at
+  3.9 kHz headless, up from 0.86 kHz, and at about 2,500 Hz in `pnpm
+  proof`, inside the service's 8 ms slices. `pnpm proof` passes.
+- **Not done:** patching `SceneIndex` in place, rather than rebuilding
+  its arrays each edit, would take the render
+  side from 9 ms toward 1. The Gesso differ still walks each subtree
+  once for every level above it. Bucketed geometry made that not
+  matter here, and the fix is saved but not made.
 
 ---
 

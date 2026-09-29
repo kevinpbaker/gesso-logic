@@ -8,6 +8,7 @@ import { fullAdder } from '../sim/Parts';
 import { Simulator } from '../sim/Simulator';
 import { makeChip, renameChip } from './DocumentEdits';
 import { ADDER, adderScene } from './Scenes';
+import { entriesOf, entryOf } from './CircuitContract';
 
 /** Sets the top level's switches A0..A7 and B0..B7 and reads S0..S7 and COUT back as a number. */
 function add(sim: Simulator, a: number, b: number): number {
@@ -118,7 +119,7 @@ describe('opening a chip', () => {
     service.geometry.subscribe(g => (geometry = g));
     service.load(adderScene());
     expect(summary.chips.map(c => c.name)).toEqual(['adder 8', 'full adder']);
-    expect(geometry.components['add']).toMatchObject({ kind: 'chip', chip: 'adder 8' });
+    expect(entryOf(geometry.components, 'add')).toMatchObject({ kind: 'chip', chip: 'adder 8' });
 
     service.openChip('add');
     service.openChip('fa2');
@@ -128,12 +129,12 @@ describe('opening a chip', () => {
     ]);
     // The full adder's own parts, on the nets the whole document runs on.
     const netlist = compile(adderScene());
-    expect(Object.keys(geometry.components).sort()).toEqual(['a', 'b', 'cin', 'cout', 'fa.both', 'fa.carry', 'fa.half', 'fa.passed', 'fa.sum', 's']);
-    expect(geometry.components['s']!.nets['in']).toBe(netlist.pinNet.get('add/fa2/s.in'));
+    expect(entriesOf(geometry.components).map(([id]) => id).sort()).toEqual(['a', 'b', 'cin', 'cout', 'fa.both', 'fa.carry', 'fa.half', 'fa.passed', 'fa.sum', 's']);
+    expect(entryOf(geometry.components, 's')!.nets['in']).toBe(netlist.pinNet.get('add/fa2/s.in'));
 
     service.closeChip(0);
     expect(summary.path).toEqual([]);
-    expect(geometry.components['add']).toBeDefined();
+    expect(entryOf(geometry.components, 'add')).toBeDefined();
   });
 });
 
@@ -151,19 +152,19 @@ describe('editing inside a chip', () => {
     service.openChip('add');
     service.openChip('fa2');
     service.place('not', 30, 30, 'spare');
-    expect(geometry.components['spare']).toMatchObject({ kind: 'not' });
+    expect(entryOf(geometry.components, 'spare')).toMatchObject({ kind: 'not' });
     // One NOT in the full adder's definition is one in each of the eight.
     expect(summary.gates).toBe(gates + 8);
     expect(summary.path.map(p => p.id)).toEqual(['add', 'fa2']);
 
     // A move inside is still a move.
     service.moveBy(['spare'], 2, 0);
-    expect(geometry.components['spare']).toMatchObject({ x: 32 });
+    expect(entryOf(geometry.components, 'spare')).toMatchObject({ x: 32 });
 
     service.undo();
     service.undo();
     expect(summary.gates).toBe(gates);
-    expect(geometry.components['spare']).toBeUndefined();
+    expect(entryOf(geometry.components, 'spare')).toBeUndefined();
   });
 });
 

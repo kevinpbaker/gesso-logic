@@ -1,8 +1,8 @@
 import { BehaviorSubject, type Observable } from 'rxjs';
 
-import { CIRCUIT_VERSION, type Circuit, type PinRef, type Rotation } from '../sim/Circuit';
+import { CIRCUIT_VERSION, type Circuit, type Component, type PinRef, type Rotation } from '../sim/Circuit';
 import { CircuitError, compile, type Netlist } from '../sim/Netlist';
-import { bitPins, isGate, widthOf, type Kind } from '../sim/Primitives';
+import { bitPins, isGate, widthOf, type Kind, type PinSpec } from '../sim/Primitives';
 import { Simulator } from '../sim/Simulator';
 import type {
   ClockRate,
@@ -19,7 +19,7 @@ import type {
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { CLOSED_ANALYSER, NO_CLIP, NO_SAVE, NO_TABLE } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_SAVE, NO_TABLE, type Buckets as GeometryBuckets } from './CircuitContract';
 import { Analyser } from './Analyser';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import {
@@ -185,6 +185,19 @@ export class CircuitService {
   private handle: number | null = null;
   /** The chip instances opened from the top, each on the level before; empty at the top. */
   private readonly path: string[] = [];
+  /** Last published geometry, for `geometryNow` to patch: what it was built from, and indexes into that. */
+  private geometryCache: {
+    level: string;
+    chips: Circuit['chips'];
+    netlist: Netlist | null;
+    /** The level's document it was built from. */
+    circuit: Circuit;
+    byId: Map<string, Component>;
+    /** The level's wires by the component driving them. */
+    wiresFrom: Map<string, Set<Wire>>;
+    components: GeometryBuckets<ComponentGeometry>;
+    wires: GeometryBuckets<WireGeometry>;
+  } | null = null;
   /** The revision last opened or saved; the document is dirty when it has moved on. -1 is never. */
   private savedRevision = 0;
   private openCamera: Camera | null = null;
@@ -642,6 +655,7 @@ export class CircuitService {
     this.circuit = next;
     this.revision++;
     this.autosave();
+    const visible = this.visibleChunks;
     this.visibleChunks = null;
     if (this.netlist !== null && this.simulator !== null && sameConnectivity(previous, next)) {
       this.documentSubject.next(this.summary());
@@ -651,10 +665,21 @@ export class CircuitService {
       return;
     }
     try {
-      const netlist = compile(next);
+      // Against the netlist before, so nets keep their numbers.
+      const netlist = compile(next, this.netlist ?? undefined);
       const simulator = new Simulator(netlist);
       if (this.simulator !== null) {
         simulator.adopt(this.simulator);
+      }
+      // Nets keep their numbers, so what was in view still is, give or
+      // take the nets the edit touched: those are added rather than the
+      // viewport searched again. One that left the view is published
+      // until the view next moves, which costs a little and shows
+      // nothing wrong.
+      if (visible !== null && netlist.numberedAgainst === this.netlist && netlist.changedNets !== null) {
+        const chunks = new Set(visible);
+        for (const net of netlist.changedNets) chunks.add(Math.floor(net / CHUNK));
+        this.visibleChunks = [...chunks].sort((a, b) => a - b);
       }
       this.netlist = netlist;
       this.simulator = simulator;
@@ -860,7 +885,7 @@ export class CircuitService {
           id: c.id,
           name: c.label ?? c.id,
           width,
-          nets: bitPins('in', width).map(bit => netlist.pinNet.get(`${c.id}.${bit}`) ?? -1)
+          nets: bitPins('in', width).map(bit => netlist.netOfPin(c.id, bit) ?? -1)
         };
       });
     this.analyser.configure(traces);
@@ -875,7 +900,7 @@ export class CircuitService {
       // Every gate at every depth, as the simulator counts them.
       gates: netlist?.gateCount ?? this.circuit.components.filter(c => isGate(c.kind)).length,
       wires: this.circuit.wires.length,
-      nets: netlist?.netCount ?? 0,
+      nets: netlist?.liveNetCount ?? 0,
       error: this.error,
       canUndo: this.undoStack.length > 0,
       canRedo: this.redoStack.length > 0,
@@ -953,25 +978,38 @@ export class CircuitService {
     return { circuit, prefix };
   }
 
+  /**
+   * The level's geometry, patched rather than rebuilt. Nets are numbered
+   * stably across recompiles (`compile`'s `previous`), and the compile
+   * says which components' pins moved; the document says, by object
+   * identity, which parts and wires are new or gone. So an edit builds
+   * the entries it touched — a gate dragged is one, a wire removed the
+   * few on the net it split — and publishes only the buckets they are in
+   * (see `GEOMETRY_BUCKETS`). Anything the edit cannot be read from —
+   * another level, a chip redefined, a compile renumbered from zero, one
+   * that failed — is built afresh.
+   */
   private geometryNow(): Geometry {
     const netlist = this.netlist;
     const { circuit, prefix } = this.level();
     const chips = this.circuit.chips;
-    const components: Record<string, ComponentGeometry> = {};
-    for (const component of circuit.components) {
+    const levelKey = `${this.opened}|${this.path.join('/')}`;
+    const netOf = (component: string, pin: string) => netlist?.netOfPin(prefix + component, pin) ?? -1;
+    const shapes = shapeCache(chips);
+    const buildComponent = (component: Component): ComponentGeometry => {
+      const spec = shapes.pins(component);
       const nets: Record<string, number> = {};
-      const spec = pinsOf(component, chips);
       if (netlist !== null) {
         // A bus pin under its own name has its first bit's net, and each
         // bit under `pin[i]`.
         for (const pin of [...spec.inputs, ...spec.outputs]) {
-          const bits = bitPins(pin, widthOf(spec, pin)).map(bit => netlist.pinNet.get(`${prefix}${component.id}.${bit}`) ?? -1);
-          nets[pin] = bits[0]!;
-          if (bits.length > 1) bits.forEach((net, i) => (nets[`${pin}[${i}]`] = net));
+          const width = widthOf(spec, pin);
+          nets[pin] = netOf(component.id, width === 1 ? pin : `${pin}[0]`);
+          for (let i = 0; i < width && width > 1; i++) nets[`${pin}[${i}]`] = netOf(component.id, `${pin}[${i}]`);
         }
       }
-      const shape = shapeOf(component, chips);
-      components[component.id] = {
+      const shape = shapes.shape(component);
+      return {
         kind: component.kind,
         x: component.x,
         y: component.y,
@@ -982,16 +1020,93 @@ export class CircuitService {
         width: component.width ?? 1,
         shape: typeof shape === 'string' ? null : shape
       };
-    }
-    const wires: Record<string, WireGeometry> = {};
-    const byId = new Map(circuit.components.map(c => [c.id, c]));
-    for (const wire of circuit.wires) {
+    };
+    const buildWire = (wire: Wire, byId: ReadonlyMap<string, Component>): WireGeometry => {
       const from = byId.get(wire.from.component);
-      const width = from === undefined ? 1 : widthOf(pinsOf(from, chips), wire.from.pin);
-      const bits = bitPins(wire.from.pin, width).map(bit => netlist?.pinNet.get(`${prefix}${wire.from.component}.${bit}`) ?? -1);
-      wires[wire.id] = { from: wire.from, to: wire.to, net: bits[0]!, width, bits: width > 1 ? bits : [] };
+      const width = from === undefined ? 1 : widthOf(shapes.pins(from), wire.from.pin);
+      const first = netOf(wire.from.component, width === 1 ? wire.from.pin : `${wire.from.pin}[0]`);
+      const bits = width === 1 ? [] : Array.from({ length: width }, (_, i) => netOf(wire.from.component, `${wire.from.pin}[${i}]`));
+      return { from: wire.from, to: wire.to, net: first, width, bits };
+    };
+
+    const cache = this.geometryCache;
+    // Which components' pins moved since the cache was built: none, when
+    // the netlist is the same one; the compile's word, when it was
+    // numbered against that one; otherwise unknown.
+    const changed =
+      cache === null || cache.level !== levelKey || cache.chips !== chips
+        ? null
+        : netlist === cache.netlist
+          ? new Set<string>()
+          : netlist !== null && netlist.numberedAgainst === cache.netlist
+            ? netlist.changedComponents
+            : null;
+    if (cache === null || changed === null) {
+      const byId = new Map<string, Component>();
+      const wiresFrom = new Map<string, Set<Wire>>();
+      const components = new Buckets<ComponentGeometry>();
+      const wires = new Buckets<WireGeometry>();
+      for (const component of circuit.components) {
+        byId.set(component.id, component);
+        components.set(component.id, buildComponent(component));
+      }
+      for (const wire of circuit.wires) {
+        addTo(wiresFrom, wire.from.component, wire);
+        wires.set(wire.id, buildWire(wire, byId));
+      }
+      this.geometryCache = { level: levelKey, chips, netlist, circuit, byId, wiresFrom, components: components.publish(), wires: wires.publish() };
+    } else {
+      const { byId, wiresFrom } = cache;
+      const components = new Buckets(cache.components);
+      const wires = new Buckets(cache.wires);
+      const parts = changesBetween(cache.circuit.components, circuit.components);
+      const links = changesBetween(cache.circuit.wires, circuit.wires);
+      for (const component of parts.removed) {
+        if (byId.get(component.id) === component) {
+          byId.delete(component.id);
+          components.delete(component.id);
+        }
+      }
+      for (const wire of links.removed) {
+        wiresFrom.get(wire.from.component)?.delete(wire);
+        wires.delete(wire.id);
+      }
+      for (const component of parts.added) {
+        byId.set(component.id, component);
+        components.set(component.id, buildComponent(component));
+      }
+      for (const wire of links.added) {
+        addTo(wiresFrom, wire.from.component, wire);
+        wires.set(wire.id, buildWire(wire, byId));
+      }
+      // Components whose pins moved, and every chip — its pins are its
+      // insides', which any edit inside it may renumber: their entries
+      // again if their nets differ, and the wires they drive, whose nets
+      // are theirs.
+      const added = new Set<object>([...parts.added, ...links.added]);
+      const recheck = new Set<string>();
+      for (const id of changed) {
+        const local = prefix === '' ? id : id.startsWith(prefix) ? id.slice(prefix.length) : null;
+        if (local !== null && byId.has(local)) recheck.add(local);
+      }
+      for (const component of circuit.components) if (component.kind === 'chip') recheck.add(component.id);
+      for (const id of recheck) {
+        const component = byId.get(id)!;
+        if (!added.has(component)) {
+          const old = components.get(id);
+          if (old === undefined || !sameNets(old.nets, shapes.pins(component), id, netOf)) components.set(id, buildComponent(component));
+        }
+        for (const wire of wiresFrom.get(id) ?? []) {
+          if (added.has(wire)) continue;
+          const old = wires.get(wire.id);
+          const next = buildWire(wire, byId);
+          if (old === undefined || old.net !== next.net || old.width !== next.width || old.bits.some((net, i) => net !== next.bits[i])) wires.set(wire.id, next);
+        }
+      }
+      this.geometryCache = { ...cache, netlist, circuit, components: components.publish(), wires: wires.publish() };
     }
-    return { components, wires, level: this.path.join('/'), opened: this.opened };
+    const published = this.geometryCache!;
+    return { components: published.components, wires: published.wires, level: this.path.join('/'), opened: this.opened };
   }
 
   private signalsNow(): Signals {
@@ -1027,7 +1142,7 @@ export class CircuitService {
     const { circuit, prefix } = this.level();
     const chips = this.circuit.chips;
     const add = (component: string, pin: string) => {
-      const net = netlist.pinNet.get(`${prefix}${component}.${pin}`);
+      const net = netlist.netOfPin(prefix + component, pin);
       if (net !== undefined) {
         chunks.add(Math.floor(net / CHUNK));
       }
@@ -1039,9 +1154,10 @@ export class CircuitService {
       }
     } else {
       const byId = new Map(circuit.components.map(c => [c.id, c]));
+      const shapes = shapeCache(chips);
       for (const component of circuit.components) {
-        if (intersects(boxOf(shapeOf(component, chips), component.x, component.y, component.rotation), viewport)) {
-          const spec = pinsOf(component, chips);
+        if (intersects(boxOf(shapes.shape(component), component.x, component.y, component.rotation), viewport)) {
+          const spec = shapes.pins(component);
           for (const pin of [...spec.inputs, ...spec.outputs]) {
             for (const bit of bitPins(pin, widthOf(spec, pin))) add(component.id, bit);
           }
@@ -1053,13 +1169,15 @@ export class CircuitService {
         if (from === undefined || to === undefined) {
           continue;
         }
-        const path = route(
-          pinAt(shapeOf(from, chips), from.x, from.y, wire.from.pin, from.rotation),
-          pinAt(shapeOf(to, chips), to.x, to.y, wire.to.pin, to.rotation),
-          slotOf(wire.to.pin)
-        );
-        if (intersects(boundsOf(path), viewport)) {
-          for (const bit of bitPins(wire.from.pin, widthOf(pinsOf(from, chips), wire.from.pin))) add(wire.from.component, bit);
+        // Not routed: a route keeps within its ends' box, a unit and a
+        // half either side and three and a half below (see `route`), so
+        // that box is enough to say whether it can meet the viewport, and
+        // ten thousand wires cost ten thousand box tests.
+        const a = pinAt(shapes.shape(from), from.x, from.y, wire.from.pin, from.rotation);
+        const b = pinAt(shapes.shape(to), to.x, to.y, wire.to.pin, to.rotation);
+        const reach = { left: Math.min(a.x, b.x) - 1.5, top: Math.min(a.y, b.y), right: Math.max(a.x, b.x) + 1.5, bottom: Math.max(a.y, b.y) + 3.5 };
+        if (intersects(reach, viewport)) {
+          for (const bit of bitPins(wire.from.pin, widthOf(shapes.pins(from), wire.from.pin))) add(wire.from.component, bit);
         }
       }
     }
@@ -1098,4 +1216,121 @@ function withRate(circuit: Circuit, rate: ClockRate): Circuit {
       return wanted === undefined ? rest : { ...rest, rate: wanted };
     })
   };
+}
+
+/**
+ * Shapes and pins for one pass over a level. A chip's are worked out from
+ * its definition — its switches and LEDs, sorted — which is worth doing
+ * once a definition rather than once an instance; every other kind's are
+ * a table lookup and are not cached.
+ */
+function shapeCache(chips: Circuit['chips']) {
+  const chipShapes = new Map<string, ReturnType<typeof shapeOf>>();
+  const chipPins = new Map<string, ReturnType<typeof pinsOf>>();
+  return {
+    shape(component: Component) {
+      if (component.kind !== 'chip') return shapeOf(component, chips);
+      const name = component.chip ?? '';
+      let shape = chipShapes.get(name);
+      if (shape === undefined) chipShapes.set(name, (shape = shapeOf(component, chips)));
+      return shape;
+    },
+    pins(component: Component) {
+      if (component.kind !== 'chip') return pinsOf(component, chips);
+      const name = component.chip ?? '';
+      let pins = chipPins.get(name);
+      if (pins === undefined) chipPins.set(name, (pins = pinsOf(component, chips)));
+      return pins;
+    }
+  };
+}
+
+/** Whether a component's recorded nets are still the nets its pins are on. */
+function sameNets(
+  nets: Readonly<Record<string, number>>,
+  spec: PinSpec,
+  id: string,
+  netOf: (component: string, pin: string) => number
+): boolean {
+  for (const pin of spec.inputs.length === 0 ? spec.outputs : spec.outputs.length === 0 ? spec.inputs : [...spec.inputs, ...spec.outputs]) {
+    const width = widthOf(spec, pin);
+    if (width === 1) {
+      if (nets[pin] !== netOf(id, pin)) return false;
+    } else {
+      for (let i = 0; i < width; i++) if (nets[`${pin}[${i}]`] !== netOf(id, `${pin}[${i}]`)) return false;
+    }
+  }
+  return true;
+}
+
+type Wire = Circuit['wires'][number];
+
+function addTo<K, V>(map: Map<K, Set<V>>, key: K, value: V): void {
+  let set = map.get(key);
+  if (set === undefined) map.set(key, (set = new Set()));
+  set.add(value);
+}
+
+/**
+ * What an edit did to a list of document objects, by identity: the
+ * objects gone and the objects new. The lists an edit makes — one
+ * filtered, one appended to, one mapped with an object replaced — share
+ * a prefix and a suffix with the list before, trimmed first, so the
+ * sets are built over only what differs.
+ */
+function changesBetween<T>(before: readonly T[], after: readonly T[]): { removed: T[]; added: T[] } {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let endBefore = before.length;
+  let endAfter = after.length;
+  while (endBefore > start && endAfter > start && before[endBefore - 1] === after[endAfter - 1]) {
+    endBefore--;
+    endAfter--;
+  }
+  const gone = before.slice(start, endBefore);
+  const come = after.slice(start, endAfter);
+  if (gone.length === 0 || come.length === 0) return { removed: gone, added: come };
+  const was = new Set(gone);
+  const is = new Set(come);
+  return { removed: gone.filter(x => !is.has(x)), added: come.filter(x => !was.has(x)) };
+}
+
+/**
+ * Geometry's buckets, written copy-on-write: a bucket is copied the
+ * first time an entry in it changes, and `publish` gives the buckets
+ * with the untouched ones shared — the same objects as before, which the
+ * differ passes over by identity.
+ */
+class Buckets<T> {
+  private readonly base: GeometryBuckets<T>;
+  private readonly copies = new Map<string, Record<string, T>>();
+
+  constructor(base: GeometryBuckets<T> = {}) {
+    this.base = base;
+  }
+
+  get(id: string): T | undefined {
+    const bucket = bucketOf(id);
+    return (this.copies.get(bucket) ?? this.base[bucket])?.[id];
+  }
+
+  set(id: string, value: T): void {
+    this.own(bucketOf(id))[id] = value;
+  }
+
+  delete(id: string): void {
+    const bucket = bucketOf(id);
+    if ((this.copies.get(bucket) ?? this.base[bucket])?.[id] !== undefined) delete this.own(bucket)[id];
+  }
+
+  publish(): GeometryBuckets<T> {
+    if (this.copies.size === 0) return this.base;
+    return { ...this.base, ...Object.fromEntries(this.copies) };
+  }
+
+  private own(bucket: string): Record<string, T> {
+    let copy = this.copies.get(bucket);
+    if (copy === undefined) this.copies.set(bucket, (copy = { ...this.base[bucket] }));
+    return copy;
+  }
 }

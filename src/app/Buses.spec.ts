@@ -6,6 +6,7 @@ import { CircuitError, compile } from '../sim/Netlist';
 import { Simulator } from '../sim/Simulator';
 import { connect, setWidth } from './DocumentEdits';
 import { ADDER, busAdderScene } from './Scenes';
+import { entriesOf, entryOf } from './CircuitContract';
 
 /** A bus's value, read bit by bit off `component.pin[i]`. */
 function bus(sim: Simulator, component: string, pin: string, width: number): number {
@@ -43,13 +44,13 @@ describe('buses', () => {
     let geometry!: import('./CircuitContract').Geometry;
     service.geometry.subscribe(g => (geometry = g));
     service.load(busAdderScene());
-    const sum = geometry.components['sum']!;
+    const sum = entryOf(geometry.components, 'sum')!;
     expect(sum.shape).toMatchObject({ width: 6, pins: { in: { x: 0, y: 3 } } });
     const netlist = compile(busAdderScene());
     for (let i = 0; i < 8; i++) {
       expect(sum.nets[`in[${i}]`]).toBe(netlist.pinNet.get(`add.S[${i}]`));
     }
-    const wire = Object.values(geometry.wires).find(w => w.to.component === 'sum')!;
+    const wire = entriesOf(geometry.wires).map(([, entry]) => entry).find(w => w.to.component === 'sum')!;
     expect(wire.width).toBe(8);
     expect(wire.bits).toHaveLength(8);
   });

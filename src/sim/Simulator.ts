@@ -1,4 +1,5 @@
 import { pinKey, type Netlist } from './Netlist';
+import { createKernel, type Kernel } from './Kernel';
 import { TRUTH } from './Primitives';
 
 /**
@@ -13,7 +14,7 @@ import { TRUTH } from './Primitives';
  * changed on the tick before. Phase 0 measured this 26× faster than
  * evaluating every gate every tick, on a CPU-shaped circuit. Changes are
  * gathered while gates are evaluated and applied after, which is the
- * unit delay.
+ * unit delay. The loop that does it is WebAssembly: see `Kernel.ts`.
  *
  * **Settling, and when it never comes.** `settle` runs ticks until
  * nothing changes. A loop that never stops changing — a ring
@@ -45,7 +46,6 @@ export const SETTLE_LIMIT = 10_000;
 const RING_WINDOW = 64;
 /** Passes the power-on settle makes before handing a circuit to the unit-delay kernel. */
 const POWER_ON_PASSES = 100;
-
 export class Simulator {
   readonly netlist: Netlist;
   /** Every net's value, indexed by net. Read it; drive nets only through `set` and `setClock`. */
@@ -59,23 +59,17 @@ export class Simulator {
   /** The level the clocks were last driven to. */
   private clockLevel: 0 | 1 = 0;
 
-  private readonly stamp: Uint32Array;
-  private epoch = 0;
-  /** Nets that changed on the last tick, or were driven since it: what the next tick evaluates. */
-  private readonly changed: Int32Array;
+  /** The inner loop, and the memory it runs in: net values, fan-out, and the nets due on the next tick. */
+  private readonly kernel: Kernel;
+  /** How many of `kernel.changed` the next tick evaluates: nets that changed on the last tick, or were driven since. */
   private changedCount = 0;
-  private readonly nextNet: Int32Array;
-  private readonly nextValue: Uint8Array;
   /** True until a tick has evaluated every gate once; see `powerOn`. */
   private everything = false;
 
   constructor(netlist: Netlist) {
     this.netlist = netlist;
-    this.value = new Uint8Array(netlist.netCount);
-    this.stamp = new Uint32Array(netlist.gateCount);
-    this.changed = new Int32Array(netlist.netCount);
-    this.nextNet = new Int32Array(netlist.netCount);
-    this.nextValue = new Uint8Array(netlist.netCount);
+    this.kernel = createKernel(netlist);
+    this.value = this.kernel.value;
     this.powerOn();
   }
 
@@ -86,7 +80,7 @@ export class Simulator {
 
   /** The net a pin is on. */
   net(component: string, pin = 'out'): number {
-    const net = this.netlist.pinNet.get(pinKey({ component, pin }));
+    const net = this.netlist.netOfPin(component, pin);
     if (net === undefined) {
       throw new Error(`No pin '${pin}' on a component '${component}'.`);
     }
@@ -101,6 +95,16 @@ export class Simulator {
       throw new Error(`'${input}' is not an input.`);
     }
     source.nets.forEach((net, bit) => this.drive(net, ((value >>> bit) & 1) as 0 | 1));
+  }
+
+  /**
+   * Sets any net, as if something had driven it, and wakes what reads
+   * it: for giving a memory built of latches its contents, which a
+   * document cannot say. Takes effect on the next tick; a gate driving
+   * the net may drive it back.
+   */
+  force(net: number, value: 0 | 1): void {
+    this.drive(net, value);
   }
 
   /** Drives every clock. Takes effect on the next tick. */
@@ -125,10 +129,20 @@ export class Simulator {
    * something the new gates settle from there.
    */
   adopt(previous: Simulator): void {
-    for (const [pin, net] of this.netlist.pinNet) {
-      const old = previous.netlist.pinNet.get(pin);
-      if (old !== undefined) {
-        this.value[net] = previous.value[old];
+    const carried = this.netlist.carriedFrom;
+    if (carried !== null && this.netlist.numberedAgainst === previous.netlist) {
+      // Numbered against the previous netlist: each net says which old
+      // net's value it carries on, so the state moves across as a copy.
+      for (let net = 0; net < carried.length; net++) {
+        const old = carried[net]!;
+        if (old >= 0) this.value[net] = previous.value[old]!;
+      }
+    } else {
+      for (const [pin, net] of this.netlist.pinNet) {
+        const old = previous.netlist.pinNet.get(pin);
+        if (old !== undefined) {
+          this.value[net] = previous.value[old];
+        }
       }
     }
     for (const { nets, value } of this.netlist.constants.values()) {
@@ -150,60 +164,30 @@ export class Simulator {
 
   /** Advances one tick; returns how many nets changed on it. */
   tick(): number {
-    const { type, in0, in1, out, fanStart, fanGate, gateCount } = this.netlist;
-    const value = this.value;
-    const nextNet = this.nextNet;
-    const nextValue = this.nextValue;
-    let count = 0;
-    let evaluations = 0;
-    const evaluate = (g: number) => {
-      evaluations++;
-      const result = TRUTH[(type[g] << 2) | (value[in0[g]] << 1) | value[in1[g]]];
-      if (result !== value[out[g]]) {
-        nextNet[count] = out[g];
-        nextValue[count] = result;
-        count++;
-      }
-    };
-
+    const kernel = this.kernel;
+    let found: number;
     if (this.everything) {
+      // Every gate once, from its record: power-on handed over a circuit
+      // with no settled state, or an edit made every gate due.
       this.everything = false;
+      const { type, in0, in1, out, gateCount } = this.netlist;
+      const value = this.value;
+      const changes = kernel.found;
+      found = 0;
       for (let g = 0; g < gateCount; g++) {
-        evaluate(g);
+        const result = TRUTH[(type[g]! << 2) | (value[in0[g]!]! << 1) | value[in1[g]!]!]!;
+        const o = out[g]!;
+        changes[found] = (o << 1) | result;
+        found += result ^ value[o]!;
       }
+      this.evaluations += gateCount;
     } else {
-      const stamp = this.stamp;
-      const epoch = ++this.epoch;
-      for (let i = 0; i < this.changedCount; i++) {
-        const n = this.changed[i];
-        for (let f = fanStart[n]; f < fanStart[n + 1]; f++) {
-          const g = fanGate[f];
-          if (stamp[g] !== epoch) {
-            stamp[g] = epoch;
-            evaluate(g);
-          }
-        }
-      }
+      found = kernel.evaluate(this.changedCount);
+      this.evaluations += kernel.evaluations;
     }
-
-    // Applied after every gate has been evaluated, never during: a gate
-    // later in this tick must see its inputs as they were when the tick
-    // began. One driver per net means no net appears twice here. A net
-    // no gate reads is not queued for the next tick, so a circuit whose
-    // last change lands on an output is quiet at once, and `settle`
-    // counts exactly its propagation delay.
-    let queued = 0;
-    for (let i = 0; i < count; i++) {
-      const n = nextNet[i];
-      value[n] = nextValue[i];
-      if (fanStart[n + 1] > fanStart[n]) {
-        this.changed[queued++] = n;
-      }
-    }
-    this.changedCount = queued;
+    this.changedCount = kernel.apply(found);
     this.ticks++;
-    this.evaluations += evaluations;
-    return count;
+    return kernel.moved;
   }
 
   /**
@@ -216,12 +200,20 @@ export class Simulator {
    */
   settle(limit = SETTLE_LIMIT): SettleResult {
     let ticks = 0;
-    while (this.pending) {
-      if (ticks >= limit) {
-        return { settled: false, ticks, ringing: this.ringing() };
-      }
+    if (this.everything && limit > 0) {
       this.tick();
       ticks++;
+    }
+    if (this.changedCount > 0 && ticks < limit) {
+      const kernel = this.kernel;
+      const run = kernel.settle(this.changedCount, limit - ticks);
+      ticks += run;
+      this.ticks += run;
+      this.evaluations += kernel.evaluations;
+      this.changedCount = kernel.queued;
+    }
+    if (this.pending) {
+      return { settled: false, ticks, ringing: this.ringing() };
     }
     return { settled: true, ticks };
   }
@@ -256,7 +248,7 @@ export class Simulator {
     if (this.value[net] !== value) {
       this.value[net] = value;
       if (fanStart[net + 1] > fanStart[net]) {
-        this.changed[this.changedCount++] = net;
+        this.kernel.changed[this.changedCount++] = net;
       }
     }
   }
@@ -266,7 +258,7 @@ export class Simulator {
     for (let t = 0; t < RING_WINDOW && this.pending; t++) {
       this.tick();
       for (let i = 0; i < this.changedCount; i++) {
-        toggles[this.changed[i]]++;
+        toggles[this.kernel.changed[i]!]!++;
       }
     }
     const nets: RingingNet[] = [];

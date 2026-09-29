@@ -1,6 +1,6 @@
-import { pinName, type Circuit, type Component, type PinRef } from './Circuit';
+import type { Circuit, Component, PinRef } from './Circuit';
 import { chipInterface, pinsOf } from './Chips';
-import { bitPins, GATE_KINDS, isGate, isSettable, widthOf, type PinSpec } from './Primitives';
+import { bitPins, GATE_KINDS, isGate, isSettable, widthOf, type GateKind, type PinSpec } from './Primitives';
 
 /**
  * A circuit compiled for running: nets as integers, gates as rows of
@@ -13,7 +13,10 @@ import { bitPins, GATE_KINDS, isGate, isSettable, widthOf, type PinSpec } from '
  * document always compiles to the same numbers.
  */
 export interface Netlist {
+  /** How many net numbers there are: with stable numbering, some may be unused (see `compile`). */
   readonly netCount: number;
+  /** How many nets there are. */
+  readonly liveNetCount: number;
   readonly gateCount: number;
   /** Per gate: its kind as an index into `GATE_KINDS` and `TRUTH`, its two input nets and its output net. */
   readonly type: Uint8Array;
@@ -29,6 +32,31 @@ export interface Netlist {
   readonly clocks: readonly number[];
   /** The net each pin is on, keyed `component.pin` by id. */
   readonly pinNet: ReadonlyMap<string, number>;
+  /**
+   * The net a pin is on, by component id and pin name (`in[3]` for a bus
+   * bit), or undefined for no such pin. What `pinNet` answers, without
+   * the thirty thousand string keys it is built from: `pinNet` is made
+   * the first time something asks for it, and an edit to a running
+   * circuit need never ask.
+   */
+  readonly netOfPin: (component: string, pin: string) => number | undefined;
+  /**
+   * For a netlist numbered against a previous one: the previous netlist,
+   * and for each net here the net there whose value it carries on — its
+   * own number when it kept it, the net it split from when it is new, -1
+   * when it has no past. Lets a simulator adopt the running state by
+   * copying values rather than by looking every pin up.
+   */
+  readonly numberedAgainst: Netlist | null;
+  /**
+   * With `numberedAgainst`: every component, by full id, one of whose
+   * pins is on a net numbered differently from before, or that is new.
+   * Everything else reads the same nets it did. Null otherwise.
+   */
+  readonly changedComponents: ReadonlySet<string> | null;
+  /** With `changedComponents`: the nets those moved pins are on now. */
+  readonly changedNets: readonly number[] | null;
+  readonly carriedFrom: Int32Array | null;
   /** A name per net for reports: its driver's pin, as `label.pin`, or its first pin when undriven. */
   readonly netNames: readonly string[];
   /** Nets some pin reads that nothing drives. Not an error: they read 0. */
@@ -46,20 +74,24 @@ export interface Source {
   readonly value: number;
 }
 
+export type CircuitErrorCode =
+  | 'duplicate-id'
+  | 'unknown-component'
+  | 'unknown-pin'
+  | 'short'
+  | 'version'
+  | 'unknown-chip'
+  | 'recursive-chip'
+  | 'width';
+
+// A plain field rather than a parameter property, so Node can run this
+// file with its types stripped (`pnpm speed`).
 export class CircuitError extends Error {
-  constructor(
-    readonly code:
-      | 'duplicate-id'
-      | 'unknown-component'
-      | 'unknown-pin'
-      | 'short'
-      | 'version'
-      | 'unknown-chip'
-      | 'recursive-chip'
-      | 'width',
-    message: string
-  ) {
+  readonly code: CircuitErrorCode;
+
+  constructor(code: CircuitErrorCode, message: string) {
     super(message);
+    this.code = code;
     this.name = 'CircuitError';
   }
 }
@@ -68,7 +100,53 @@ export function pinKey(ref: PinRef): string {
   return `${ref.component}.${ref.pin}`;
 }
 
-export function compile(circuit: Circuit): Netlist {
+/** A component as the walk placed it: its full id, and where its pins start in the flat list. */
+interface Placed {
+  readonly component: Component;
+  readonly id: string;
+  readonly base: number;
+  readonly spec: PinSpec;
+  /** Each pin's offset from `base`: a bus pin's bits follow it. */
+  readonly offsets: ReadonlyMap<string, number>;
+  /** How many pins it has, from `base` on. */
+  readonly count: number;
+  /** A chip's definition, whose interface its pins are. */
+  readonly definition?: Circuit;
+}
+
+/** What the next compile against a netlist reads from it: each placed component, and each pin's net. */
+const internals = new WeakMap<Netlist, { placedById: ReadonlyMap<string, Placed>; pinNetIndex: Int32Array }>();
+
+const offsetCache = new WeakMap<PinSpec, ReadonlyMap<string, number>>();
+
+/** Where each of a spec's pins starts, in the order the walk adds them: inputs, then outputs, a bit each. */
+function offsetsOf(spec: PinSpec): ReadonlyMap<string, number> {
+  const cached = offsetCache.get(spec);
+  if (cached !== undefined) return cached;
+  const offsets = new Map<string, number>();
+  let at = 0;
+  for (const pin of [...spec.inputs, ...spec.outputs]) {
+    offsets.set(pin, at);
+    at += widthOf(spec, pin);
+  }
+  offsetCache.set(spec, offsets);
+  return offsets;
+}
+
+const GATE_INDEX = Object.fromEntries(GATE_KINDS.map((kind, i) => [kind, i])) as Record<GateKind, number>;
+
+/**
+ * Compiles a circuit. With `previous`, the netlist of the same document a
+ * moment ago, nets are numbered stably: a net keeps the number it had,
+ * found through any of its pins that existed then, and only a net with
+ * no past, or one split from a net whose number the other side kept, gets
+ * a new one. So an edit renumbers only what it touched, and whatever
+ * reads nets by number — the render worker's geometry and signals — sees
+ * only that change. When the numbers have grown sparse, more than twice
+ * the nets there are, they are packed again from zero, as without
+ * `previous`.
+ */
+export function compile(circuit: Circuit, previous?: Netlist): Netlist {
   if (circuit.version !== 1) {
     throw new CircuitError('version', `This build reads circuit version 1, not ${String(circuit.version)}.`);
   }
@@ -83,33 +161,50 @@ export function compile(circuit: Circuit): Netlist {
   // sources or sinks, only points its pins join — `fa3.a` to
   // `fa3/a.out`, `fa3/s.in` to `fa3.s` — so a net runs straight through
   // the chip's edge as if the switch were a length of wire.
-  const pinIndex = new Map<string, number>();
-  const pins: PinRef[] = [];
-  const driving: boolean[] = [];
-  /** Every part that does something, at every depth, under its full id. */
-  const parts: Component[] = [];
-  /** Wires, and the joins at chips' edges, as pairs of pin keys. */
-  const links: { readonly from: PinRef; readonly to: PinRef; readonly id: string }[] = [];
+  //
+  // Wires are resolved to pin indices as the walk meets them, by each
+  // component's first pin and each pin's offset from it, and a pin's key
+  // is built once, for `pinNet`: looking every wire's ends up by string
+  // was most of what a compile of ten thousand gates cost.
+  const pinComponent: string[] = [];
+  const pinName: string[] = [];
+  const driving: number[] = [];
+  /** Every part that does something, at every depth: its full id, and where its pins are. */
+  const parts: Placed[] = [];
+  /** Wires, and the joins at chips' edges, as pairs of pin indices. */
+  const linkFrom: number[] = [];
+  const linkTo: number[] = [];
   const chips = circuit.chips ?? {};
-  /** Every component at every depth, by full id, for messages that name one. */
-  const named = new Map<string, Component>();
-  const addPin = (component: string, pin: string, drives: boolean) => {
-    const ref = { component, pin };
-    pinIndex.set(pinKey(ref), pins.length);
-    pins.push(ref);
-    driving.push(drives);
+  /** Every component at every depth, in the walk's order, and by full id: for `netOfPin` and messages. */
+  const everyPlaced: Placed[] = [];
+  const placedById = new Map<string, Placed>();
+  const addPins = (id: string, spec: PinSpec, pins: readonly string[], drives: number) => {
+    for (const pin of pins) {
+      const width = widthOf(spec, pin);
+      for (let i = 0; i < width; i++) {
+        pinComponent.push(id);
+        pinName.push(width === 1 ? pin : `${pin}[${i}]`);
+        driving.push(drives);
+      }
+    }
   };
-  const walk = (level: Circuit, prefix: string, inside: readonly string[]) => {
-    const ids = new Set<string>();
-    /** Each component's pins on this level, for the widths of the wires between them. */
-    const specs = new Map<string, PinSpec>();
+  const place = (component: Component, id: string, spec: PinSpec, drives: boolean, definition?: Circuit): Placed => {
+    const base = pinComponent.length;
+    addPins(id, spec, spec.inputs, 0);
+    addPins(id, spec, spec.outputs, drives ? 1 : 0);
+    const placed: Placed = { component, id, base, spec, offsets: offsetsOf(spec), count: pinComponent.length - base, definition };
+    placedById.set(id, placed);
+    everyPlaced.push(placed);
+    return placed;
+  };
+  const walk = (level: Circuit, prefix: string, inside: readonly string[]): Map<string, Placed> => {
+    /** Each component on this level, by its id here. */
+    const here = new Map<string, Placed>();
     for (const component of level.components) {
-      if (ids.has(component.id)) {
+      if (here.has(component.id)) {
         throw new CircuitError('duplicate-id', `Two components have the id '${prefix}${component.id}'.`);
       }
-      ids.add(component.id);
       const id = prefix + component.id;
-      named.set(id, component);
       if (component.kind === 'chip') {
         const name = component.chip ?? '';
         const definition = chips[name];
@@ -119,22 +214,22 @@ export function compile(circuit: Circuit): Netlist {
         if (inside.includes(name)) {
           throw new CircuitError('recursive-chip', `Chip '${name}' contains itself, by way of ${[...inside, name].join(' › ')}.`);
         }
+        const outer = place(component, id, pinsOf(component, chips), false, definition);
+        here.set(component.id, outer);
+        const within = walk(definition, `${id}/`, [...inside, name]);
         const face = chipInterface(definition);
-        specs.set(component.id, pinsOf(component, chips));
-        for (const pin of [...face.inputs, ...face.outputs]) {
-          for (const bit of bitPins(pin.name, pin.width)) addPin(id, bit, false);
-        }
-        walk(definition, `${id}/`, [...inside, name]);
         for (const [pins, inner] of [
           [face.inputs, 'out'],
           [face.outputs, 'in']
         ] as const) {
           for (const pin of pins) {
-            const outer = bitPins(pin.name, pin.width);
-            const edge = bitPins(inner, pin.width);
-            outer.forEach((bit, i) => {
-              links.push({ from: { component: id, pin: bit }, to: { component: `${id}/${pin.component}`, pin: edge[i]! }, id: `${id}.${pin.name}` });
-            });
+            const edge = within.get(pin.component)!;
+            const from = outer.base + outer.offsets.get(pin.name)!;
+            const to = edge.base + edge.offsets.get(inner)!;
+            for (let i = 0; i < pin.width; i++) {
+              linkFrom.push(from + i);
+              linkTo.push(to + i);
+            }
           }
         }
         continue;
@@ -146,110 +241,174 @@ export function compile(circuit: Circuit): Netlist {
       // pin's bits are joined to its one-bit pins.
       const bus = component.kind === 'split' || component.kind === 'join';
       const spec = pinsOf(component, chips);
-      specs.set(component.id, spec);
-      for (const pin of spec.inputs) {
-        for (const bit of bitPins(pin, widthOf(spec, pin))) addPin(id, bit, false);
-      }
-      for (const pin of spec.outputs) {
-        for (const bit of bitPins(pin, widthOf(spec, pin))) addPin(id, bit, !edge && !bus);
-      }
+      const placed = place(component, id, spec, !edge && !bus);
+      here.set(component.id, placed);
       if (bus) {
         const busPin = component.kind === 'split' ? 'in' : 'out';
         const ones = component.kind === 'split' ? spec.outputs : spec.inputs;
-        bitPins(busPin, widthOf(spec, busPin)).forEach((bit, i) => {
-          links.push({ from: { component: id, pin: bit }, to: { component: id, pin: ones[i]! }, id: `${id}.${ones[i]}` });
+        const busAt = placed.base + placed.offsets.get(busPin)!;
+        ones.forEach((one, i) => {
+          linkFrom.push(busAt + i);
+          linkTo.push(placed.base + placed.offsets.get(one)!);
         });
       } else if (!edge) {
-        parts.push({ ...component, id });
+        parts.push(placed);
       }
     }
     for (const wire of level.wires) {
       // A wire is as wide as its pins, which must agree; a bus wire is a
       // link per bit.
-      const fromSpec = specs.get(wire.from.component);
-      const toSpec = specs.get(wire.to.component);
-      const fromWidth = fromSpec === undefined ? 1 : widthOf(fromSpec, wire.from.pin);
-      const toWidth = toSpec === undefined ? 1 : widthOf(toSpec, wire.to.pin);
-      if (fromSpec !== undefined && toSpec !== undefined && fromWidth !== toWidth) {
+      const end = (ref: PinRef): { at: number; width: number } => {
+        const placed = here.get(ref.component);
+        if (placed === undefined) {
+          throw new CircuitError('unknown-component', `Wire '${prefix}${wire.id}' names a component '${prefix}${ref.component}' that is not in the circuit.`);
+        }
+        const offset = placed.offsets.get(ref.pin);
+        if (offset === undefined) {
+          const known = [...placed.spec.inputs, ...placed.spec.outputs];
+          throw new CircuitError(
+            'unknown-pin',
+            `Wire '${prefix}${wire.id}' names pin '${ref.pin}' on ${placed.component.kind} '${placed.component.label ?? placed.id}', which has ${known.join(', ')}.`
+          );
+        }
+        return { at: placed.base + offset, width: widthOf(placed.spec, ref.pin) };
+      };
+      const from = end(wire.from);
+      const to = end(wire.to);
+      if (from.width !== to.width) {
         throw new CircuitError(
           'width',
-          `Wire '${prefix}${wire.id}' joins ${wire.from.component}.${wire.from.pin}, ${fromWidth} bits wide, to ${wire.to.component}.${wire.to.pin}, ${toWidth}.`
+          `Wire '${prefix}${wire.id}' joins ${wire.from.component}.${wire.from.pin}, ${from.width} bits wide, to ${wire.to.component}.${wire.to.pin}, ${to.width}.`
         );
       }
-      const fromBits = bitPins(wire.from.pin, fromWidth);
-      const toBits = bitPins(wire.to.pin, toWidth);
-      fromBits.forEach((bit, i) => {
-        links.push({
-          from: { component: prefix + wire.from.component, pin: bit },
-          to: { component: prefix + wire.to.component, pin: toBits[i]! },
-          id: prefix + wire.id
-        });
-      });
+      for (let i = 0; i < from.width; i++) {
+        linkFrom.push(from.at + i);
+        linkTo.push(to.at + i);
+      }
     }
+    return here;
   };
   walk(circuit, '', []);
+  const pinCount = pinComponent.length;
+
+  /**
+   * A pin as people read it: its component's label, or id, and the pin —
+   * inside a chip, after the instance's path.
+   */
+  const nameOf = (index: number): string => {
+    const id = pinComponent[index]!;
+    const component = placedById.get(id)?.component;
+    const slash = id.lastIndexOf('/');
+    return `${id.slice(0, slash + 1)}${component?.label ?? id.slice(slash + 1)}.${pinName[index]}`;
+  };
 
   // Wires join pins into nets.
-  const parent = pins.map((_, i) => i);
+  const parent = new Int32Array(pinCount);
+  for (let i = 0; i < pinCount; i++) parent[i] = i;
   const find = (i: number): number => {
     while (parent[i] !== i) {
-      parent[i] = parent[parent[i]];
-      i = parent[i];
+      parent[i] = parent[parent[i]!]!;
+      i = parent[i]!;
     }
     return i;
   };
-  const indexOf = (ref: PinRef, wire: string): number => {
-    const index = pinIndex.get(pinKey(ref));
-    if (index === undefined) {
-      const component = named.get(ref.component);
-      if (component === undefined) {
-        throw new CircuitError('unknown-component', `Wire '${wire}' names a component '${ref.component}' that is not in the circuit.`);
-      }
-      const known = pins.filter(p => p.component === ref.component).map(p => p.pin);
-      throw new CircuitError(
-        'unknown-pin',
-        `Wire '${wire}' names pin '${ref.pin}' on ${component.kind} '${component.label ?? ref.component}', which has ${known.join(', ')}.`
-      );
-    }
-    return index;
-  };
-  for (const link of links) {
-    const a = find(indexOf(link.from, link.id));
-    const b = find(indexOf(link.to, link.id));
+  for (let l = 0; l < linkFrom.length; l++) {
+    const a = find(linkFrom[l]!);
+    const b = find(linkTo[l]!);
     if (a !== b) {
       parent[Math.max(a, b)] = Math.min(a, b);
     }
   }
 
-  // Number the nets in order of their first pin, and find each one's
-  // driver. Two drivers on one net is a short, and no answer is right,
-  // so it is refused rather than resolved.
-  const netOfRoot = new Map<number, number>();
-  const pinNetIndex = new Int32Array(pins.length);
-  const drivers: number[] = [];
-  const firstPin: number[] = [];
-  for (let i = 0; i < pins.length; i++) {
-    const root = find(i);
-    let net = netOfRoot.get(root);
-    if (net === undefined) {
-      net = netOfRoot.size;
-      netOfRoot.set(root, net);
-      drivers.push(-1);
-      firstPin.push(i);
+  // Number the nets, and find each one's driver. Two drivers on one net
+  // is a short, and no answer is right, so it is refused rather than
+  // resolved. A root is always a net's lowest pin.
+  const netOfRoot = new Int32Array(pinCount).fill(-1);
+  const pinNetIndex = new Int32Array(pinCount);
+  let netTotal = 0;
+  let carried: number[] | null = null;
+  /** The old net of each pin, for telling afterwards which pins moved; -1 for a pin that is new. */
+  const oldNet = previous === undefined ? null : new Int32Array(pinCount).fill(-1);
+  if (previous !== undefined) {
+    // A component that is the same document object as before, placed the
+    // same way — for a chip, from the same definition — has its pins in
+    // the same order, and their old nets are a copy. Anything else is
+    // looked up pin by pin.
+    const before = internals.get(previous);
+    for (const placed of everyPlaced) {
+      const was = before?.placedById.get(placed.id);
+      if (was !== undefined && was.component === placed.component && was.count === placed.count && was.definition === placed.definition) {
+        oldNet!.set(before!.pinNetIndex.subarray(was.base, was.base + was.count), placed.base);
+      } else {
+        for (let i = placed.base; i < placed.base + placed.count; i++) {
+          oldNet![i] = previous.netOfPin(pinComponent[i]!, pinName[i]!) ?? -1;
+        }
+      }
     }
+  }
+  if (previous !== undefined) {
+    // First, every net that can keep a number it had does: the first of
+    // its pins, in order, whose old net no one here has claimed yet.
+    const claimed = new Uint8Array(previous.netCount);
+    const origin: number[] = [];
+    /** For a net whose old number another took: the old net its value comes from, by root. */
+    const pending = new Map<number, number>();
+    let highest = -1;
+    for (let i = 0; i < pinCount; i++) {
+      const root = find(i);
+      const old = oldNet![i]!;
+      if (old === -1) continue;
+      if (netOfRoot[root] === -1 && claimed[old] === 0) {
+        claimed[old] = 1;
+        netOfRoot[root] = old;
+        origin[old] = old;
+        if (old > highest) highest = old;
+      } else if (netOfRoot[root] === -1 && !pending.has(root)) {
+        // Remember where a net whose old number is taken came from, for
+        // its value; it is numbered below.
+        pending.set(root, old);
+      }
+    }
+    // Then the rest, above everything kept.
+    let next = Math.max(highest + 1, 0);
+    let live = 0;
+    for (let i = 0; i < pinCount; i++) {
+      const root = find(i);
+      if (i === root) live++;
+      if (netOfRoot[root] === -1) {
+        netOfRoot[root] = next;
+        origin[next] = pending.get(root) ?? -1;
+        next++;
+      }
+    }
+    if (next <= 2 * live) {
+      netTotal = next;
+      carried = origin;
+    } else {
+      netOfRoot.fill(-1);
+    }
+  }
+  if (carried === null) {
+    for (let i = 0; i < pinCount; i++) {
+      const root = find(i);
+      if (netOfRoot[root] === -1) netOfRoot[root] = netTotal++;
+    }
+  }
+  const drivers: number[] = new Array(netTotal).fill(-1);
+  const firstPin: number[] = new Array(netTotal).fill(-1);
+  for (let i = 0; i < pinCount; i++) {
+    const net = netOfRoot[find(i)]!;
     pinNetIndex[i] = net;
+    if (firstPin[net] === -1) firstPin[net] = i;
     if (driving[i]) {
       if (drivers[net] !== -1) {
-        throw new CircuitError(
-          'short',
-          `${pinName(circuit, pins[drivers[net]])} and ${pinName(circuit, pins[i])} both drive the same net.`
-        );
+        throw new CircuitError('short', `${nameOf(drivers[net]!)} and ${nameOf(i)} both drive the same net.`);
       }
       drivers[net] = i;
     }
   }
-  const netCount = netOfRoot.size;
-  const netOf = (component: string, pin: string) => pinNetIndex[pinIndex.get(`${component}.${pin}`)!];
+  const netCount = drivers.length;
+  const netOf = (placed: Placed, pin: string) => pinNetIndex[placed.base + placed.offsets.get(pin)!]!;
 
   // Gates, sources and outputs.
   const types: number[] = [];
@@ -258,29 +417,32 @@ export function compile(circuit: Circuit): Netlist {
   const outs: number[] = [];
   const inputs = new Map<string, Source>();
   const constants = new Map<string, Source>();
-  const bitsOf = (id: string, pin: string, width: number) => bitPins(pin, width).map(bit => netOf(id, bit));
   const clocks: number[] = [];
   const read = new Uint8Array(netCount);
-  for (const component of parts) {
-    const { id, kind } = component;
+  const bitsOf = (placed: Placed, pin: string, width: number) => {
+    const at = placed.base + placed.offsets.get(pin)!;
+    return Array.from({ length: width }, (_, i) => pinNetIndex[at + i]!);
+  };
+  for (const placed of parts) {
+    const { component, id } = placed;
+    const kind = component.kind;
     if (isGate(kind)) {
-      const a = netOf(id, 'a');
-      const b = kind === 'not' ? a : netOf(id, 'b');
-      types.push(GATE_KINDS.indexOf(kind));
+      const a = netOf(placed, 'a');
+      const b = kind === 'not' ? a : netOf(placed, 'b');
+      types.push(GATE_INDEX[kind]);
       ins0.push(a);
       ins1.push(b);
-      outs.push(netOf(id, 'out'));
+      outs.push(netOf(placed, 'out'));
       read[a] = 1;
       read[b] = 1;
     } else if (isSettable(kind) || kind === 'constant') {
-      const nets = bitsOf(id, 'out', kind === 'button' ? 1 : (component.width ?? 1));
+      const nets = bitsOf(placed, 'out', kind === 'button' ? 1 : (component.width ?? 1));
       (kind === 'constant' ? constants : inputs).set(id, { net: nets[0]!, nets, value: component.value ?? 0 });
     } else if (kind === 'clock') {
-      clocks.push(netOf(id, 'out'));
+      clocks.push(netOf(placed, 'out'));
     } else {
-      const spec = pinsOf(component, chips);
-      for (const pin of spec.inputs) {
-        for (const net of bitsOf(id, pin, widthOf(spec, pin))) read[net] = 1;
+      for (const pin of placed.spec.inputs) {
+        for (const net of bitsOf(placed, pin, widthOf(placed.spec, pin))) read[net] = 1;
       }
     }
   }
@@ -309,18 +471,37 @@ export function compile(circuit: Circuit): Netlist {
     }
   }
 
-  const pinNet = new Map<string, number>();
-  pins.forEach((ref, i) => pinNet.set(pinKey(ref), pinNetIndex[i]));
-  const netNames = drivers.map((driver, net) => pinName(circuit, pins[driver === -1 ? firstPin[net] : driver]));
+  let pinNet: Map<string, number> | null = null;
+  const netOfPin = (component: string, pin: string): number | undefined => {
+    const placed = placedById.get(component);
+    if (placed === undefined) return undefined;
+    const bracket = pin.indexOf('[');
+    const offset = placed.offsets.get(bracket < 0 ? pin : pin.slice(0, bracket));
+    if (offset === undefined) return undefined;
+    const bit = bracket < 0 ? 0 : Number(pin.slice(bracket + 1, -1));
+    return pinNetIndex[placed.base + offset + bit];
+  };
   const floating: number[] = [];
   for (let net = 0; net < netCount; net++) {
-    if (drivers[net] === -1 && read[net] === 1) {
+    if (drivers[net] === -1 && firstPin[net] !== -1 && read[net] === 1) {
       floating.push(net);
     }
   }
 
-  return {
+  let moved: { components: Set<string>; nets: number[] } | null = null;
+  if (carried !== null && oldNet !== null) {
+    moved = { components: new Set(), nets: [] };
+    for (let i = 0; i < pinCount; i++) {
+      if (oldNet[i] !== pinNetIndex[i]) {
+        moved.components.add(pinComponent[i]!);
+        moved.nets.push(pinNetIndex[i]!);
+      }
+    }
+  }
+  let netNames: string[] | null = null;
+  const netlist: Netlist = {
     netCount,
+    liveNetCount: firstPin.reduce((n, pin) => (pin === -1 ? n : n + 1), 0),
     gateCount,
     type: Uint8Array.from(types),
     in0,
@@ -331,8 +512,25 @@ export function compile(circuit: Circuit): Netlist {
     inputs,
     constants,
     clocks,
-    pinNet,
-    netNames,
-    floating
+    get pinNet(): ReadonlyMap<string, number> {
+      if (pinNet === null) {
+        pinNet = new Map();
+        for (let i = 0; i < pinCount; i++) pinNet.set(`${pinComponent[i]}.${pinName[i]}`, pinNetIndex[i]!);
+      }
+      return pinNet;
+    },
+    netOfPin,
+    get netNames(): readonly string[] {
+      // A number no net holds — one left behind by a merge — is named ''.
+      netNames ??= drivers.map((driver, net) => (driver === -1 && firstPin[net] === -1 ? '' : nameOf(driver === -1 ? firstPin[net]! : driver)));
+      return netNames;
+    },
+    floating,
+    numberedAgainst: carried === null ? null : (previous ?? null),
+    changedComponents: moved?.components ?? null,
+    changedNets: moved?.nets ?? null,
+    carriedFrom: carried === null ? null : Int32Array.from({ length: netCount }, (_, net) => carried![net] ?? -1)
   };
+  internals.set(netlist, { placedById, pinNetIndex });
+  return netlist;
 }

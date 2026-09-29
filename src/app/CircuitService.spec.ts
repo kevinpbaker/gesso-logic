@@ -5,6 +5,7 @@ import { dFlipFlop } from '../sim/Parts';
 import type { Signals, Status } from './CircuitContract';
 import { CircuitService, type Schedule } from './CircuitService';
 import { signalOf } from './SignalPacking';
+import { entryOf } from './CircuitContract';
 
 /**
  * The service on its own, with time in the spec's hands.
@@ -149,7 +150,7 @@ describe('CircuitService', () => {
       const signals = h.signals[h.signals.length - 1]!;
       const geometry = h.service['geometryNow']();
       return [0, 1, 2].reduce((sum, bit) => {
-        const net = geometry.components[`bit${bit}.slave.q`]!.nets.out!;
+        const net = entryOf(geometry.components, `bit${bit}.slave.q`)!.nets.out!;
         return sum | (signalOf(signals.chunks, net) << bit);
       }, 0);
     };

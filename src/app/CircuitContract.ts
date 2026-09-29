@@ -121,9 +121,15 @@ export interface WireGeometry {
   readonly bits: readonly number[];
 }
 
+/**
+ * Entries by id, in buckets by a hash of the id: see `bucketOf`. Read
+ * them with `entryOf` and `entriesOf`.
+ */
+export type Buckets<T> = Readonly<Record<string, Readonly<Record<string, T>>>>;
+
 export interface Geometry {
-  readonly components: Readonly<Record<string, ComponentGeometry>>;
-  readonly wires: Readonly<Record<string, WireGeometry>>;
+  readonly components: Buckets<ComponentGeometry>;
+  readonly wires: Buckets<WireGeometry>;
   /**
    * Which level this is, as the path's instance ids joined with `/`: ''
    * at the top. The summary and the geometry are separate keys, and one
@@ -342,3 +348,33 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   clipboard: NO_CLIP,
   analyser: CLOSED_ANALYSER
 });
+
+/**
+ * How many buckets geometry is kept in. An edit publishes the buckets it
+ * touched — a new object each, with the rest shared — so the differ
+ * walks a few hundred entries rather than thirty thousand, and the render
+ * worker copies as few when it applies the patch. A flat record of ten
+ * thousand parts was both, on every edit, for one changed part.
+ */
+export const GEOMETRY_BUCKETS = 64;
+
+/** The bucket an id's entry is in: a hash of the id, the same wherever it is asked. */
+export function bucketOf(id: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 0x01000193);
+  return String((hash >>> 0) % GEOMETRY_BUCKETS);
+}
+
+/** An entry by id, or undefined. */
+export function entryOf<T>(buckets: Buckets<T>, id: string): T | undefined {
+  return buckets[bucketOf(id)]?.[id];
+}
+
+/** Every entry, as `[id, entry]`, in no particular order. */
+export function entriesOf<T>(buckets: Buckets<T>): [string, T][] {
+  const entries: [string, T][] = [];
+  for (const bucket of Object.values(buckets)) {
+    for (const id in bucket) entries.push([id, bucket[id]!]);
+  }
+  return entries;
+}

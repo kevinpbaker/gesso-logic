@@ -6,6 +6,7 @@ import { Circuit } from './CircuitContract';
 import { CircuitService } from './CircuitService';
 import { circuitChannels } from './channels';
 import { signalOf } from './SignalPacking';
+import { entriesOf, entryOf } from './CircuitContract';
 
 /**
  * Phase 2's exit: the circuit channel driven from the render worker's
@@ -56,7 +57,7 @@ describe('the circuit channel', () => {
       library: expect.any(Array)
     });
     const led = () => {
-      const net = circuit.view.geometry.value.components.led?.nets.in;
+      const net = entryOf(circuit.view.geometry.value.components, "led")?.nets.in;
       return net === undefined ? -1 : signalOf(circuit.view.signals.value.chunks, net);
     };
     expect(led()).toBe(0);
@@ -90,7 +91,7 @@ describe('the circuit channel', () => {
     expect(circuit.view.signals.value.chunks).toEqual({});
     // The document is kept — someone is halfway through drawing it — and
     // drawn, with no net on any wire until it compiles.
-    expect(Object.values(circuit.view.geometry.value.wires).map(wire => wire.net)).toEqual([-1, -1]);
+    expect(entriesOf(circuit.view.geometry.value.wires).map(([, entry]) => entry).map(wire => wire.net)).toEqual([-1, -1]);
   });
 
   it('steps the clock and runs it, reporting cycles in status', async () => {

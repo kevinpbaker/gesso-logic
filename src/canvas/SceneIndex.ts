@@ -1,4 +1,4 @@
-import type { Geometry } from '../app/CircuitContract';
+import { type ComponentGeometry, type Geometry, type WireGeometry } from '../app/CircuitContract';
 import { boundsOf, boxOf, LAYOUT, pinAt, route, sizeOf, slotOf, type Box, type KindLayout, type Point, type Shape } from '../app/Layout';
 import type { PinRef, Rotation } from '../sim/Circuit';
 import { GATE_KINDS, isGate, PINS, type Kind } from '../sim/Primitives';
@@ -81,99 +81,150 @@ export class SceneIndex {
   /** The world the circuit covers. */
   readonly bounds: Box;
 
-  private readonly cellsX: number;
-  private readonly cellsY: number;
-  private readonly originX: number;
-  private readonly originY: number;
-  private readonly cellComponentStart: Int32Array;
-  private readonly cellComponents: Int32Array;
-  private readonly cellWireStart: Int32Array;
-  private readonly cellWires: Int32Array;
+  /** Each component's geometry entry. */
+  readonly entries: readonly ComponentGeometry[];
+  /** Each component's box, and each wire's route: shared with the scene before wherever the edit left them alone. */
+  readonly placed: readonly Placed[];
+  readonly routes: readonly Route[];
+  /** Which build this is, for telling what it reused. */
+  readonly build = ++builds;
+  /**
+   * Where the drawing differs from the scene this was built after: see
+   * `changedAreas`. Empty for a scene built after none.
+   */
+  readonly changed: readonly Box[];
+
+  private readonly componentGrid: Grids;
+  private readonly wireGrid: Grids;
   private readonly componentStamp: Uint32Array;
   private readonly wireStamp: Uint32Array;
   private epoch = 0;
 
-  constructor(geometry: Geometry) {
-    const ids = Object.keys(geometry.components);
-    const indexOf = new Map(ids.map((id, n) => [id, n]));
-    this.ids = ids;
-    this.indexOf = indexOf;
-    this.turns = new Uint8Array(ids.length);
-    this.componentCount = ids.length;
-    this.kind = new Uint8Array(ids.length);
-    this.x = new Float32Array(ids.length);
-    this.y = new Float32Array(ids.length);
-    this.valueNet = new Int32Array(ids.length);
-    this.widths = new Uint8Array(ids.length);
-    const labels: (string | null)[] = [];
-    const displayNets: (Int32Array | null)[] = [];
-    const shapes: (KindLayout | null)[] = [];
-    const chipNames: (string | null)[] = [];
-    const boxes: Box[] = [];
-    ids.forEach((id, n) => {
-      const c = geometry.components[id]!;
+  constructor(geometry: Geometry, previous: SceneIndex | null = null) {
+    const build = this.build;
+    // Geometry comes in buckets, and an edit replaces the few it touched:
+    // every other bucket is the object it was, and its parts and wires
+    // are read from what the last build made of it, with no lookup per
+    // entry. See `GEOMETRY_BUCKETS`.
+    const componentBuckets = Object.values(geometry.components).map(bucket => {
+      let digest = placedDigests.get(bucket);
+      if (digest === undefined) {
+        digest = Object.keys(bucket).map(id => {
+          const entry = bucket[id]!;
+          // An entry the edit kept, in a bucket it touched, is the same
+          // entry and keeps its `Placed`.
+          let place = placedCache.get(entry);
+          if (place === undefined) placedCache.set(entry, (place = placeOf(id, entry, build)));
+          return place;
+        });
+        placedDigests.set(bucket, digest);
+      }
+      return digest;
+    });
+    const placed = componentBuckets.flat();
+    const count = placed.length;
+    this.placed = placed;
+    this.componentCount = count;
+    this.ids = placed.map(p => p.id);
+    this.entries = placed.map(p => p.entry);
+    this.indexOf = new Map(this.ids.map((id, n) => [id, n]));
+    this.turns = new Uint8Array(count);
+    this.kind = new Uint8Array(count);
+    this.x = new Float32Array(count);
+    this.y = new Float32Array(count);
+    this.valueNet = new Int32Array(count);
+    this.widths = new Uint8Array(count);
+    const labels: (string | null)[] = new Array(count);
+    const displayNets: (Int32Array | null)[] = new Array(count);
+    const shapes: (KindLayout | null)[] = new Array(count);
+    const chipNames: (string | null)[] = new Array(count);
+    const boxes: Box[] = new Array(count);
+    for (let n = 0; n < count; n++) {
+      const place = placed[n]!;
+      const c = place.entry;
+      place.used = build;
       this.kind[n] = KIND_INDEX[c.kind];
       this.x[n] = c.x;
       this.y[n] = c.y;
       this.turns[n] = c.rotation / 90;
-      this.valueNet[n] = (c.kind === 'output' || c.kind === 'probe' ? c.nets.in : c.nets.out) ?? -1;
+      this.valueNet[n] = place.valueNet;
       this.widths[n] = c.width;
-      const busPin = c.kind === 'input' || c.kind === 'constant' ? 'out' : 'in';
-      displayNets.push(
-        c.width > 1 && (c.kind === 'input' || c.kind === 'constant' || c.kind === 'output' || c.kind === 'probe' || c.kind === 'hex')
-          ? Int32Array.from({ length: c.width }, (_, i) => c.nets[`${busPin}[${i}]`] ?? -1)
-          : c.kind === 'hex' || c.kind === 'seg7'
-            ? Int32Array.from(PINS[c.kind].inputs, pin => c.nets[pin] ?? -1)
-            : null
-      );
-      labels.push(isGate(c.kind) ? null : (c.label ?? id));
-      shapes.push(c.shape);
-      chipNames.push(c.chip);
-      boxes.push(boxOf(c.shape ?? c.kind, c.x, c.y, c.rotation));
-    });
+      displayNets[n] = place.displayNets;
+      labels[n] = place.label;
+      shapes[n] = c.shape;
+      chipNames[n] = c.chip;
+      boxes[n] = place.box;
+    }
     this.labels = labels;
     this.displayNets = displayNets;
     this.shapes = shapes;
     this.chipNames = chipNames;
 
-    const starts: number[] = [0];
-    const points: number[] = [];
-    const nets: number[] = [];
-    const widthsOfWires: number[] = [];
-    const bitsOfWires: (Int32Array | null)[] = [];
-    const wireBoxes: Box[] = [];
-    const wireIds: string[] = [];
-    const wireEnds: { from: PinRef; to: PinRef }[] = [];
-    for (const [wireId, wire] of Object.entries(geometry.wires)) {
-      const from = geometry.components[wire.from.component];
-      const to = geometry.components[wire.to.component];
-      if (from === undefined || to === undefined || !indexOf.has(wire.from.component)) {
-        continue;
+    // Wires, likewise by bucket. A cached route stands while both its
+    // ends' `Placed` were used by this build — each is still its
+    // component's entry — which needs no lookup by id either; only a
+    // wire whose end changed is looked up and routed again.
+    const wireBuckets = Object.values(geometry.wires).map(bucket => {
+      let digest = wireDigests.get(bucket);
+      if (digest === undefined) {
+        digest = Object.keys(bucket).map(id => ({ id, wire: bucket[id]!, route: routeCache.get(bucket[id]!) ?? null }));
+        wireDigests.set(bucket, digest);
       }
-      const path = route(
-        pinAt(from.shape ?? from.kind, from.x, from.y, wire.from.pin, from.rotation),
-        pinAt(to.shape ?? to.kind, to.x, to.y, wire.to.pin, to.rotation),
-        slotOf(wire.to.pin)
-      );
-      for (const p of path) {
-        points.push(p.x, p.y);
+      return digest;
+    });
+    const routes: Route[] = [];
+    const wires: WireGeometry[] = [];
+    for (const digest of wireBuckets) {
+      for (const item of digest) {
+        let routed = item.route;
+        if (routed === null || routed.from.used !== build || routed.to.used !== build) {
+          const wire = item.wire;
+          const fromIndex = this.indexOf.get(wire.from.component);
+          const toIndex = this.indexOf.get(wire.to.component);
+          if (fromIndex === undefined || toIndex === undefined) {
+            continue;
+          }
+          const from = this.entries[fromIndex]!;
+          const to = this.entries[toIndex]!;
+          const path = route(
+            pinAt(from.shape ?? from.kind, from.x, from.y, wire.from.pin, from.rotation),
+            pinAt(to.shape ?? to.kind, to.x, to.y, wire.to.pin, to.rotation),
+            slotOf(wire.to.pin)
+          );
+          routed = { id: item.id, from: placed[fromIndex]!, to: placed[toIndex]!, points: path.flatMap(p => [p.x, p.y]), box: boundsOf(path), born: build, used: 0 };
+          item.route = routed;
+          routeCache.set(wire, routed);
+        }
+        routed.used = build;
+        routes.push(routed);
+        wires.push(item.wire);
       }
-      starts.push(points.length);
-      nets.push(wire.net);
-      widthsOfWires.push(wire.width);
-      bitsOfWires.push(wire.bits.length > 0 ? Int32Array.from(wire.bits) : null);
-      wireIds.push(wireId);
-      wireEnds.push({ from: wire.from, to: wire.to });
-      wireBoxes.push(boundsOf(path));
     }
-    this.wireCount = nets.length;
-    this.wireStart = Int32Array.from(starts);
-    this.wirePoints = Float32Array.from(points);
-    this.wireNet = Int32Array.from(nets);
-    this.wireWidth = Uint8Array.from(widthsOfWires);
+    const wireCount = routes.length;
+    this.wireCount = wireCount;
+    this.routes = routes;
+    this.wireIds = routes.map(r => r.id);
+    this.wireEnds = wires;
+    const starts = new Int32Array(wireCount + 1);
+    const wireNet = new Int32Array(wireCount);
+    const wireWidth = new Uint8Array(wireCount);
+    const bitsOfWires: (Int32Array | null)[] = new Array(wireCount);
+    const wireBoxes: Box[] = new Array(wireCount);
+    for (let w = 0; w < wireCount; w++) {
+      const wire = wires[w]!;
+      starts[w + 1] = starts[w]! + routes[w]!.points.length;
+      wireNet[w] = wire.net;
+      wireWidth[w] = wire.width;
+      bitsOfWires[w] = wire.bits.length > 0 ? Int32Array.from(wire.bits) : null;
+      wireBoxes[w] = routes[w]!.box;
+    }
+    const points = new Float32Array(starts[wireCount]!);
+    for (let w = 0; w < wireCount; w++) points.set(routes[w]!.points, starts[w]!);
+    this.wireStart = starts;
+    this.wirePoints = points;
+    this.wireNet = wireNet;
+    this.wireWidth = wireWidth;
     this.wireBits = bitsOfWires;
-    this.wireIds = wireIds;
-    this.wireEnds = wireEnds;
 
     // A loop rather than `Math.min(...boxes)`: thirty thousand arguments
     // is past what a call can take.
@@ -188,18 +239,12 @@ export class SceneIndex {
       bottom = Math.max(bottom, box.bottom);
     }
     this.bounds = left === Infinity ? { left: 0, top: 0, right: 0, bottom: 0 } : { left, top, right, bottom };
-    this.originX = Math.floor(this.bounds.left / CELL) * CELL;
-    this.originY = Math.floor(this.bounds.top / CELL) * CELL;
-    this.cellsX = Math.max(1, Math.ceil((this.bounds.right - this.originX) / CELL) + 1);
-    this.cellsY = Math.max(1, Math.ceil((this.bounds.bottom - this.originY) / CELL) + 1);
-    const componentCells = this.bucket(boxes);
-    const wireCells = this.bucket(wireBoxes);
-    this.cellComponentStart = componentCells.start;
-    this.cellComponents = componentCells.items;
-    this.cellWireStart = wireCells.start;
-    this.cellWires = wireCells.items;
+    this.componentGrid = grids(this.bounds, boxes);
+    this.wireGrid = grids(this.bounds, wireBoxes);
     this.componentStamp = new Uint32Array(this.componentCount);
     this.wireStamp = new Uint32Array(this.wireCount);
+    // Now, while the stamps say what this build reused from the last.
+    this.changed = previous === null ? [] : changedAreas(previous, this);
   }
 
   isGate(component: number): boolean {
@@ -337,35 +382,30 @@ export class SceneIndex {
     wire: ((index: number) => void) | null
   ): void {
     const epoch = ++this.epoch;
-    const x0 = this.cellX(area.left);
-    const x1 = this.cellX(area.right);
-    const y0 = this.cellY(area.top);
-    const y1 = this.cellY(area.bottom);
     if (area.right < this.bounds.left || area.left > this.bounds.right || area.bottom < this.bounds.top || area.top > this.bounds.bottom) {
       return;
     }
-    for (let cy = y0; cy <= y1; cy++) {
-      for (let cx = x0; cx <= x1; cx++) {
-        const cell = cy * this.cellsX + cx;
-        if (component !== null) {
-          for (let i = this.cellComponentStart[cell]!; i < this.cellComponentStart[cell + 1]!; i++) {
-            const c = this.cellComponents[i]!;
-            if (this.componentStamp[c] !== epoch) {
-              this.componentStamp[c] = epoch;
-              component(c);
-            }
-          }
+    if (component !== null) {
+      const stamp = this.componentStamp;
+      const visit = (c: number) => {
+        if (stamp[c] !== epoch) {
+          stamp[c] = epoch;
+          component(c);
         }
-        if (wire !== null) {
-          for (let i = this.cellWireStart[cell]!; i < this.cellWireStart[cell + 1]!; i++) {
-            const w = this.cellWires[i]!;
-            if (this.wireStamp[w] !== epoch) {
-              this.wireStamp[w] = epoch;
-              wire(w);
-            }
-          }
+      };
+      this.componentGrid.fine.visit(area, visit);
+      this.componentGrid.coarse.visit(area, visit);
+    }
+    if (wire !== null) {
+      const stamp = this.wireStamp;
+      const visit = (w: number) => {
+        if (stamp[w] !== epoch) {
+          stamp[w] = epoch;
+          wire(w);
         }
-      }
+      };
+      this.wireGrid.fine.visit(area, visit);
+      this.wireGrid.coarse.visit(area, visit);
     }
   }
 
@@ -392,34 +432,6 @@ export class SceneIndex {
     return [...nets].sort((a, b) => a - b);
   }
 
-  private cellX(x: number): number {
-    return Math.min(this.cellsX - 1, Math.max(0, Math.floor((x - this.originX) / CELL)));
-  }
-
-  private cellY(y: number): number {
-    return Math.min(this.cellsY - 1, Math.max(0, Math.floor((y - this.originY) / CELL)));
-  }
-
-  private bucket(boxes: readonly Box[]): { start: Int32Array; items: Int32Array } {
-    const counts = new Int32Array(this.cellsX * this.cellsY + 1);
-    const each = (box: Box, visit: (cell: number) => void) => {
-      for (let cy = this.cellY(box.top); cy <= this.cellY(box.bottom); cy++) {
-        for (let cx = this.cellX(box.left); cx <= this.cellX(box.right); cx++) {
-          visit(cy * this.cellsX + cx);
-        }
-      }
-    };
-    for (const box of boxes) {
-      each(box, cell => counts[cell + 1]!++);
-    }
-    for (let i = 1; i < counts.length; i++) {
-      counts[i]! += counts[i - 1]!;
-    }
-    const fill = counts.slice(0, -1);
-    const items = new Int32Array(counts[counts.length - 1]!);
-    boxes.forEach((box, n) => each(box, cell => (items[fill[cell]!++] = n)));
-    return { start: counts, items };
-  }
 }
 
 function distanceToSegment(p: Point, x0: number, y0: number, x1: number, y1: number): number {
@@ -437,55 +449,198 @@ function distanceToSegment(p: Point, x0: number, y0: number, x1: number, y1: num
  * these are left alone, so moving one gate redraws the tiles around it
  * and not the other ten thousand gates' worth.
  */
-export function changedAreas(before: SceneIndex, after: SceneIndex): Box[] {
+function changedAreas(before: SceneIndex, after: SceneIndex): Box[] {
   const areas: Box[] = [];
-  const boxOf = (s: SceneIndex, c: number): Box => ({
-    left: s.x[c]!,
-    top: s.y[c]!,
-    right: s.x[c]! + s.width(c),
-    bottom: s.y[c]! + s.height(c)
-  });
-  for (let c = 0; c < after.componentCount; c++) {
-    const was = before.indexOf.get(after.ids[c]!);
-    if (
-      was === undefined ||
-      before.x[was] !== after.x[c] ||
-      before.y[was] !== after.y[c] ||
-      before.kind[was] !== after.kind[c] ||
-      before.turns[was] !== after.turns[c]
-    ) {
-      areas.push(boxOf(after, c));
-      if (was !== undefined) areas.push(boxOf(before, was));
+  // What `after` reused from `before` is the same object, stamped with
+  // `after`'s build as it was reused, and what it made afresh was born
+  // in that build. So what is gone is what `before` has that was not
+  // stamped, and what is new is what was born — found without a set of
+  // thirty thousand. Only those are compared, by id and by value: a part
+  // whose entry is new because its nets were renumbered is drawn the
+  // same, and redraws nothing.
+  const build = after.build;
+  const gone = new Map<string, Placed>();
+  for (const place of before.placed) if (place.used !== build) gone.set(place.id, place);
+  for (const place of after.placed) {
+    if (place.born !== build) continue;
+    const was = gone.get(place.id);
+    if (was !== undefined) {
+      gone.delete(place.id);
+      const old = was.entry;
+      const entry = place.entry;
+      if (old.x === entry.x && old.y === entry.y && old.kind === entry.kind && old.rotation === entry.rotation && old.label === entry.label && old.shape === entry.shape && old.width === entry.width) {
+        continue;
+      }
+      areas.push(was.box);
     }
+    areas.push(place.box);
   }
-  for (let c = 0; c < before.componentCount; c++) {
-    if (!after.indexOf.has(before.ids[c]!)) areas.push(boxOf(before, c));
-  }
-  const routes = (s: SceneIndex) => {
-    const byId = new Map<string, { key: string; box: Box }>();
-    for (let w = 0; w < s.wireCount; w++) {
-      const points = Array.from(s.wirePoints.subarray(s.wireStart[w]!, s.wireStart[w + 1]!));
-      const xs = points.filter((_, i) => i % 2 === 0);
-      const ys = points.filter((_, i) => i % 2 === 1);
-      byId.set(s.wireIds[w]!, {
-        key: points.join(','),
-        box: { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) }
-      });
+  for (const place of gone.values()) areas.push(place.box);
+
+  const goneRoutes = new Map<string, Route>();
+  for (const route of before.routes) if (route.used !== build) goneRoutes.set(route.id, route);
+  for (const route of after.routes) {
+    if (route.born !== build) continue;
+    const was = goneRoutes.get(route.id);
+    if (was !== undefined) {
+      goneRoutes.delete(route.id);
+      if (was.points.length === route.points.length && was.points.every((v, i) => v === route.points[i])) continue;
+      areas.push(was.box);
     }
-    return byId;
-  };
-  const old = routes(before);
-  const now = routes(after);
-  for (const [id, route] of now) {
-    const was = old.get(id);
-    if (was === undefined || was.key !== route.key) {
-      areas.push(route.box);
-      if (was !== undefined) areas.push(was.box);
-    }
+    areas.push(route.box);
   }
-  for (const [id, route] of old) {
-    if (!now.has(id)) areas.push(route.box);
-  }
+  for (const route of goneRoutes.values()) areas.push(route.box);
   // Half a unit of margin: strokes and bubbles reach past their boxes.
   return areas.map(a => ({ left: a.left - 0.5, top: a.top - 0.5, right: a.right + 0.5, bottom: a.bottom + 0.5 }));
+}
+
+/** A wire's route, and the ends it was routed between. */
+export interface Route {
+  readonly id: string;
+  readonly from: Placed;
+  readonly to: Placed;
+  /** x then y. */
+  readonly points: readonly number[];
+  readonly box: Box;
+  /** The build that made it, and the last that used it. */
+  readonly born: number;
+  used: number;
+}
+
+/** A component's entry, and what the scene reads from it that takes working out. */
+export interface Placed {
+  readonly id: string;
+  readonly entry: ComponentGeometry;
+  readonly box: Box;
+  readonly valueNet: number;
+  readonly displayNets: Int32Array | null;
+  readonly label: string | null;
+  /** The build that made it, and the last that used it. */
+  readonly born: number;
+  used: number;
+}
+
+let builds = 0;
+const routeCache = new WeakMap<WireGeometry, Route>();
+const placedCache = new WeakMap<ComponentGeometry, Placed>();
+const placedDigests = new WeakMap<object, Placed[]>();
+const wireDigests = new WeakMap<object, { readonly id: string; readonly wire: WireGeometry; route: Route | null }[]>();
+
+function placeOf(id: string, c: ComponentGeometry, build: number): Placed {
+  const busPin = c.kind === 'input' || c.kind === 'constant' ? 'out' : 'in';
+  return {
+    id,
+    entry: c,
+    box: boxOf(c.shape ?? c.kind, c.x, c.y, c.rotation),
+    valueNet: (c.kind === 'output' || c.kind === 'probe' ? c.nets.in : c.nets.out) ?? -1,
+    displayNets:
+      c.width > 1 && (c.kind === 'input' || c.kind === 'constant' || c.kind === 'output' || c.kind === 'probe' || c.kind === 'hex')
+        ? Int32Array.from({ length: c.width }, (_, i) => c.nets[`${busPin}[${i}]`] ?? -1)
+        : c.kind === 'hex' || c.kind === 'seg7'
+          ? Int32Array.from(PINS[c.kind].inputs, pin => c.nets[pin] ?? -1)
+          : null,
+    label: isGate(c.kind) ? null : (c.label ?? id),
+    born: build,
+    used: 0
+  };
+}
+
+/**
+ * Items spread over more fine cells than this go in the coarse grid. A
+ * wire running the height of the benchmark's RAM crossed a hundred and
+ * fifty cells, and twenty thousand wires filled the index with a million
+ * entries — half of every rebuild.
+ */
+const SPREAD = 8;
+const COARSE = CELL * 8;
+
+interface Grids {
+  readonly fine: Grid;
+  readonly coarse: Grid;
+}
+
+function grids(bounds: Box, boxes: readonly Box[]): Grids {
+  const fine = new Grid(bounds, CELL);
+  const coarse = new Grid(bounds, COARSE);
+  const wide = new Uint8Array(boxes.length);
+  for (let i = 0; i < boxes.length; i++) wide[i] = fine.cellsCovered(boxes[i]!) > SPREAD ? 1 : 0;
+  return { fine: fine.fill(boxes, wide, 0), coarse: coarse.fill(boxes, wide, 1) };
+}
+
+/** A uniform grid over the scene's bounds: each cell's items, packed. */
+class Grid {
+  private readonly originX: number;
+  private readonly originY: number;
+  private readonly cellsX: number;
+  private readonly cellsY: number;
+  private readonly size: number;
+  private start = new Int32Array(1);
+  private items = new Int32Array(0);
+
+  constructor(bounds: Box, size: number) {
+    this.size = size;
+    this.originX = Math.floor(bounds.left / size) * size;
+    this.originY = Math.floor(bounds.top / size) * size;
+    this.cellsX = Math.max(1, Math.ceil((bounds.right - this.originX) / size) + 1);
+    this.cellsY = Math.max(1, Math.ceil((bounds.bottom - this.originY) / size) + 1);
+  }
+
+  cellsCovered(box: Box): number {
+    return (this.cellY(box.bottom) - this.cellY(box.top) + 1) * (this.cellX(box.right) - this.cellX(box.left) + 1);
+  }
+
+  /** Fills the grid with the boxes whose `group` is `take`. */
+  fill(boxes: readonly Box[], group: Uint8Array, take: number): this {
+    // Each box's cells, worked out once for both passes.
+    const range = new Int32Array(boxes.length * 4);
+    const counts = new Int32Array(this.cellsX * this.cellsY + 1);
+    for (let n = 0; n < boxes.length; n++) {
+      if (group[n] !== take) continue;
+      const box = boxes[n]!;
+      const x0 = this.cellX(box.left);
+      const x1 = this.cellX(box.right);
+      const y0 = this.cellY(box.top);
+      const y1 = this.cellY(box.bottom);
+      range[n * 4] = x0;
+      range[n * 4 + 1] = x1;
+      range[n * 4 + 2] = y0;
+      range[n * 4 + 3] = y1;
+      for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) counts[cy * this.cellsX + cx + 1]!++;
+    }
+    for (let i = 1; i < counts.length; i++) counts[i]! += counts[i - 1]!;
+    const fill = counts.slice(0, -1);
+    const items = new Int32Array(counts[counts.length - 1]!);
+    for (let n = 0; n < boxes.length; n++) {
+      if (group[n] !== take) continue;
+      const x0 = range[n * 4]!;
+      const x1 = range[n * 4 + 1]!;
+      for (let cy = range[n * 4 + 2]!, y1 = range[n * 4 + 3]!; cy <= y1; cy++) {
+        for (let cx = x0; cx <= x1; cx++) items[fill[cy * this.cellsX + cx]!++] = n;
+      }
+    }
+    this.start = counts;
+    this.items = items;
+    return this;
+  }
+
+  /** Each item in a cell the area covers; an item in several, once a cell. */
+  visit(area: Box, each: (index: number) => void): void {
+    if (this.items.length === 0) return;
+    const x0 = this.cellX(area.left);
+    const x1 = this.cellX(area.right);
+    for (let cy = this.cellY(area.top), y1 = this.cellY(area.bottom); cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const cell = cy * this.cellsX + cx;
+        for (let i = this.start[cell]!; i < this.start[cell + 1]!; i++) each(this.items[i]!);
+      }
+    }
+  }
+
+  private cellX(x: number): number {
+    return Math.min(this.cellsX - 1, Math.max(0, Math.floor((x - this.originX) / this.size)));
+  }
+
+  private cellY(y: number): number {
+    return Math.min(this.cellsY - 1, Math.max(0, Math.floor((y - this.originY) / this.size)));
+  }
 }
