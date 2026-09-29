@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 17 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 18 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -22,7 +22,8 @@ library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
 and a computer of 8,559 gates runs programs from a ROM, drawing on a
-32 × 16 LED matrix. Lockstep and Pong, Phase 18 on, are not built.
+32 × 16 LED matrix, in lockstep with the emulator. Pong, Phase 19 on,
+is not built.
 
 ---
 
@@ -1349,6 +1350,41 @@ trustworthy, and it runs in CI.
 
 **Exit:** the whole suite in lockstep with zero divergences, plus a
 randomised program fuzzer that runs for a minute without one.
+
+**Done.** `src/app/Lockstep.ts` runs the gate-level computer and the
+emulator side by side. The computer is the whole of it: CPU, ROM,
+memory and ports, the one `computerScene` builds. After every
+instruction it compares PC, A, B, X, the flags, the halt, all 128 bytes
+of RAM read off the latches, and both output ports. The first difference
+stops it with a message like:
+
+> Diverged at instruction 3, cycle 7: ADD #0x01 at 0x02 left RAM[0x45]
+> 0x05 on gates and 0x01 in the emulator, first in bit 2.
+
+- **The suite:** all seven programs run to their halt with no divergence
+  (`Lockstep.spec.ts`, in `pnpm test`).
+- **The fuzzer:** every ROM word a random instruction the ISA defines,
+  with a random operand and a rare `HLT`, and the buttons changing at
+  random, 5,000 instructions a program. `pnpm lockstep 60` ran 306
+  programs, 1,244,411 instructions at about 20,700 a second, with no
+  divergence. CI runs that minute on every push, and `pnpm test` runs 8
+  seconds of it.
+- **It catches what it should:**
+  - An emulator whose SUB sets C one value off diverged on the second
+    random program: `SUB 0x85 at 0x2B left C 0x01 on gates and 0x00 in
+    the emulator`.
+  - Gate RAM that let writes above 0x80 through diverged on the fifth:
+    `STA 0x3C,X` with X = 0x8F wrote 0x4B.
+  - The spec forces a latch and fakes a register, and checks the report
+    names the instruction, cycle, place and bit.
+- **The emulator's devices are the hardware's.** The buttons read what
+  the gate side's are set to. The frame tick is bit 9 of the clock edges
+  since reset, counted as the timer counts them: an instruction with `c`
+  cycles before it reads edge `c + 1`. A spec waits the tick up and
+  down, 1,024 cycles, in lockstep.
+- **Not the port-3 log.** Port 3 has no latch on the gate side, so what a
+  test program logs there is compared by the Phase 16 CPU spec, which
+  has its ports in JavaScript.
 
 ---
 

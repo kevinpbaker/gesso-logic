@@ -1,4 +1,4 @@
-# Typecheck, specs, and Phase 7's frame budget.
+# Typecheck, specs, Phase 18's lockstep, and Phase 7's frame budget.
 #
 # The proof's freeze check runs Chrome with SwiftShader, so there is a
 # GPU process to drive the render worker's frames while the page's main
@@ -24,5 +24,7 @@ jobs:
         run: bash scripts/ci-install.sh
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Lockstep, the gate-level computer against the emulator, a minute of fuzzing
+        run: pnpm lockstep 60
       - name: Frame budget
         run: pnpm proof

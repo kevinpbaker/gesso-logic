@@ -467,19 +467,20 @@ masks:  .byte 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80
 `;
 
 /**
- * The computer: the CPU chip, a ROM holding a program, memory and ports,
+ * The computer: the CPU chip, a ROM holding a program — source, or ROM
+ * words — memory and ports,
  * the LED matrix on the framebuffer, the buttons on `IN 0`, a hex display
  * on each `OUT` port, and a clock. It resets itself on the first clock
  * edge, and the program runs from there.
  */
-export function computerScene(program = THREE_INSTRUCTIONS, rate = 4): Circuit {
+export function computerScene(program: string | readonly number[] = THREE_INSTRUCTIONS, rate = 4): Circuit {
   const { chips: cpuChips, ...processorDefinition } = cpu();
   const { chips: ioChips, ...ioDefinition } = memoryAndPorts();
   const b = new CircuitBuilder();
   const processor = b.chip('cpu', 'CPU');
   const io = b.chip('memory', 'memory and ports');
-  const assembled = assemble(program);
-  const rom = b.rom('rom', [...assembled.rom.slice(0, assembled.size)]);
+  const words = typeof program === 'string' ? (({ rom, size }) => [...rom.slice(0, size)])(assemble(program)) : [...program];
+  const rom = b.rom('rom', words);
   const clock = b.clock('clk');
   // Power-on reset: a flip-flop fed 0 wakes set — every flip-flop here
   // does, by the order power-on settles latches in — and holds reset
