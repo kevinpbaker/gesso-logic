@@ -14,7 +14,7 @@
   "dependencies": {
     "gesso-components": "file:vendor/gesso-components-0.4.0-f183dffd.tgz",
     "gesso-core": "file:vendor/gesso-core-0.4.0-e0f99f0b.tgz",
-    "gesso-framework": "file:vendor/gesso-framework-0.4.0-321dce01.tgz",
+    "gesso-framework": "file:vendor/gesso-framework-0.4.0-09509557.tgz",
     "rxjs": "^7.8.2"
   },
   "devDependencies": {

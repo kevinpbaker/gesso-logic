@@ -213,6 +213,10 @@ to clone each container once per batch**, keeping track of which
 containers this batch has already copied. That's an engine change,
 logged under Phase 0b.
 
+**Fixed in Phase 0b.** A batch now copies each container once, and the
+`record` run at fit-all holds its frame: its patch phase is 0.41 ms,
+and 0.28 ms close up. Hex stays the contract, for the bytes.
+
 ---
 
 ## 3. The suspected gaps, confirmed or removed

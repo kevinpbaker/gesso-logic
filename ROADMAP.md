@@ -250,6 +250,15 @@ within a budget, and log it under Engine changes.
 
 **Exit:** the Phase 0 `record` run at fit-all holds its frame.
 
+**Done.** A batch now copies each container on its paths once and
+writes into its own copies after that. It never writes into what it
+was handed, or into a value a patch carried. `StorePatch.budget.spec.ts`
+counts the copies: a batch of 1,000 sets into a 10,000-entry value
+copied it 1,000 times, and now copies it once. The `record` run at
+fit-all holds its frame, with a patch phase of 0.41 ms (it was 420 s),
+and close up it is 0.28 ms (it was 33.9 ms). Hex chunks stay the
+contract: 51 patches and 6.7 KiB a publish against 908 and 62.7 KiB.
+
 Also found by Phase 0, by hand (PHASE0.md §5), and **done**:
 `overscrollBehavior="contain"` on an app's root did nothing in a
 mounted app. The wheel controller read the runtime's wrapper, not the
@@ -538,7 +547,8 @@ shipped in.
 
 | Phase | Change | Shipped in |
 | ----- | ------ | ---------- |
-| 0b    | `overscrollBehavior="contain"` works on an app's root and on any node, not only scroll containers, so a canvas can keep the wheel (`UiWheelController`, `GessoRuntime`) | uncommitted in `../gesso`; vendored here |
+| 0b    | `overscrollBehavior="contain"` works on an app's root and on any node, not only scroll containers, so a canvas can keep the wheel (`UiWheelController`, `GessoRuntime`) | gesso `94bb672` |
+| 0b    | `applyPatches` copies each container once per batch, not once per patch (`StorePatch`) | gesso `9327bcb` |
 
 ---
 

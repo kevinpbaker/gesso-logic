@@ -130,11 +130,11 @@ export function benchMatrix(): BenchRun[] {
   }
 
   // 5. The wire shape, with the most nets on screen and while panning.
-  //    `record` is measured only close up: at fit-all it sends ~900
-  //    patches a publish into a 10,000-key object, and the replica,
-  //    which clones the object once per patch, spent 420 s applying one
-  //    frame's worth. See PHASE0.md.
-  for (const shape of ['hex', 'base64'] as WireShape[]) {
+  //    `record` at fit-all sends ~900 patches a publish into a
+  //    10,000-key object. Before Phase 0b the replica copied that object
+  //    once per patch and fell minutes behind; these runs are that
+  //    phase's exit criterion.
+  for (const shape of ['hex', 'base64', 'record'] as WireShape[]) {
     add(`wire-${shape}-still-all`, { shape });
     add(`wire-${shape}-pan-mid`, { shape, motion: 'pan', zoom: 'mid' });
   }
