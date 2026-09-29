@@ -263,3 +263,35 @@ describe('the editor', () => {
     expect(sent).toEqual([['tabulate', ['g']]]);
   });
 });
+
+describe('the editor, from the menus', () => {
+  it('rotates, makes a chip and deletes the selection the way the keys do', () => {
+    const { editor, sent } = setup();
+    editor.selectOnly(['g', 'a', 'nothing']);
+    expect([...editor.selection].sort()).toEqual(['a', 'g']);
+    editor.rotateSelection();
+    editor.makeChip();
+    expect(sent).toContainEqual(['rotate', ['g', 'a']]);
+    expect(sent.find(s => s[0] === 'makeChip')).toBeDefined();
+    // Made into a chip, the parts are no longer selected here.
+    expect(editor.hasSelection).toBe(false);
+    editor.selectAll();
+    editor.deleteSelection();
+    expect(sent.find(s => s[0] === 'remove')).toBeDefined();
+    expect(editor.hasSelection).toBe(false);
+  });
+
+  it('says what the keys do for what is selected', () => {
+    const { editor } = setup();
+    expect(editor.hint).toMatch(/Drag from a pin/);
+    editor.selectOnly(['a']);
+    expect(editor.hint).toMatch(/flip it/);
+    editor.selectOnly(['a', 'g']);
+    expect(editor.hint).toMatch(/M make a chip/);
+    editor.startPlacing('and');
+    expect(editor.placing).toEqual({ what: 'and', chip: null });
+    expect(editor.hint).toMatch(/Esc stops/);
+    editor.cancel();
+    expect(editor.placing).toBeNull();
+  });
+});

@@ -79,28 +79,32 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   const cyclesPerPixel = () => span.value / Math.max(1, columns);
   const cycleAt = (x: number, v: AnalyserView) => Math.round(firstShown(v) + (x - GUTTER) * cyclesPerPixel());
 
+  /** The wave area's box: pointer positions are the page's, and the panel is not at its left edge. */
+  const waves = ctx.bounds('waves');
+  const xOf = (event: { x: number }) => event.x - waves.value.x;
+
   let drag: { x: number; start: number; moved: boolean } | null = null;
   const pointerDown = (event: UiPointerEvent) => {
     const v = view.value;
-    drag = { x: event.x, start: firstShown(v), moved: false };
+    drag = { x: xOf(event), start: firstShown(v), moved: false };
   };
   const pointerMove = (event: UiPointerEvent) => {
     if (drag === null) return;
-    const dx = event.x - drag.x;
+    const dx = xOf(event) - drag.x;
     if (Math.abs(dx) >= 3) drag.moved = true;
     if (drag.moved) start.value = Math.round(drag.start - dx * cyclesPerPixel());
   };
   const pointerUp = (event: UiPointerEvent) => {
-    if (drag !== null && !drag.moved && event.x >= GUTTER) cursor.value = cycleAt(event.x, view.value);
+    if (drag !== null && !drag.moved && xOf(event) >= GUTTER) cursor.value = cycleAt(xOf(event), view.value);
     drag = null;
   };
   const wheel = (event: UiWheelEvent) => {
     const v = view.value;
     if (event.modifiers.ctrl || event.modifiers.meta) {
       // About the pointer: the cycle under it stays under it.
-      const at = cycleAt(event.x, v);
+      const at = cycleAt(xOf(event), v);
       const next = Math.max(MIN_SPAN, Math.min(8192, Math.round(span.value * Math.exp(event.deltaY * 0.002))));
-      const fraction = (event.x - GUTTER) / Math.max(1, columns);
+      const fraction = (xOf(event) - GUTTER) / Math.max(1, columns);
       span.value = next;
       start.value = Math.round(at - fraction * next);
     } else {
@@ -207,6 +211,7 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
       <box
         width={percent(100)}
         height={view.pipe(map(v => Math.max(1, v.traces.length) * ROW))}
+        modifiers={[waves.modifier]}
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}

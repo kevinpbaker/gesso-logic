@@ -42,11 +42,13 @@ const panel = proof ? proofPanel(host, { global: 'gessologicProof' }) : null;
 const app = createApp({
   ...(panel?.options ?? {}),
   workerName: params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : proof ? 'proof' : undefined,
-  // Save and Open are the circuit's, not the page's. The shell has to
-  // say so before the render worker has heard of the key, or Chrome's
-  // "Save page as" opens over the canvas.
+  // Save, Open and Duplicate are the circuit's, not the page's, and so
+  // is F10, which goes to the menu bar. The shell has to say so before
+  // the render worker has heard of the key, or Chrome's "Save page as"
+  // opens over the canvas, and Ctrl+D bookmarks the page.
   interceptKey: event =>
-    (event.ctrlKey || event.metaKey) && !event.altKey && (event.key.toLowerCase() === 's' || event.key.toLowerCase() === 'o')
+    event.key === 'F10' ||
+    ((event.ctrlKey || event.metaKey) && !event.altKey && ['s', 'o', 'd'].includes(event.key.toLowerCase()))
 });
 panel?.attach(app);
 

@@ -15,9 +15,10 @@ import {
   type UiKeyboardEvent,
   type UiPasteEvent,
   type UiPointerEvent,
+  type UiNode,
   type UiWheelEvent
 } from 'gesso-core';
-import { each, FrameService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
+import { each, FocusService, FrameService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type Signals } from '../app/CircuitContract';
 import { intersects, type Box } from '../app/Layout';
@@ -65,12 +66,32 @@ export interface Camera {
 
 export type ZoomPreset = 'all' | 'mid' | 'close';
 
+/** What is selected, for the inspector: counts, and the one part when there is exactly one. */
+export interface SelectionSummary {
+  readonly parts: number;
+  readonly wires: number;
+  readonly one: {
+    readonly id: string;
+    readonly kind: Kind;
+    readonly width: number;
+    readonly label: string | null;
+    /** A chip's definition name; null for any other kind. */
+    readonly chip: string | null;
+  } | null;
+}
+
 export interface CanvasHandle {
   readonly element: UiChild;
   readonly camera: BehaviorSubject<Camera> & { value: Camera };
   readonly size: UiContainerSizeSource;
   /** Frames the camera: everything, a few hundred gates, or a few dozen. */
   show(preset: ZoomPreset): void;
+  /** Centres the view on these components, zooming out if they do not fit. */
+  frame(ids: readonly string[]): void;
+  /** Zooms about the middle of the view by a factor: 2 is twice as close. */
+  zoomBy(factor: number): void;
+  /** Components outlined as a problem — the ones oscillating — until it is set again. */
+  readonly highlight: BehaviorSubject<readonly string[]>;
   /** Whether there is a scene and a size to draw it at. */
   ready(): boolean;
   /** A scale within the canvas's zoom limits. */
@@ -89,6 +110,11 @@ export interface CanvasHandle {
   selectedChip(): string | null;
   /** The one component selected — its id, kind and width — or null for none or several. */
   selectedPart(): { readonly id: string; readonly kind: Kind; readonly width: number } | null;
+  selection(): SelectionSummary;
+  /** Puts the keyboard on the canvas, so its keys work again after a menu or a dialog. */
+  focus(): void;
+  /** A component's label, or null; for naming parts in messages. */
+  labelOf(id: string): string | null;
   /** Selection, gestures and the keys that drive them. */
   readonly editor: Editor;
   /** Bumped whenever the editor has something new to show. */
@@ -128,7 +154,13 @@ interface Tile {
   readonly drawLive: (surface: PaintSurface, box: PaintBox) => void;
 }
 
-export function circuitCanvas(ctx: ComponentContext, files: FileActions | null = null): CanvasHandle {
+/**
+ * A key the application answers before the editor sees it — the view
+ * and simulation shortcuts, help — returning whether it did.
+ */
+export type CanvasKeys = (key: string, ctrl: boolean, shift: boolean) => boolean;
+
+export function circuitCanvas(ctx: ComponentContext, files: FileActions | null = null, keys: CanvasKeys | null = null): CanvasHandle {
   const circuit = ctx.channel(Circuit);
   const size = new UiContainerSizeSource();
   const camera = internalState<Camera>({ x: 0, y: 0, scale: 1 }) as unknown as CanvasHandle['camera'];
@@ -503,14 +535,31 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
    * redrawn when either moves, and with nothing selected and no gesture
    * under way it records nothing and costs nothing.
    */
+  const highlight = new BehaviorSubject<readonly string[]>([]);
   const drawOverlay = (surface: PaintSurface) => {
     const c = camera.value;
     surface.scale(c.scale, c.scale);
     surface.translate(-c.x, -c.y);
+    // Parts that will not settle, ringed in the danger colour under the
+    // selection, so a click on the status bar's problem shows where.
+    const flagged = highlight.value;
+    if (flagged.length > 0) {
+      const px = 1 / c.scale;
+      surface.beginPath();
+      for (const id of flagged) {
+        const i = scene.indexOf.get(id);
+        if (i !== undefined) surface.rect(scene.x[i]! - 6 * px, scene.y[i]! - 6 * px, scene.width(i) + 12 * px, scene.height(i) + 12 * px);
+      }
+      surface.strokeColor('danger');
+      surface.lineWidth(3 * px);
+      surface.lineDash([6 * px, 4 * px]);
+      surface.stroke();
+      surface.lineDash([]);
+    }
     editor.drawOverlay(surface);
   };
-  const overlay = combineLatest([camera, editorChanged]).pipe(
-    map(([c, version]): UiPaint => ({ draw: drawOverlay, inputs: [c.x, c.y, c.scale, version] }))
+  const overlay = combineLatest([camera, editorChanged, highlight]).pipe(
+    map(([c, version, flagged]): UiPaint => ({ draw: drawOverlay, inputs: [c.x, c.y, c.scale, version, flagged.join(',')] }))
   );
 
   const show = (preset: ZoomPreset) => {
@@ -531,6 +580,34 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     const cx = (b.left + b.right) / 2;
     const cy = (b.top + b.bottom) / 2;
     camera.value = { scale, x: cx - s.width / scale / 2, y: cy - s.height / scale / 2 };
+  };
+
+  const frame = (ids: readonly string[]) => {
+    const s = size.current;
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const id of ids) {
+      const i = scene.indexOf.get(id);
+      if (i === undefined) continue;
+      left = Math.min(left, scene.x[i]!);
+      top = Math.min(top, scene.y[i]!);
+      right = Math.max(right, scene.x[i]! + scene.width(i));
+      bottom = Math.max(bottom, scene.y[i]! + scene.height(i));
+    }
+    if (s.width <= 0 || left === Infinity) return;
+    // Close enough to read the parts, and never closer than it is now
+    // unless they would not otherwise fit.
+    const fit = Math.min(s.width / (right - left + 16), s.height / (bottom - top + 16));
+    const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(fit, Math.max(camera.value.scale, 8))));
+    const cx = (left + right) / 2;
+    const cy = (top + bottom) / 2;
+    camera.value = { scale, x: cx - s.width / scale / 2, y: cy - s.height / scale / 2 };
+  };
+  const zoomBy = (factor: number) => {
+    const s = size.current;
+    zoomAt(s.width / 2, s.height / 2, factor);
   };
 
   // Frame the view when a document is opened, once there is a size to
@@ -570,8 +647,20 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
   // And where it is left is remembered, once the view comes to rest.
   ctx.effect(camera.pipe(debounceTime(400)), c => circuit.send.rememberCamera(c.x, c.y, c.scale));
 
+  const focusService = ctx.inject(FocusService);
+  let node: UiNode | null = null;
+  /**
+   * Where the canvas is on the page. Pointer events arrive in page
+   * coordinates, and the canvas stopped being the whole page when the
+   * menu bar and the palette arrived, so every position is taken
+   * relative to this before the editor or the camera sees it.
+   */
+  const box = ctx.bounds('canvas');
+  const local = (event: { x: number; y: number }) => ({ x: event.x - box.value.x, y: event.y - box.value.y });
   const element = (
     <box
+      ref={(n: UiNode | null) => (node = n)}
+      label="Circuit"
       width={percent(100)}
       height={percent(100)}
       overflow="hidden"
@@ -579,6 +668,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       containerSize={size}
       modifiers={[
         sizeContainer({ source: size }),
+        box.modifier,
         dropTarget({
           accepts: EXTERNAL_FILES,
           onDrop: payload => files?.openDropped(payload.data as readonly { name: string; bytes?: ArrayBuffer }[]),
@@ -587,15 +677,16 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       ]}
       onWheel={(event: UiWheelEvent) => {
         if (event.modifiers.ctrl || event.modifiers.meta) {
-          zoomAt(event.x, event.y, Math.exp(-event.deltaY * 0.002));
+          const at = local(event);
+          zoomAt(at.x, at.y, Math.exp(-event.deltaY * 0.002));
         } else {
           panBy(event.deltaX, event.deltaY);
         }
       }}
       focusable
-      onPointerDown={(event: UiPointerEvent) => editor.pointerDown({ x: event.x, y: event.y }, event.buttons, event.modifiers.shift)}
-      onPointerMove={(event: UiPointerEvent) => editor.pointerMove({ x: event.x, y: event.y }, event.buttons)}
-      onPointerUp={(event: UiPointerEvent) => editor.pointerUp({ x: event.x, y: event.y })}
+      onPointerDown={(event: UiPointerEvent) => editor.pointerDown(local(event), event.buttons, event.modifiers.shift)}
+      onPointerMove={(event: UiPointerEvent) => editor.pointerMove(local(event), event.buttons)}
+      onPointerUp={(event: UiPointerEvent) => editor.pointerUp(local(event))}
       onKeyDown={(event: UiKeyboardEvent) => {
         const ctrl = event.modifiers.ctrl || event.modifiers.meta;
         const key = event.key.toLowerCase();
@@ -605,13 +696,20 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
           event.preventDefault();
           return;
         }
+        if (keys?.(event.key, ctrl, event.modifiers.shift)) {
+          event.preventDefault();
+          return;
+        }
         if (editor.keyDown(event.key, event.modifiers.ctrl || event.modifiers.meta, event.modifiers.shift)) {
           event.preventDefault();
         }
       }}
       onKeyUp={(event: UiKeyboardEvent) => editor.keyUp(event.key)}
       onPaste={(event: UiPasteEvent) => editor.paste(event.text)}
-      onPinchMove={(event: UiPinchEvent) => zoomAt(event.x, event.y, event.scaleDelta)}>
+      onPinchMove={(event: UiPinchEvent) => {
+        const at = local(event);
+        zoomAt(at.x, at.y, event.scaleDelta);
+      }}>
       {each(visibleTiles, 'key', renderTile)}
       <paint position="absolute" left={0} top={0} width={percent(100)} height={percent(100)} paint={overlay} />
     </box>
@@ -622,6 +720,9 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     camera,
     size,
     show,
+    frame,
+    zoomBy,
+    highlight,
     ready: () => scene.componentCount > 0 && size.current.width > 0,
     clampScale: (scale: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)),
     tileCount: () => shown.length,
@@ -641,6 +742,36 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       const id = [...editor.selection][0]!;
       const c = scene.indexOf.get(id);
       return c === undefined ? null : { id, kind: scene.kindOf(c), width: scene.widths[c]! };
+    },
+    selection: () => {
+      let parts = 0;
+      let wires = 0;
+      for (const id of editor.selection) {
+        if (scene.indexOf.has(id)) parts++;
+        else wires++;
+      }
+      const only = parts === 1 && wires === 0 ? scene.indexOf.get([...editor.selection][0]!) : undefined;
+      return {
+        parts,
+        wires,
+        one:
+          only === undefined
+            ? null
+            : {
+                id: scene.ids[only]!,
+                kind: scene.kindOf(only),
+                width: scene.widths[only]!,
+                label: scene.labels[only] ?? null,
+                chip: scene.chipNames[only] ?? null
+              }
+      };
+    },
+    focus: () => {
+      if (node !== null) focusService.focus(node);
+    },
+    labelOf: (id: string) => {
+      const c = scene.indexOf.get(id);
+      return c === undefined ? null : scene.labels[c] ?? null;
     },
     selectedChip: () => {
       if (editor.selection.size !== 1) return null;

@@ -143,6 +143,47 @@ export class Editor {
     }
   }
 
+  /** The part on the pointer, while one is being placed; null otherwise. */
+  get placing(): { readonly what: Kind; readonly chip: string | null } | null {
+    return this.mode.kind === 'placing' ? { what: this.mode.what, chip: this.mode.chip ?? null } : null;
+  }
+
+  /**
+   * What can be done from here, for the status bar: the keys that act
+   * on what is selected, or on nothing, so that none of them has to be
+   * found by accident.
+   */
+  get hint(): string {
+    switch (this.mode.kind) {
+      case 'placing':
+        return `Placing ${this.mode.chip ?? this.mode.what}: click to drop it · Esc stops`;
+      case 'wiring':
+        return 'Release on a pin to connect · Esc cancels';
+      case 'moving':
+        return 'Arrow keys nudge a selection · Shift+arrows nudge by 4';
+      case 'marquee':
+        return 'Shift adds to the selection';
+      default:
+        break;
+    }
+    const scene = this.deps.scene();
+    const ids = this.selectedComponents();
+    if (ids.length === 0 && this.selection.size > 0) return 'Wire selected · Del deletes it';
+    if (ids.length === 0) {
+      return scene.componentCount === 0
+        ? 'Pick a part on the left, or press its key · Drag from a pin to wire · ? shows every shortcut'
+        : 'Drag from a pin to wire · Drag empty space to select · Space+drag or right-drag pans · Ctrl+wheel zooms · ? for shortcuts';
+    }
+    if (ids.length === 1) {
+      const c = scene.indexOf.get(ids[0]!);
+      const kind = c === undefined ? null : scene.kindOf(c);
+      if (kind === 'chip') return 'Double-click to open · R rotate · Ctrl+D duplicate · Del delete';
+      if (kind === 'input') return 'Click again to flip it · R rotate · Ctrl+D duplicate · Del delete';
+      if (kind === 'button') return 'Hold to press · R rotate · Ctrl+D duplicate · Del delete';
+    }
+    return 'R rotate · M make a chip · T truth table · Ctrl+D duplicate · Ctrl+C copy · Del delete';
+  }
+
   // -------------------------------------------------------------------------
   // Pointer
   // -------------------------------------------------------------------------
@@ -301,15 +342,13 @@ export class Editor {
           this.deps.send.redo();
           return true;
         case 'a':
-          this.select(this.deps.scene().ids, false);
-          this.deps.changed();
+          this.selectAll();
           return true;
         case 'c':
           this.copy();
           return true;
         case 'x':
-          this.copy();
-          this.deleteSelection();
+          this.cut();
           return true;
         case 'd':
           this.duplicate();
@@ -320,36 +359,22 @@ export class Editor {
     }
     switch (key) {
       case 'Escape':
-        this.mode = { kind: 'idle' };
-        this.selection.clear();
-        this.deps.changed();
+        this.cancel();
         return true;
       case 'Delete':
       case 'Backspace':
         this.deleteSelection();
         return true;
-      case 'm': {
-        // The selection made into a chip, in place.
-        const ids = this.selectedComponents();
-        if (ids.length > 0) {
-          this.deps.send.makeChip(ids);
-          // The selected parts are inside the chip now.
-          this.selection.clear();
-          this.deps.changed();
-        }
+      case 'm':
+        this.makeChip();
         return true;
-      }
-      case 't': {
-        // The truth table of the selection; with nothing selected, none.
-        this.deps.send.tabulate(this.selectedComponents());
+      case 't':
+        this.tabulate();
         return true;
-      }
       case 'r':
-      case 'R': {
-        const ids = this.selectedComponents();
-        if (ids.length > 0) this.deps.send.rotate(ids);
+      case 'R':
+        this.rotateSelection();
         return true;
-      }
       case 'ArrowLeft':
       case 'ArrowRight':
       case 'ArrowUp':
@@ -371,6 +396,68 @@ export class Editor {
         return false;
       }
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Commands, for the keys above and for the menus and toolbar
+  // -------------------------------------------------------------------------
+
+  /** Whether anything is selected: a part or a wire. */
+  get hasSelection(): boolean {
+    return this.selection.size > 0;
+  }
+
+  /** Whether any part — not only wires — is selected. */
+  get hasSelectedParts(): boolean {
+    return this.selectedComponents().length > 0;
+  }
+
+  /** Stops whatever is under way and lets go of the selection. */
+  cancel(): void {
+    this.mode = { kind: 'idle' };
+    this.selection.clear();
+    this.deps.changed();
+  }
+
+  selectAll(): void {
+    this.select(this.deps.scene().ids, false);
+    this.deps.changed();
+  }
+
+  /** Selects exactly these, as a click on each would; for the status bar's problem link. */
+  selectOnly(ids: readonly string[]): void {
+    const scene = this.deps.scene();
+    this.select(
+      ids.filter(id => scene.indexOf.has(id)),
+      false
+    );
+    this.deps.changed();
+  }
+
+  rotateSelection(): void {
+    const ids = this.selectedComponents();
+    if (ids.length > 0) this.deps.send.rotate(ids);
+  }
+
+  /** The selection made into a chip, in place. */
+  makeChip(): void {
+    const ids = this.selectedComponents();
+    if (ids.length > 0) {
+      this.deps.send.makeChip(ids);
+      // The selected parts are inside the chip now.
+      this.selection.clear();
+      this.deps.changed();
+    }
+  }
+
+  /** The truth table of the selection; with nothing selected, none. */
+  tabulate(): void {
+    this.deps.send.tabulate(this.selectedComponents());
+  }
+
+  cut(): void {
+    this.copy();
+    this.deleteSelection();
   }
 
   keyUp(key: string): void {
@@ -578,7 +665,7 @@ export class Editor {
     return [...this.selection].filter(id => scene.indexOf.has(id));
   }
 
-  private deleteSelection(): void {
+  deleteSelection(): void {
     if (this.selection.size === 0) return;
     this.deps.send.remove([...this.selection]);
     this.selection.clear();
@@ -590,7 +677,7 @@ export class Editor {
    * values, rates, which chip a chip is, and the definitions a chip
    * needs — and it publishes the text for the canvas to hand the shell.
    */
-  private copy(): void {
+  copy(): void {
     const ids = this.selectedComponents();
     if (ids.length > 0) this.deps.send.copy(ids);
   }
@@ -600,7 +687,7 @@ export class Editor {
    * picked here so the copies can be selected the moment they are asked
    * for: each selected part, and each wire between two of them.
    */
-  private duplicate(): void {
+  duplicate(): void {
     const ids = this.selectedComponents();
     if (ids.length === 0) return;
     const scene = this.deps.scene();

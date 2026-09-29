@@ -22,6 +22,7 @@ import type {
 import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_SAVE, NO_TABLE, type Buckets as GeometryBuckets } from './CircuitContract';
 import { Analyser } from './Analyser';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
+import { AssemblyError } from '../cpu/Assembler';
 import {
   connect,
   extract,
@@ -366,6 +367,21 @@ export class CircuitService {
                       ? computerScene(DIAGONAL, 60)
                       : { version: CIRCUIT_VERSION, components: [], wires: [] }
     );
+  }
+
+  loadProgram(name: string, source: string): void {
+    let circuit: Circuit;
+    try {
+      circuit = computerScene(source, 60);
+    } catch (error) {
+      if (!(error instanceof AssemblyError)) throw error;
+      this.message = `Couldn't assemble ${name}: ${error.message}`;
+      this.documentSubject.next(this.summary());
+      return;
+    }
+    this.load(circuit);
+    this.message = `Loaded the computer, running ${name}`;
+    this.documentSubject.next(this.summary());
   }
 
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void {
@@ -778,7 +794,11 @@ export class CircuitService {
       }
     }
     this.sample(simulator);
-    this.publish(false);
+    // A slice that stopped the run — an oscillation, or the analyser's
+    // trigger — publishes whatever the interval says: left to the
+    // interval, the last status said "running" for good and the problem
+    // that stopped it was never shown.
+    this.publish(!this.running);
     if (this.running) {
       this.queueSlice();
     }

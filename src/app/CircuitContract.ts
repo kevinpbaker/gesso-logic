@@ -237,6 +237,12 @@ export interface CircuitCommands {
   redo(): void;
   /** Replaces the document with a named one, and forgets its history. */
   loadScene(name: SceneName): void;
+  /**
+   * Replaces the document with the computer, running this program's
+   * assembly source from its ROM; `name` is what to call it when it
+   * does not assemble.
+   */
+  loadProgram(name: string, source: string): void;
   /** Drives an input component, as a person flipping a switch does. */
   /** Sets a switch: a bit, or for a wide one a number. */
   setInput(id: string, value: number): void;

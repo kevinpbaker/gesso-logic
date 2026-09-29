@@ -292,3 +292,26 @@ describe('CircuitService history', () => {
     expect(h.status.cycles).toBe(2);
   });
 });
+
+describe('loadProgram', () => {
+  it('opens the computer running the program, and says so', () => {
+    const service = new CircuitService({ schedule: () => {}, now: () => 0 });
+    let summary!: import('./CircuitContract').DocumentSummary;
+    service.document.subscribe(d => (summary = d));
+    service.loadProgram('tiny.asm', 'LDA #1\nHLT\n');
+    expect(summary.gates).toBeGreaterThan(1000);
+    expect(summary.message).toBe('Loaded the computer, running tiny.asm');
+    expect(summary.dirty).toBe(false);
+  });
+
+  it('keeps the document and says why when the program does not assemble', () => {
+    const service = new CircuitService({ schedule: () => {}, now: () => 0 });
+    let summary!: import('./CircuitContract').DocumentSummary;
+    service.document.subscribe(d => (summary = d));
+    service.loadScene('counter');
+    const gates = summary.gates;
+    service.loadProgram('broken.asm', 'NOPE 1\n');
+    expect(summary.gates).toBe(gates);
+    expect(summary.message).toMatch(/^Couldn't assemble broken\.asm/);
+  });
+});

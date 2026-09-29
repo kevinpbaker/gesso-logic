@@ -34,6 +34,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         undo: () => service.undo(),
         redo: () => service.redo(),
         loadScene: name => service.loadScene(name),
+        loadProgram: (name, source) => service.loadProgram(name, source),
         setInput: (id, value) => service.setInput(id, value),
         setWidth: (ids, width) => service.setWidth(ids, width),
         run: () => service.run(),
