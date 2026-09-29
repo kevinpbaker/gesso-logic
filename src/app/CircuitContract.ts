@@ -151,7 +151,7 @@ export interface Signals {
 export type ClockRate = number | 'max';
 
 /** The documents the application can open by name, until Phase 6 opens files. */
-export type SceneName = 'empty' | 'bench' | 'counter' | 'adder' | 'bus adder';
+export type SceneName = 'empty' | 'bench' | 'counter' | 'adder' | 'bus adder' | 'ram';
 
 export interface Status {
   readonly running: boolean;

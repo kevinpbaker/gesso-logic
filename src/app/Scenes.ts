@@ -5,6 +5,7 @@ import { dFlipFlop } from '../sim/Parts';
 import { pinsOf } from '../sim/Chips';
 import { PINS, type GateKind } from '../sim/Primitives';
 import { shapeOf, sizeOf } from './Layout';
+import { ram } from './Generators';
 
 /**
  * Circuits the application starts with, until Phase 6 opens files.
@@ -374,4 +375,28 @@ function mulberry32(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
   };
+}
+
+/**
+ * Phase 14's exit, as a scene: the generated 128-byte RAM as a chip,
+ * between switches for the address and the data, buttons for write
+ * enable and reset, and hex displays of all three. Double-click it to
+ * open it: rows, then bytes, then the latches.
+ */
+export function ramScene(): Circuit {
+  const { chips, ...definition } = ram(128);
+  const b = new CircuitBuilder();
+  const memory = b.chip('ram', 'RAM 128');
+  const address = b.input('A', 0x05, 7);
+  const data = b.input('D', 0x5a, 8);
+  b.connect(address, { component: memory, pin: 'A' });
+  b.connect(data, { component: memory, pin: 'D' });
+  b.connect(b.button('we'), { component: memory, pin: 'we' });
+  b.connect(b.button('rst'), { component: memory, pin: 'rst' });
+  const q = { component: memory, pin: 'Q' };
+  b.display('hex', 'address', { in: address }, 7);
+  b.display('hex', 'data', { in: data }, 8);
+  b.display('hex', 'read', { in: q }, 8);
+  b.output('Q', q, 8);
+  return layOut({ ...b.build(), chips: { ...chips, 'RAM 128': definition as Circuit } });
 }

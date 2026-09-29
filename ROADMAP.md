@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 13 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 14 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -20,8 +20,9 @@ have switches, buttons, probes and displays to work them with. They
 save to files and come back after a reload. Chips, buses, a standard
 library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
-ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler;
-the CPU itself, Phase 14 on, is not built.
+ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
+and its RAM and register file are generated. The CPU itself, Phase 15
+on, is not built.
 
 ---
 
@@ -1117,6 +1118,47 @@ for each generated chip, at the size the CPU uses.
 
 **Exit:** a 128-byte RAM chip that the editor opens, and that passes a
 write-then-read-every-address spec.
+
+**Done.** `src/app/Generators.ts` builds the parts, and `pnpm generate`
+writes them to `circuits/`: `ram-128.gessologic.json` and
+`register-file.gessologic.json`. A spec fails when those files are
+stale. The toolbar's **RAM** button loads the RAM as a chip between
+switches for the address and data, buttons for `we` and `rst`, and hex
+displays. In Chrome: `rst` read back 00, `we` wrote 5A, and the chip
+opened onto its rows, a row onto its bytes, and a byte onto its latches.
+The specs write a pattern to all 128 addresses and read it back, rewrite
+every byte in reverse, check that reset clears it, that it holds while
+`we` is low, the 16-, 32- and 256-byte sizes, and the register file's
+loads.
+
+- **RAM 128 is 6,572 gates,** under the budget's 6,900:
+  - 128 `RAM byte`s of 42 gates each: eight library D latches, the
+    enable `(sel · we) + rst`, and eight ANDs putting the byte on `Q`
+    only while selected;
+  - 8 `RAM row`s, each with 16 select ANDs and a 16-way OR tree;
+  - a 4 → 16 and a 3 → 8 decoder, 43 gates together;
+  - an 8-way OR tree, and the reset gating on `D`.
+- **Decoding is shared.** A decoder above two bits is two smaller
+  decoders and an AND per output, so 7 → 128 costs 43 gates, not the
+  800 the budget allowed. Most of the gates are the RAM's read path and
+  latches, as the budget expected.
+- **Reset is in the RAM,** because `ISA.md` promises it and lockstep
+  will check it. While `rst` is high every byte is open and `D` is
+  forced to 0. That costs 137 gates, against about 1,000 for a clear
+  input on every latch.
+- **Writing is level-sensitive:** `we` must rise after `A` and `D` are
+  steady and fall before they change. Phase 16's control unit owns that
+  strobe.
+- **Generated levels get their own layout** (`layered` in
+  `Generators.ts`). Each part sits one column past its furthest driver,
+  so the decoders come before the rows they select and signals only run
+  left to right. `layOut` places by the nearest source, which put the
+  rows ahead of their decoder.
+- **The register file** is three library `register 8`s, A, B and X,
+  with one `D`, a load line each and an output each: the datapath reads
+  all three at once, so there are no read ports. 312 gates.
+- **The framebuffer taps,** the RAM's top 64 bytes as outputs for the
+  LED matrix, are Phase 17's. The generator is where they'll be added.
 
 ## Phase 15 — The datapath
 
