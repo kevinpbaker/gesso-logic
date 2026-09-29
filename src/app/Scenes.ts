@@ -5,7 +5,8 @@ import { dFlipFlop } from '../sim/Parts';
 import { chipInterface, pinsOf } from '../sim/Chips';
 import { PINS, type GateKind } from '../sim/Primitives';
 import { shapeOf, sizeOf } from './Layout';
-import { datapath, ram } from './Generators';
+import { assemble } from '../cpu/Assembler';
+import { cpu, datapath, ram } from './Generators';
 
 /**
  * Circuits the application starts with, until Phase 6 opens files.
@@ -423,4 +424,47 @@ export function datapathScene(): Circuit {
     else b.output(pin.name, out);
   }
   return layOut({ ...b.build(), chips: { ...chips, datapath: definition as Circuit } });
+}
+
+/** The program Phase 16's exit runs: three instructions, and a halt. */
+export const THREE_INSTRUCTIONS = `
+        LDA #5
+        ADD #3          ; A = 8
+        HLT
+`;
+
+/**
+ * Phase 16's exit, as a scene: the CPU chip, a ROM holding a program,
+ * and the clock. `M` carries the ROM's table port when the CPU asks for
+ * a table byte, and 0 otherwise — RAM and devices come with Phase 17.
+ * `rst` starts on: flip it off and the program runs, then halts.
+ */
+export function computerScene(program = THREE_INSTRUCTIONS): Circuit {
+  const { chips, ...definition } = cpu();
+  const b = new CircuitBuilder();
+  const processor = b.chip('cpu', 'CPU');
+  const rom = b.rom('rom', [...assemble(program).rom.slice(0, assemble(program).size)]);
+  const clock = b.clock('clk');
+  const rst = b.input('rst', 1);
+  b.connect(clock, { component: processor, pin: 'clk' });
+  b.connect(rst, { component: processor, pin: 'rst' });
+  b.connect({ component: processor, pin: 'PC' }, { component: rom, pin: 'A' });
+  b.connect({ component: rom, pin: 'D' }, { component: processor, pin: 'I' });
+  b.connect({ component: processor, pin: 'ADDR' }, { component: rom, pin: 'T' });
+  const m = b.chip('M', 'mux 2 ×8');
+  b.connect(b.constant(0, 'no memory', 8), { component: m, pin: 'A' });
+  b.connect({ component: rom, pin: 'Q' }, { component: m, pin: 'B' });
+  b.connect({ component: processor, pin: 'table' }, { component: m, pin: 's' });
+  b.connect({ component: m, pin: 'Y' }, { component: processor, pin: 'M' });
+  b.display('hex', 'PC', { in: { component: processor, pin: 'PC' } }, 8);
+  b.display('hex', 'A', { in: { component: processor, pin: 'A' } }, 8);
+  b.display('hex', 'B', { in: { component: processor, pin: 'B' } }, 8);
+  b.display('hex', 'X', { in: { component: processor, pin: 'X' } }, 8);
+  b.output('halted', { component: processor, pin: 'halted' });
+  const built = b.build();
+  return layOut({
+    ...built,
+    components: built.components.map(c => (c.kind === 'clock' ? { ...c, rate: 4 } : c)),
+    chips: { ...chips, CPU: definition as Circuit }
+  });
 }

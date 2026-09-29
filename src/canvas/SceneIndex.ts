@@ -35,9 +35,10 @@ export const KIND_INDEX: Readonly<Record<Kind, number>> = {
   seg7: 14,
   chip: 15,
   split: 16,
-  join: 17
+  join: 17,
+  rom: 18
 };
-export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7', 'chip', 'split', 'join'];
+export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7', 'chip', 'split', 'join', 'rom'];
 
 export class SceneIndex {
   readonly componentCount: number;

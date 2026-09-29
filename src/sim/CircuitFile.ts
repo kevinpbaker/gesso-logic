@@ -1,6 +1,6 @@
 import { CIRCUIT_VERSION, type Circuit, type Component, type PinRef, type Rotation, type Wire } from './Circuit';
 import { pinsOf } from './Chips';
-import { MAX_WIDTH, PINS, widthOf, type Kind } from './Primitives';
+import { MAX_WIDTH, PINS, ROM_WORDS, widthOf, type Kind } from './Primitives';
 
 /** The kinds that may have a width. */
 const WIDTHED: ReadonlySet<Kind> = new Set(['input', 'constant', 'output', 'probe', 'hex', 'split', 'join']);
@@ -65,7 +65,8 @@ export function writeCircuit(circuit: Circuit): string {
       ...(c.value !== undefined ? { value: c.value } : {}),
       ...(c.width !== undefined ? { width: c.width } : {}),
       ...(c.rate !== undefined ? { rate: c.rate } : {}),
-      ...(c.chip !== undefined ? { chip: c.chip } : {})
+      ...(c.chip !== undefined ? { chip: c.chip } : {}),
+      ...(c.rom !== undefined ? { rom: c.rom } : {})
     });
   const wire = (w: Wire) =>
     JSON.stringify({
@@ -185,6 +186,13 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
     if (kind === 'chip' && (typeof chip !== 'string' || !chipNames.has(chip))) {
       throw new CircuitFileError(`${here}.chip: ${JSON.stringify(chip)} is not a chip this file defines`);
     }
+    const rom = raw['rom'];
+    if (rom !== undefined) {
+      if (kind !== 'rom') throw new CircuitFileError(`${here}.rom: a ${kind} has no words`);
+      if (!Array.isArray(rom) || rom.length > ROM_WORDS || !rom.every(w => Number.isInteger(w) && w >= 0 && w <= 0xffff)) {
+        throw new CircuitFileError(`${here}.rom: not a list of at most ${ROM_WORDS} words from 0 to 0xFFFF`);
+      }
+    }
     kinds.set(id, kind as Kind);
     components.push({
       id,
@@ -196,7 +204,8 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
       ...(value !== undefined ? { value } : {}),
       ...(width !== undefined ? { width } : {}),
       ...(rate !== undefined ? { rate } : {}),
-      ...(kind === 'chip' ? { chip: chip as string } : {})
+      ...(kind === 'chip' ? { chip: chip as string } : {}),
+      ...(rom !== undefined ? { rom: rom as number[] } : {})
     });
   }
 

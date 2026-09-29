@@ -20,7 +20,18 @@ export type ChipKind = 'chip';
  * they cost no gate and no tick.
  */
 export type BusKind = 'split' | 'join';
-export type Kind = GateKind | SourceKind | DisplayKind | ChipKind | BusKind;
+/**
+ * The program ROM: 256 words of 16 bits, looked up, not built of gates —
+ * the one part the showpiece's gate count leaves out, as Logisim's ROM
+ * is. Two read ports: `A` → `D` for instructions, `T` → `Q` for a word's
+ * low byte, which `LDT` reads tables through. Each takes a tick, as a
+ * gate does. Its words are the component's `rom`.
+ */
+export type MemoryKind = 'rom';
+export type Kind = GateKind | SourceKind | DisplayKind | ChipKind | BusKind | MemoryKind;
+
+/** A ROM's size in words, and its ports' widths. */
+export const ROM_WORDS = 256;
 
 export const GATE_KINDS: readonly GateKind[] = ['not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor'];
 
@@ -77,7 +88,8 @@ export const PINS: Readonly<Record<Kind, PinSpec>> = {
   chip: { inputs: [], outputs: [] },
   // Their pins depend on their width; ask `pinsOf`. These are an 8-bit one's shape without the bits.
   split: { inputs: ['in'], outputs: [] },
-  join: { inputs: [], outputs: ['out'] }
+  join: { inputs: [], outputs: ['out'] },
+  rom: { inputs: ['A', 'T'], outputs: ['D', 'Q'], widths: { A: 8, T: 8, D: 16, Q: 8 } }
 };
 
 /** Parts a person drives: switches and push buttons. */

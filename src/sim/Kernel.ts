@@ -84,9 +84,19 @@ export interface Kernel {
   readonly moved: number;
 }
 
-export function createKernel(netlist: Netlist): Kernel {
+/**
+ * `extra`: changes a tick may add beyond one a gate — a ROM's outputs.
+ * `watched`: nets something outside the kernel reads — a ROM's addresses.
+ * Each gets an edge of its own onto a scratch net past the last, which
+ * nothing reads: the edge makes the net count as read, so a change to it
+ * is queued for the next tick, where the ROM sees it.
+ */
+export function createKernel(netlist: Netlist, extra = 0, watched: readonly number[] = []): Kernel {
   const { type, in0, in1, out, fanStart, fanGate, netCount, gateCount } = netlist;
-  const edgeCount = fanGate.length;
+  const scratch = netCount;
+  const isWatched = new Uint8Array(netCount);
+  for (const net of watched) isWatched[net] = 1;
+  const edgeCount = fanGate.length + watched.length;
   let at = 0;
   const region = (bytes: number) => {
     const start = at;
@@ -95,23 +105,31 @@ export function createKernel(netlist: Netlist): Kernel {
   };
   const header = region(HEADER_WORDS * 4);
   const truth = region(32);
-  region(netCount);
+  region(netCount + 1);
   const edges = region(edgeCount * 8);
   const edgeStart = region((netCount + 1) * 4);
   const changed = region(netCount * 4);
   // A change an evaluation at most, and one written past the last kept.
-  const found = region((Math.max(edgeCount, gateCount) + 1) * 4);
+  const foundCount = Math.max(edgeCount, gateCount) + extra + 1;
+  const found = region(foundCount * 4);
   const memory = new WebAssembly.Memory({ initial: Math.max(1, Math.ceil(at / 65536)) });
   const buffer = memory.buffer;
   const words = new Int32Array(buffer);
 
   new Uint8Array(buffer, truth, TRUTH.length).set(TRUTH);
+  let edge = 0;
   for (let n = 0; n < netCount; n++) {
-    words[(edgeStart >> 2) + n] = edges + fanStart[n]! * 8;
-    for (let f = fanStart[n]!; f < fanStart[n + 1]!; f++) {
+    words[(edgeStart >> 2) + n] = edges + edge * 8;
+    for (let f = fanStart[n]!; f < fanStart[n + 1]!; f++, edge++) {
       const g = fanGate[f]!;
-      words[(edges >> 2) + f * 2] = in0[g] === n ? in1[g]! : in0[g]!;
-      words[(edges >> 2) + f * 2 + 1] = (type[g]! << TYPE_SHIFT) | out[g]!;
+      words[(edges >> 2) + edge * 2] = in0[g] === n ? in1[g]! : in0[g]!;
+      words[(edges >> 2) + edge * 2 + 1] = (type[g]! << TYPE_SHIFT) | out[g]!;
+    }
+    if (isWatched[n]) {
+      // An AND of the net with itself, onto the scratch net.
+      words[(edges >> 2) + edge * 2] = n;
+      words[(edges >> 2) + edge * 2 + 1] = (1 << TYPE_SHIFT) | scratch;
+      edge++;
     }
   }
   words[(edgeStart >> 2) + netCount] = edges + edgeCount * 8;
@@ -128,7 +146,7 @@ export function createKernel(netlist: Netlist): Kernel {
   return {
     value: new Uint8Array(buffer, VALUES, netCount),
     changed: new Int32Array(buffer, changed, netCount),
-    found: new Int32Array(buffer, found, Math.max(edgeCount, gateCount) + 1),
+    found: new Int32Array(buffer, found, foundCount),
     evaluate: exports.evaluate,
     apply: exports.apply,
     settle: exports.settle,

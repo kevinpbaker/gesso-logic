@@ -457,6 +457,7 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
           {button('Bus adder', () => circuit.send.loadScene('bus adder'))}
           {button('RAM', () => circuit.send.loadScene('ram'))}
           {button('Datapath', () => circuit.send.loadScene('datapath'))}
+          {button('Computer', () => circuit.send.loadScene('computer'))}
           {button('Bench scene', () => circuit.send.loadScene('bench'))}
           {button('Truth table T', () => circuit.send.tabulate([...canvas.editor.selection]))}
           {button('Make chip M', () => canvas.editor.keyDown('m', false, false))}

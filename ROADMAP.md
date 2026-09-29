@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 15 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 16 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -21,8 +21,8 @@ save to files and come back after a reload. Chips, buses, a standard
 library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
-and its RAM and datapath are generated. The control unit, Phase 16 on,
-is not built.
+and a CPU of 1,666 gates runs programs from a ROM. Memory and devices,
+Phase 17 on, are not wired to it yet.
 
 ---
 
@@ -1226,6 +1226,61 @@ cycle, checked against `ISA.md`.
 
 **Exit:** the CPU chip, complete, runs a three-instruction program from
 the ROM and halts.
+
+**Done.** The toolbar's **Computer** button loads the CPU chip, a ROM
+holding `LDA #5`, `ADD #3`, `HLT`, and a 4 Hz clock. `rst` starts on.
+In Chrome: Run, then flip `rst` off, and the program runs and halts
+with PC at 03 and A at 08. The spec runs the same scene: six cycles
+after reset, halted, A = 8.
+
+- **The ROM is a new primitive** (`rom` in `Primitives.ts`): 256
+  sixteen-bit words, kept in the component's `rom` field and in the
+  file. It has two read ports, `A` → `D` for instructions and `T` → `Q`
+  for `LDT`'s table bytes. Each port takes a tick, as a gate does. It
+  isn't gates, so it isn't counted, as the showpiece's rules say. The
+  simulator looks it up in JavaScript between ticks, when an address
+  it reads changed on the tick before. Two consequences:
+  - Each address net gets a dummy edge in the WebAssembly kernel onto a
+    scratch net, so the kernel queues a change to it.
+  - A circuit with a ROM settles one tick at a time from JavaScript,
+    instead of in the kernel's own settle loop. Circuits without one are
+    unchanged.
+
+  It draws as a chip body named ROM.
+- **The control unit is generated from the control table,** 343 gates
+  against the budget's 500:
+  - a step flip-flop (fetch, execute) and a halted flip-flop that `HLT`
+    sets and `rst` clears;
+  - two 4 → 16 decoders on the opcode's nibbles, and an AND for each of
+    the 49 opcodes;
+  - each control line the OR of the opcodes whose row raises it, ANDed
+    with execute; `jump` is each jump's opcode ANDed with its flag.
+
+  A reserved opcode raises nothing.
+- **Strobes:** `we` and `out` are the store and port-write lines ANDed
+  with the clock being low. So a write happens in the second half of the
+  execute cycle, after the address and data have settled, and ends
+  before the edge that moves them.
+- **Checked three ways:**
+  - Every opcode, on both cycles, under all eight flag combinations,
+    against the table, strobes included.
+  - The whole CPU against the emulator on all seven test programs,
+    cycle by cycle, with ROM, RAM and ports in JavaScript: PC, A, B, X
+    and all of RAM after every instruction, and the port log at the end.
+  - Mutations: jumps with their conditions inverted fail five programs;
+    a halt that doesn't hold fails all seven.
+- **The CPU chip** is the control unit and the datapath: 1,323 + 343 =
+  1,666 gates. Its pins: `I`, `M`, `rst`, `clk` in; `PC`, `ADDR`, `D`,
+  `K`, `we`, `out`, `table`, `port`, `halted`, and A, B, X out.
+  `circuits/cpu.gessologic.json` is the file.
+- **Speed:** the computer scene runs a four-instruction loop at about
+  100 kHz headless, with 1,578 evaluations and 28 ticks a cycle. That's
+  with the ROM looked up between ticks, and no RAM yet. Pong's budget
+  is 30 kHz.
+- **Not yet:** a CPU resets only when told to. The latches wake as
+  power-on's document order leaves them, and nothing in gates can tell
+  power-on from any other moment, so the scene starts with `rst` on.
+  The Pong page will need to pulse it at load.
 
 ## Phase 17 — Memory and devices
 

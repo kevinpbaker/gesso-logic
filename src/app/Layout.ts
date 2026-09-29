@@ -58,6 +58,9 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
   // Placeholders too: a split's or join's shape depends on its width; see `busShape`.
   split: { width: 2, height: 9, pins: { in: { x: 0, y: 1 } } },
   join: { width: 2, height: 9, pins: { out: { x: 2, y: 1 } } },
+  // The ROM: an instruction port and a table port, each an address in
+  // on the left and its word out on the right.
+  rom: { width: 8, height: 6, pins: { A: { x: 0, y: 1 }, T: { x: 0, y: 3 }, D: { x: 8, y: 1 }, Q: { x: 8, y: 3 } } },
   seg7: {
     width: 5,
     height: 8,

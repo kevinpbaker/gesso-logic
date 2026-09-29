@@ -70,6 +70,8 @@ export interface Component {
   readonly rate?: number;
   /** A `chip`'s definition, by its name in the document's `chips`. */
   readonly chip?: string;
+  /** A `rom`'s words, from address 0; a word not given is 0. */
+  readonly rom?: readonly number[];
 }
 
 export interface PinRef {

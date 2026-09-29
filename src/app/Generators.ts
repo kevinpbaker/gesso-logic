@@ -1,6 +1,8 @@
 import type { Circuit, Component, PinRef } from '../sim/Circuit';
 import { pinsOf } from '../sim/Chips';
 import { CircuitBuilder } from '../sim/CircuitBuilder';
+import { ALU_OP, EXECUTE, RIGHT, type Lines } from '../cpu/Control';
+import { INSTRUCTIONS } from '../cpu/Isa';
 import { library, libraryWithDependencies } from '../sim/Library';
 import { shapeOf, sizeOf } from './Layout';
 import { layOut } from './Scenes';
@@ -660,11 +662,180 @@ export function datapath(): Generated {
   return { ...done, chips: { ...done.chips, 'register file': file as Circuit } };
 }
 
+// ---------------------------------------------------------------------------
+// The control unit
+// ---------------------------------------------------------------------------
+
+/** ORs a list of pins as a balanced tree; none is a constant 0. */
+function any(b: CircuitBuilder, pins: readonly PinRef[], label: string): PinRef {
+  if (pins.length === 0) return b.constant(0, `${label} (none)`);
+  let level = [...pins];
+  let n = 0;
+  while (level.length > 1) {
+    const next: PinRef[] = [];
+    for (let i = 0; i + 1 < level.length; i += 2) next.push(b.or(level[i]!, level[i + 1]!, `${label} ${n++}`));
+    if (level.length % 2 === 1) next.push(level[level.length - 1]!);
+    level = next;
+  }
+  return level[0]!;
+}
+
+/**
+ * The control unit, hardwired from the control table (`src/cpu/Control.ts`):
+ * opcode decode crossed with a cycle counter, one row an opcode.
+ *
+ *   - **step** is a flip-flop: fetch, then execute, then fetch. `rst`
+ *     puts it at fetch.
+ *   - **halted** is a flip-flop set by executing `HLT` and cleared by
+ *     `rst`; while it is set every line is low and step stands still.
+ *   - **Decode:** two 4 → 16 decoders on the opcode's nibbles, and an AND
+ *     for each opcode the ISA defines. A reserved opcode raises nothing.
+ *   - **Each line** is the OR of the opcodes whose row raises it, ANDed
+ *     with execute; `ir` and `inc` are fetch itself. `op` and `right` are
+ *     each bit's OR. `jump` is each jump's opcode ANDed with its flag.
+ *   - **`we` and `out`** are the store and port-write lines ANDed with
+ *     the clock being low: a strobe in the second half of the execute
+ *     cycle, after the address and data have settled and before the
+ *     clock edge that moves them.
+ */
+export function controlUnit(chips: Record<string, Circuit> = {}): string {
+  const name = 'control unit';
+  if (chips[name] !== undefined) return name;
+  Object.assign(chips, libraryWithDependencies('D flip-flop'));
+  const nibbles = decoder(4, chips);
+  const b = new CircuitBuilder();
+  const opcode = bitsOf(b, 'OP bits', b.input('OP', 0, 8));
+  const z = b.input('Z');
+  const c = b.input('C');
+  const n = b.input('N');
+  const rst = b.input('rst');
+  const clk = b.input('clk');
+  const keep = b.not(rst, 'not rst');
+
+  // step and halted
+  const stepFf = b.chip('step', 'D flip-flop');
+  const haltedFf = b.chip('halted', 'D flip-flop');
+  const step = { component: stepFf, pin: 'q' };
+  const halted = { component: haltedFf, pin: 'q' };
+  const running = { component: haltedFf, pin: 'qn' };
+  const fetch = b.and({ component: stepFf, pin: 'qn' }, running, 'fetch');
+  const execute = b.and(step, running, 'execute');
+
+  // Decode
+  const decodeNibble = (from: number, label: string) => {
+    const d = b.chip(label, nibbles);
+    b.connect(bus(b, `${label} nibble`, opcode.slice(from, from + 4)), { component: d, pin: 'A' });
+    return bitsOf(b, `${label} lines`, { component: d, pin: 'Y' }, 16);
+  };
+  const low = decodeNibble(0, 'low');
+  const high = decodeNibble(4, 'high');
+  const lineOf = new Map<number, PinRef>();
+  for (const instruction of INSTRUCTIONS) {
+    const code = instruction.opcode;
+    lineOf.set(code, b.and(high[code >> 4]!, low[code & 15]!, `${instruction.mnemonic} ${instruction.mode}`));
+  }
+  const opcodesWhere = (test: (lines: Lines) => boolean) => INSTRUCTIONS.filter(i => test(EXECUTE.get(i.opcode)!)).map(i => lineOf.get(i.opcode)!);
+  const executed = (test: (lines: Lines) => boolean, label: string) => b.and(any(b, opcodesWhere(test), label), execute, label);
+
+  // halted's next state: set by HLT, held once set, cleared by reset.
+  const halting = b.or(halted, b.and(execute, lineOf.get(0x00)!, 'HLT now'), 'halt');
+  b.connect(b.and(halting, keep, 'halt or reset'), { component: haltedFf, pin: 'd' });
+
+  const outputs: [string, PinRef, number?][] = [];
+  outputs.push(['ir', fetch], ['inc', fetch]);
+  const flag = { Z: z, C: c, N: n } as const;
+  const notFlag = { Z: b.not(z, 'not Z'), C: b.not(c, 'not C'), N: b.not(n, 'not N') } as const;
+  const jumps = INSTRUCTIONS.flatMap(i => {
+    const condition = EXECUTE.get(i.opcode)!.jump;
+    if (condition === undefined) return [];
+    const line = lineOf.get(i.opcode)!;
+    if (condition === 'always') return [line];
+    const holds = condition.startsWith('N') && condition.length === 2 ? notFlag[condition[1] as 'Z' | 'C' | 'N'] : flag[condition as 'Z' | 'C' | 'N'];
+    return [b.and(line, holds, `${i.mnemonic} taken`)];
+  });
+  outputs.push(['jump', b.and(any(b, jumps, 'jump'), execute, 'jump')]);
+  for (const line of ['ret', 'link', 'la', 'lb', 'lx', 'lzn', 'lc'] as const) outputs.push([line, executed(l => l[line] === true, line)]);
+  const opBits = [0, 1, 2, 3].map(bit => executed(l => l.op !== undefined && ((ALU_OP[l.op] >> bit) & 1) === 1, `op${bit}`));
+  outputs.push(['op', bus(b, 'op bus', opBits), 4]);
+  outputs.push(['left', executed(l => l.left === 'X', 'left')]);
+  const rightBits = [0, 1].map(bit => executed(l => ((RIGHT[l.right ?? 'ZERO'] >> bit) & 1) === 1, `right${bit}`));
+  outputs.push(['right', bus(b, 'right bus', rightBits), 2]);
+  outputs.push(['index', executed(l => l.index === true, 'index')]);
+  const clockLow = b.not(clk, 'clock low');
+  outputs.push(['we', b.and(executed(l => l.store === true, 'store'), clockLow, 'we')]);
+  outputs.push(['out', b.and(executed(l => l.out === true, 'port write'), clockLow, 'out')]);
+  outputs.push(['table', executed(l => l.source === 'table', 'table')]);
+  outputs.push(['port', executed(l => l.source === 'port', 'port')]);
+  outputs.push(['halted', halted]);
+
+  // step's next state: toggles while running, holds while halted, 0 on reset.
+  b.connect(b.and(b.xor(step, running, 'step next'), keep, 'step or reset'), { component: stepFf, pin: 'd' });
+  b.connect(clk, { component: stepFf, pin: 'clk' });
+  b.connect(clk, { component: haltedFf, pin: 'clk' });
+  for (const [label, pin, width] of outputs) b.output(label, pin, width ?? 1);
+  chips[name] = b.build();
+  return name;
+}
+
+// ---------------------------------------------------------------------------
+// The CPU
+// ---------------------------------------------------------------------------
+
+/**
+ * The CPU: the control unit driving the datapath. What it needs from
+ * outside is a ROM and, from Phase 17, memory and devices.
+ *
+ * In: `I` the ROM word at `PC`; `M` the data byte (a RAM byte, a ROM
+ * table byte or a port, as `table` and `port` ask); `rst`; `clk`. Out:
+ * `PC` for the ROM; `ADDR` the data address, for RAM and the ROM's table
+ * port; `D` the data to write, which is A; `K`, whose low bits name the
+ * port; `we` and `out`, the RAM and port write strobes; `table` and
+ * `port`, which say what `M` should carry; `halted`; and A, B, X for
+ * displays.
+ */
+export function cpu(): Generated {
+  const { chips: dataChips, ...dp } = datapath();
+  const chips: Record<string, Circuit> = { ...dataChips, datapath: dp as Circuit };
+  const before = new Set(Object.keys(chips));
+  controlUnit(chips);
+  const generated = new Set(Object.keys(chips).filter(name => !before.has(name) && name !== 'D flip-flop' && name !== 'mux 2'));
+  const b = new CircuitBuilder();
+  const i = b.input('I', 0, 16);
+  const m = b.input('M', 0, 8);
+  const rst = b.input('rst');
+  const clk = b.input('clk');
+  const control = b.chip('control', 'control unit');
+  const path = b.chip('datapath', 'datapath');
+  b.connect(i, { component: path, pin: 'I' });
+  b.connect(m, { component: path, pin: 'M' });
+  for (const target of [control, path]) {
+    b.connect(rst, { component: target, pin: 'rst' });
+    b.connect(clk, { component: target, pin: 'clk' });
+  }
+  b.connect({ component: path, pin: 'OP' }, { component: control, pin: 'OP' });
+  for (const flag of ['Z', 'C', 'N']) b.connect({ component: path, pin: flag }, { component: control, pin: flag });
+  for (const line of ['ir', 'inc', 'jump', 'ret', 'link', 'la', 'lb', 'lx', 'lzn', 'lc', 'op', 'left', 'right', 'index']) {
+    b.connect({ component: control, pin: line }, { component: path, pin: line });
+  }
+  b.output('PC', { component: path, pin: 'PC' }, 8);
+  b.output('ADDR', { component: path, pin: 'ADDR' }, 8);
+  b.output('D', { component: path, pin: 'A' }, 8);
+  b.output('K', { component: path, pin: 'K' }, 8);
+  for (const line of ['we', 'out', 'table', 'port', 'halted']) b.output(line, { component: control, pin: line });
+  b.output('A', { component: path, pin: 'A' }, 8);
+  b.output('B', { component: path, pin: 'B' }, 8);
+  b.output('X', { component: path, pin: 'X' }, 8);
+  const done = laidOut(b.build(), chips, generated);
+  // The datapath's own chips are laid out as `datapath` left them.
+  return { ...done, chips: { ...done.chips, ...Object.fromEntries(Object.entries(dataChips)), datapath: dp as Circuit } };
+}
+
 /** What `scripts/generate.ts` writes, file name by file name, under `circuits/`. */
 export function generatedFiles(): Record<string, Generated> {
   return {
     'ram-128.gessologic.json': ram(128),
     'register-file.gessologic.json': registerFile(),
-    'datapath.gessologic.json': datapath()
+    'datapath.gessologic.json': datapath(),
+    'cpu.gessologic.json': cpu()
   };
 }

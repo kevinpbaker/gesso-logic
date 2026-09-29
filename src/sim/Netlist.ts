@@ -1,6 +1,6 @@
 import type { Circuit, Component, PinRef } from './Circuit';
 import { chipInterface, pinsOf } from './Chips';
-import { bitPins, GATE_KINDS, isGate, isSettable, widthOf, type GateKind, type PinSpec } from './Primitives';
+import { bitPins, GATE_KINDS, isGate, isSettable, ROM_WORDS, widthOf, type GateKind, type PinSpec } from './Primitives';
 
 /**
  * A circuit compiled for running: nets as integers, gates as rows of
@@ -12,6 +12,15 @@ import { bitPins, GATE_KINDS, isGate, isSettable, widthOf, type GateKind, type P
  * there is no Z. Gates are indexed in document order, so the same
  * document always compiles to the same numbers.
  */
+/** A ROM as the simulator runs it: see `MemoryKind` in `Primitives.ts`. */
+export interface RomPart {
+  readonly words: Uint16Array;
+  readonly address: Int32Array;
+  readonly data: Int32Array;
+  readonly table: Int32Array;
+  readonly tableData: Int32Array;
+}
+
 export interface Netlist {
   /** How many net numbers there are: with stable numbering, some may be unused (see `compile`). */
   readonly netCount: number;
@@ -30,6 +39,8 @@ export interface Netlist {
   readonly inputs: ReadonlyMap<string, Source>;
   readonly constants: ReadonlyMap<string, Source>;
   readonly clocks: readonly number[];
+  /** Each ROM: its words, and the nets of its two ports, least significant bit first. */
+  readonly roms: readonly RomPart[];
   /** The net each pin is on, keyed `component.pin` by id. */
   readonly pinNet: ReadonlyMap<string, number>;
   /**
@@ -418,6 +429,7 @@ export function compile(circuit: Circuit, previous?: Netlist): Netlist {
   const inputs = new Map<string, Source>();
   const constants = new Map<string, Source>();
   const clocks: number[] = [];
+  const roms: RomPart[] = [];
   const read = new Uint8Array(netCount);
   const bitsOf = (placed: Placed, pin: string, width: number) => {
     const at = placed.base + placed.offsets.get(pin)!;
@@ -440,6 +452,13 @@ export function compile(circuit: Circuit, previous?: Netlist): Netlist {
       (kind === 'constant' ? constants : inputs).set(id, { net: nets[0]!, nets, value: component.value ?? 0 });
     } else if (kind === 'clock') {
       clocks.push(netOf(placed, 'out'));
+    } else if (kind === 'rom') {
+      const words = new Uint16Array(ROM_WORDS);
+      words.set((component.rom ?? []).slice(0, ROM_WORDS));
+      const port = (pin: string, width: number) => Int32Array.from(bitsOf(placed, pin, width));
+      const rom: RomPart = { words, address: port('A', 8), data: port('D', 16), table: port('T', 8), tableData: port('Q', 8) };
+      for (const net of [...rom.address, ...rom.table]) read[net] = 1;
+      roms.push(rom);
     } else {
       for (const pin of placed.spec.inputs) {
         for (const net of bitsOf(placed, pin, widthOf(placed.spec, pin))) read[net] = 1;
@@ -512,6 +531,7 @@ export function compile(circuit: Circuit, previous?: Netlist): Netlist {
     inputs,
     constants,
     clocks,
+    roms,
     get pinNet(): ReadonlyMap<string, number> {
       if (pinNet === null) {
         pinNet = new Map();

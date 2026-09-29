@@ -66,10 +66,16 @@ export class Simulator {
   /** True until a tick has evaluated every gate once; see `powerOn`. */
   private everything = false;
 
+  /** Nets a ROM reads: when one changes, the ROM is looked up again. See `tick`. */
+  private readonly romInput: Uint8Array;
+
   constructor(netlist: Netlist) {
     this.netlist = netlist;
-    this.kernel = createKernel(netlist);
+    const romInputs = netlist.roms.flatMap(rom => [...rom.address, ...rom.table]);
+    this.kernel = createKernel(netlist, netlist.roms.length * 24, [...new Set(romInputs)]);
     this.value = this.kernel.value;
+    this.romInput = new Uint8Array(netlist.netCount);
+    for (const net of romInputs) this.romInput[net] = 1;
     this.powerOn();
   }
 
@@ -165,6 +171,13 @@ export class Simulator {
   /** Advances one tick; returns how many nets changed on it. */
   tick(): number {
     const kernel = this.kernel;
+    // A ROM is due when an address it reads changed on the last tick, as
+    // a gate is; its words are looked up here, in JavaScript, and its
+    // changes join the gates' — applied with them, visible next tick.
+    let romsDue = this.everything && this.netlist.roms.length > 0;
+    if (!romsDue && this.netlist.roms.length > 0) {
+      for (let i = 0; i < this.changedCount && !romsDue; i++) romsDue = this.romInput[kernel.changed[i]!] === 1;
+    }
     let found: number;
     if (this.everything) {
       // Every gate once, from its record: power-on handed over a circuit
@@ -185,9 +198,34 @@ export class Simulator {
       found = kernel.evaluate(this.changedCount);
       this.evaluations += kernel.evaluations;
     }
+    if (romsDue) found = this.lookUp(found);
     this.changedCount = kernel.apply(found);
     this.ticks++;
     return kernel.moved;
+  }
+
+  /** Every ROM's outputs as its addresses say, written after the `found` changes already in the kernel's list. */
+  private lookUp(found: number): number {
+    const value = this.value;
+    const changes = this.kernel.found;
+    const read = (nets: Int32Array) => {
+      let v = 0;
+      for (let i = 0; i < nets.length; i++) v |= value[nets[i]!]! << i;
+      return v;
+    };
+    const drive = (nets: Int32Array, word: number) => {
+      for (let i = 0; i < nets.length; i++) {
+        const bit = (word >> i) & 1;
+        const net = nets[i]!;
+        changes[found] = (net << 1) | bit;
+        found += bit ^ value[net]!;
+      }
+    };
+    for (const rom of this.netlist.roms) {
+      drive(rom.data, rom.words[read(rom.address)]!);
+      drive(rom.tableData, rom.words[read(rom.table)]! & 0xff);
+    }
+    return found;
   }
 
   /**
@@ -204,7 +242,14 @@ export class Simulator {
       this.tick();
       ticks++;
     }
-    if (this.changedCount > 0 && ticks < limit) {
+    if (this.netlist.roms.length > 0) {
+      // A ROM is looked up between ticks, which the kernel's own settle
+      // loop has no room for: a circuit with one settles a tick at a time.
+      while (this.changedCount > 0 && ticks < limit) {
+        this.tick();
+        ticks++;
+      }
+    } else if (this.changedCount > 0 && ticks < limit) {
       const kernel = this.kernel;
       const run = kernel.settle(this.changedCount, limit - ticks);
       ticks += run;
@@ -247,7 +292,7 @@ export class Simulator {
     const { fanStart } = this.netlist;
     if (this.value[net] !== value) {
       this.value[net] = value;
-      if (fanStart[net + 1] > fanStart[net]) {
+      if (fanStart[net + 1] > fanStart[net] || this.romInput[net] === 1) {
         this.kernel.changed[this.changedCount++] = net;
       }
     }
@@ -301,6 +346,23 @@ export class Simulator {
         if (value[out[g]] !== result) {
           value[out[g]] = result;
           moved = true;
+        }
+      }
+      for (const rom of this.netlist.roms) {
+        for (const [from, to, mask] of [
+          [rom.address, rom.data, 0xffff],
+          [rom.table, rom.tableData, 0xff]
+        ] as const) {
+          let address = 0;
+          from.forEach((net, i) => (address |= value[net]! << i));
+          const word = rom.words[address]! & mask;
+          to.forEach((net, i) => {
+            const bit = (word >> i) & 1;
+            if (value[net] !== bit) {
+              value[net] = bit;
+              moved = true;
+            }
+          });
         }
       }
       if (!moved) {

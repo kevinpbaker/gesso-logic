@@ -56,8 +56,8 @@ export type Detail = 'blocks' | 'gates' | 'full';
 export function detailAt(scale: number): Detail {
   return scale < BLOCKS_BELOW ? 'blocks' : scale < WIRES_FROM ? 'gates' : 'full';
 }
-/** Parts that show no one value of their own: chips, and a bus's splits and joins. */
-const WIRING: ReadonlySet<string> = new Set(['chip', 'split', 'join']);
+/** Parts that show no one value of their own: chips, ROMs, and a bus's splits and joins. */
+const WIRING: ReadonlySet<string> = new Set(['chip', 'split', 'join', 'rom']);
 
 /** At or above this, switches and LEDs carry their labels. */
 const LABELS_FROM = 10;
@@ -483,7 +483,8 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
   // Chips: a body, their definition's name inside it, and at close
   // zoom the names of their pins along its edges. Filled, so the wires
   // under a chip's body do not show through it.
-  const chips = others.filter(c => scene.kindOf(c) === 'chip');
+  // A ROM is drawn as a chip named ROM.
+  const chips = others.filter(c => scene.kindOf(c) === 'chip' || scene.kindOf(c) === 'rom');
   if (chips.length > 0) {
     surface.beginPath();
     for (const c of chips) {
@@ -497,7 +498,7 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
     if (scale >= BLOCKS_BELOW) {
       surface.fillColor('text');
       for (const c of chips) {
-        const name = scene.chipNames[c] ?? '?';
+        const name = scene.kindOf(c) === 'rom' ? 'ROM' : (scene.chipNames[c] ?? '?');
         // Bold runs about seven tenths of its size a character.
         const fontSize = Math.min(1.1, Math.max(0.5, (scene.width(c) - 1.2) / Math.max(1, name.length) / 0.7));
         surface.text(name, scene.x[c]! + scene.width(c) / 2, scene.y[c]! + scene.height(c) / 2 + fontSize * 0.35, {
