@@ -14,7 +14,8 @@
     "bench": "node scripts/bench.ts",
     "phase0:sim": "node scripts/phase0-sim.ts",
     "proof": "node scripts/proof.ts",
-    "speed": "node --import ./scripts/lib/extensionless.mjs scripts/speed.ts"
+    "speed": "node --import ./scripts/lib/extensionless.mjs scripts/speed.ts",
+    "asm": "node --import ./scripts/lib/extensionless.mjs scripts/asm.ts"
   },
   "dependencies": {
     "gesso-components": "file:vendor/gesso-components-0.4.0-f183dffd.tgz",

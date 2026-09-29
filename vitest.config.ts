@@ -13,7 +13,7 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    include: ['src/sim/**/*.spec.ts', 'src/app/**/*.spec.ts', 'src/canvas/**/*.spec.ts'],
+    include: ['src/sim/**/*.spec.ts', 'src/cpu/**/*.spec.ts', 'src/app/**/*.spec.ts', 'src/canvas/**/*.spec.ts'],
     environment: 'node'
   }
 });

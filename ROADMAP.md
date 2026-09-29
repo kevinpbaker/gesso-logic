@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 12 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 13 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -19,8 +19,9 @@ the circuit running, circuits can be built on it by hand, and they
 have switches, buttons, probes and displays to work them with. They
 save to files and come back after a reload. Chips, buses, a standard
 library and a logic analyser are built, and a 10,000-gate circuit runs
-at over 100 kHz and takes an edit mid-run inside a frame. The CPU,
-Phase 13 on, is not built.
+at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
+ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler;
+the CPU itself, Phase 14 on, is not built.
 
 ---
 
@@ -1074,6 +1075,38 @@ its cycles and its flag effects. Then two tools in TypeScript, headless:
 
 **Exit:** a test program suite (arithmetic, flags, every branch, indexed
 addressing, `CALL` / `RET`, I/O) that passes on the emulator.
+
+**Done.** [ISA.md](ISA.md) is the frozen ISA. `src/cpu` holds the table
+(`Isa.ts`), the emulator (`Emulator.ts`, about 250 lines) and the
+assembler (`Assembler.ts`). `pnpm asm program.asm` writes a ROM image,
+256 hex words, sixteen to a line. The suite is seven programs in
+`src/cpu/programs`: arithmetic, logic, flags, branches, indexed, call
+and return, and I/O. Each says what it expects in `;!` comments, a
+register, a byte, an output, or the checkpoints it logged to port 3,
+and all seven pass. The expected values were worked out by hand, not
+read off the emulator. There are 25 specs, one of them holding
+ISA.md's opcode table to `Isa.ts` row by row. What was decided:
+
+- **Every instruction is two cycles, fetch and execute.** Indexed
+  addresses come from their own 8-bit adder, about 40 gates, cheaper
+  than a memory-address register and a third cycle. The control unit is
+  one fetch row plus one execute row per opcode.
+- **49 opcodes, 31 mnemonics, up from the sketch's 24.** Added: `NOP`;
+  `TAX`, `TXA`, `TAB` and `TBA` (a computed value into X without a trip
+  through RAM); `JNC` and `JNN`, so every flag branches both ways; the
+  ALU operations with `B` and with a memory operand as well as
+  immediate; and `LDT`.
+- **`LDT t,X` reads a byte out of the ROM,** through a second address
+  port on the ROM primitive. That port is not gates, so it costs
+  nothing, and it gives `.byte` a use a Harvard machine otherwise
+  lacks: tables, such as Pong's pixel masks.
+- **Only the ALU sets flags.** Loads, transfers, I/O and jumps never
+  touch them, so the flags register has one source. `SUB` and `CMP` set
+  C when there was no borrow, as the library's `add/sub 8` already does.
+- **Opcode `00` is `HLT`,** so an empty ROM word stops the CPU instead
+  of running on. A reserved opcode stops the emulator with an error.
+- **Port 3 is the suite's log.** The hardware has nothing on it, which
+  is what lets Phase 18 run these same programs in lockstep.
 
 ## Phase 14 — The generators
 
