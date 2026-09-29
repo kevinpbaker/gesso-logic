@@ -142,8 +142,9 @@ empty ROM word, and running off the end of a program, halts.
 
 - **Two cycles for everything** keeps the control unit to one row per
   opcode for execute, plus one shared fetch row. The data address for
-  `a,X` comes from a dedicated 8-bit adder (operand + X). That is about
-  40 gates, cheaper than a memory-address register and a third cycle.
+  `a,X` comes from a dedicated 8-bit adder (operand + X), the library's
+  48-gate `add/sub 8`: cheaper than a memory-address register and a
+  third cycle.
 - **`LDT` reads the ROM through a second port.** The ROM is a lookup
   primitive, not gates (see the showpiece's counting rules), so a second
   address port costs nothing. `.byte` data can then be read, which a

@@ -84,7 +84,9 @@ function layered(circuit: Circuit): Circuit {
       const rows = (drivers.get(c.id) ?? []).map(d => rowOf.get(d)).filter((r): r is number => r !== undefined);
       return rows.length === 0 ? 0 : rows.reduce((a, r) => a + r, 0) / rows.length;
     };
-    const ordered = index === 0 ? column : [...column].sort((a, b) => weight(a) - weight(b));
+    // Switches and LEDs stay in the order they were made: it is the
+    // order of the pins down the sides of the chip they make.
+    const ordered = index === 0 || index === columns.length - 1 ? column : [...column].sort((a, b) => weight(a) - weight(b));
     let y = Math.round((tallest - heightOf(column)) / 2);
     for (const c of ordered) {
       const { height } = size(c);
@@ -371,10 +373,298 @@ export function registerFile(names: readonly string[] = ['A', 'B', 'X']): Genera
   return laidOut(b.build(), chips, new Set());
 }
 
+// ---------------------------------------------------------------------------
+// The ALU
+// ---------------------------------------------------------------------------
+
+/** Joins eight single-bit pins into a bus. */
+function bus(b: CircuitBuilder, label: string, bits: readonly PinRef[]): PinRef {
+  const join = b.join(label, bits.length);
+  bits.forEach((bit, i) => b.connect(bit, { component: join, pin: `b${i}` }));
+  return { component: join, pin: 'out' };
+}
+
+/** A bus's bits, through a split. */
+function bitsOf(b: CircuitBuilder, label: string, source: PinRef, width = 8): PinRef[] {
+  const split = b.split(label, width);
+  b.connect(source, { component: split, pin: 'in' });
+  return Array.from({ length: width }, (_, i) => ({ component: split, pin: `b${i}` }));
+}
+
+/**
+ * The ALU: `L` and `R` in, `op` choosing what to do with them (the codes
+ * are `ALU_OP` in `src/cpu/Control.ts`), `Y` out with the flags it would
+ * set — `C`, `Z`, `N`. Whether they are kept is the flags register's
+ * business, not the ALU's.
+ *
+ *   - `op` is decoded to one line an operation.
+ *   - One library adder/subtractor does ADD, SUB (and CMP), INC and DEC:
+ *     for the last two its right side is forced to 1, which costs nine
+ *     gates where a mux would cost 32.
+ *   - AND, OR and XOR are a gate a bit; the shifts are wiring.
+ *   - `Y` is each result gated by its operation's line, and ORed.
+ *   - `C` is the adder's carry for ADD and SUB, the bit shifted out for
+ *     SHL and SHR; `Z` is a NOR of `Y`, `N` its top bit.
+ */
+function alu(chips: Record<string, Circuit>): string {
+  const name = 'ALU';
+  if (chips[name] !== undefined) return name;
+  Object.assign(chips, libraryWithDependencies('add/sub 8'));
+  const lines = decoder(4, chips);
+  const gather = orTree(8, 8, chips);
+  const b = new CircuitBuilder();
+  const l = bitsOf(b, 'L bits', b.input('L', 0, 8));
+  const r = bitsOf(b, 'R bits', b.input('R', 0, 8));
+  const decode = b.chip('decode', lines);
+  b.connect(b.input('op', 0, 4), { component: decode, pin: 'A' });
+  const line = bitsOf(b, 'op lines', { component: decode, pin: 'Y' }, 16);
+  const [add, sub, and, or, xor, passR, passL, inc, dec, shl, shr] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => line[i]!);
+
+  // The adder: right side R, or 1 for INC and DEC.
+  const one = b.or(inc!, dec!, 'inc or dec');
+  const notOne = b.not(one, 'not inc/dec');
+  const adderRight = bus(b, 'adder right', r.map((bit, i) => (i === 0 ? b.or(bit, one, 'one') : b.and(bit, notOne, `r${i} or 0`))));
+  const adder = b.chip('adder', 'add/sub 8');
+  b.connect(bus(b, 'adder left', l), { component: adder, pin: 'A' });
+  b.connect(adderRight, { component: adder, pin: 'B' });
+  b.connect(b.or(sub!, dec!, 'subtract'), { component: adder, pin: 'sub' });
+  const sum = bitsOf(b, 'sum bits', { component: adder, pin: 'S' });
+  const arithmetic = b.or(b.or(add!, sub!, 'add or sub'), one, 'arithmetic');
+
+  // Each operation's result, gated by its line.
+  const gated = (label: string, select: PinRef, bit: (i: number) => PinRef | null) =>
+    bus(
+      b,
+      label,
+      Array.from({ length: 8 }, (_, i) => {
+        const value = bit(i);
+        return value === null ? b.constant(0, `${label} ${i}`) : b.and(value, select, `${label} ${i}`);
+      })
+    );
+  const results = [
+    gated('sum', arithmetic, i => sum[i]!),
+    gated('and', and!, i => b.and(l[i]!, r[i]!, `l and r ${i}`)),
+    gated('or', or!, i => b.or(l[i]!, r[i]!, `l or r ${i}`)),
+    gated('xor', xor!, i => b.xor(l[i]!, r[i]!, `l xor r ${i}`)),
+    gated('R', passR!, i => r[i]!),
+    gated('L', passL!, i => l[i]!),
+    gated('shl', shl!, i => (i === 0 ? null : l[i - 1]!)),
+    gated('shr', shr!, i => (i === 7 ? null : l[i + 1]!))
+  ];
+  const tree = b.chip('result', gather);
+  results.forEach((result, i) => b.connect(result, { component: tree, pin: `I${i}` }));
+  const y = bitsOf(b, 'Y bits', { component: tree, pin: 'Y' });
+  b.output('Y', { component: tree, pin: 'Y' }, 8);
+
+  const carry = b.or(
+    b.or(b.and({ component: adder, pin: 'cout' }, b.or(add!, sub!, 'add or sub?'), 'adder carry'), b.and(l[7]!, shl!, 'shl carry'), 'carries'),
+    b.and(l[0]!, shr!, 'shr carry'),
+    'carry'
+  );
+  b.output('C', carry);
+  let any = y[0]!;
+  for (let i = 1; i < 8; i++) any = b.or(any, y[i]!, `any ${i}`);
+  b.output('Z', b.not(any, 'zero'));
+  b.output('N', y[7]!);
+  chips[name] = b.build();
+  return name;
+}
+
+// ---------------------------------------------------------------------------
+// The datapath
+// ---------------------------------------------------------------------------
+
+/**
+ * The CPU's datapath: every register and everything between them, with
+ * a pin for each control line (`Lines` in `src/cpu/Control.ts`), so a
+ * person can drive it from switches — Phase 15 — and the control unit
+ * can drive it from gates — Phase 16.
+ *
+ * In: `I` the ROM word at `PC`; `M` the data byte the memory system puts
+ * up (RAM, a ROM table byte or a port, as the control unit says); the
+ * control lines; `rst`; `clk`. Out: `PC` for the ROM; `OP` and `K`, the
+ * instruction register's two bytes, for the control unit; `ADDR` the data
+ * address; `A` (also the data written to RAM and ports), `B`, `X`, `L`;
+ * the flags.
+ *
+ *   - **IR** is two library registers, loaded from `I` on `ir`.
+ *   - **A, B, X** are the generated register file, all loaded from the
+ *     ALU's `Y`.
+ *   - **The ALU** takes A or X on the left (`left`), and on the right K,
+ *     B, M or 0 (`right`).
+ *   - **The flags** are three flip-flops: Z and N load on `lzn`, C on
+ *     `lc`.
+ *   - **PC** is a library counter: `inc` counts, `jump` loads K — or L,
+ *     with `ret`. **L** loads PC on `link`.
+ *   - **ADDR** is K, or K + X from an adder of its own on `index`.
+ *   - **Reset is synchronous:** while `rst` is high, a clock edge loads 0
+ *     into every register and flag.
+ */
+export function datapath(): Generated {
+  const chips: Record<string, Circuit> = {
+    ...libraryWithDependencies('register 8'),
+    ...libraryWithDependencies('counter 8'),
+    ...libraryWithDependencies('mux 2 ×8'),
+    ...libraryWithDependencies('mux 4 ×8'),
+    ...libraryWithDependencies('add/sub 8')
+  };
+  const generated = new Set<string>();
+  const before = new Set(Object.keys(chips));
+  alu(chips);
+  const { chips: fileChips, ...file } = registerFile();
+  Object.assign(chips, fileChips);
+  chips['register file'] = file as Circuit;
+
+  // Clear ×8: a byte, or 0 while rst is high — what a register loads on reset.
+  {
+    const b = new CircuitBuilder();
+    const d = bitsOf(b, 'D bits', b.input('D', 0, 8));
+    const keep = b.not(b.input('rst'), 'not rst');
+    b.output('Y', bus(b, 'Y bits', d.map((bit, i) => b.and(bit, keep, `bit ${i}`))), 8);
+    chips['clear ×8'] = b.build();
+  }
+  // Flags: Z, C and N, each held, loaded, or cleared on reset.
+  {
+    const b = new CircuitBuilder();
+    const inputs = { Z: b.input('Z in'), C: b.input('C in'), N: b.input('N in') };
+    const lzn = b.input('lzn');
+    const lc = b.input('lc');
+    const rst = b.input('rst');
+    const clk = b.input('clk');
+    const keep = b.not(rst, 'not rst');
+    for (const flag of ['Z', 'C', 'N'] as const) {
+      const ff = b.chip(`${flag} flag`, 'D flip-flop');
+      const choose = b.chip(`${flag} next`, 'mux 2');
+      b.connect({ component: ff, pin: 'q' }, { component: choose, pin: 'a' });
+      b.connect(inputs[flag], { component: choose, pin: 'b' });
+      b.connect(flag === 'C' ? lc : lzn, { component: choose, pin: 's' });
+      b.connect(b.and({ component: choose, pin: 'y' }, keep, `${flag} or reset`), { component: ff, pin: 'd' });
+      b.connect(clk, { component: ff, pin: 'clk' });
+      b.output(flag, { component: ff, pin: 'q' });
+    }
+    chips.flags = b.build();
+  }
+  for (const name of Object.keys(chips)) if (!before.has(name)) generated.add(name);
+  generated.delete('register file');
+
+  const b = new CircuitBuilder();
+  const word = bitsOf(b, 'I bits', b.input('I', 0, 16), 16);
+  const m = b.input('M', 0, 8);
+  const line = (name: string, width = 1) => b.input(name, 0, width);
+  const ir = line('ir');
+  const inc = line('inc');
+  const jump = line('jump');
+  const ret = line('ret');
+  const link = line('link');
+  const la = line('la');
+  const lb = line('lb');
+  const lx = line('lx');
+  const lzn = line('lzn');
+  const lc = line('lc');
+  const op = line('op', 4);
+  const left = line('left');
+  const right = line('right', 2);
+  const index = line('index');
+  const rst = line('rst');
+  const clk = line('clk');
+  const withReset = (load: PinRef, label: string) => b.or(load, rst, label);
+  const cleared = (d: PinRef, label: string) => {
+    const clear = b.chip(label, 'clear ×8');
+    b.connect(d, { component: clear, pin: 'D' });
+    b.connect(rst, { component: clear, pin: 'rst' });
+    return { component: clear, pin: 'Y' };
+  };
+  const register = (label: string, d: PinRef, load: PinRef) => {
+    const reg = b.chip(label, 'register 8');
+    b.connect(cleared(d, `${label} in`), { component: reg, pin: 'D' });
+    b.connect(withReset(load, `${label} load`), { component: reg, pin: 'load' });
+    b.connect(clk, { component: reg, pin: 'clk' });
+    return { component: reg, pin: 'Q' };
+  };
+
+  // IR
+  const opcode = register('IR op', bus(b, 'op byte', word.slice(8)), ir);
+  const k = register('IR k', bus(b, 'k byte', word.slice(0, 8)), ir);
+
+  // A, B, X, from the ALU.
+  const regs = b.chip('registers', 'register file');
+  const theAlu = b.chip('alu', 'ALU');
+  const y = { component: theAlu, pin: 'Y' };
+  b.connect(cleared(y, 'Y in'), { component: regs, pin: 'D' });
+  b.connect(withReset(la, 'A load'), { component: regs, pin: 'load A' });
+  b.connect(withReset(lb, 'B load'), { component: regs, pin: 'load B' });
+  b.connect(withReset(lx, 'X load'), { component: regs, pin: 'load X' });
+  b.connect(clk, { component: regs, pin: 'clk' });
+  const a = { component: regs, pin: 'A' };
+  const x = { component: regs, pin: 'X' };
+  const regB = { component: regs, pin: 'B' };
+
+  const leftMux = b.chip('left', 'mux 2 ×8');
+  b.connect(a, { component: leftMux, pin: 'A' });
+  b.connect(x, { component: leftMux, pin: 'B' });
+  b.connect(left, { component: leftMux, pin: 's' });
+  const rightMux = b.chip('right', 'mux 4 ×8');
+  b.connect(k, { component: rightMux, pin: 'A' });
+  b.connect(regB, { component: rightMux, pin: 'B' });
+  b.connect(m, { component: rightMux, pin: 'C' });
+  b.connect(b.constant(0, 'zero', 8), { component: rightMux, pin: 'D' });
+  b.connect(right, { component: rightMux, pin: 'S' });
+  b.connect({ component: leftMux, pin: 'Y' }, { component: theAlu, pin: 'L' });
+  b.connect({ component: rightMux, pin: 'Y' }, { component: theAlu, pin: 'R' });
+  b.connect(op, { component: theAlu, pin: 'op' });
+
+  // Flags
+  const flags = b.chip('flags', 'flags');
+  for (const flag of ['Z', 'C', 'N']) b.connect({ component: theAlu, pin: flag }, { component: flags, pin: `${flag} in` });
+  b.connect(lzn, { component: flags, pin: 'lzn' });
+  b.connect(lc, { component: flags, pin: 'lc' });
+  b.connect(rst, { component: flags, pin: 'rst' });
+  b.connect(clk, { component: flags, pin: 'clk' });
+
+  // PC and L
+  const pc = b.chip('PC', 'counter 8');
+  const pcSource = b.chip('PC source', 'mux 2 ×8');
+  b.connect(k, { component: pcSource, pin: 'A' });
+  b.connect(ret, { component: pcSource, pin: 's' });
+  b.connect({ component: pcSource, pin: 'Y' }, { component: pc, pin: 'D' });
+  b.connect(rst, { component: pc, pin: 'clr' });
+  b.connect(jump, { component: pc, pin: 'load' });
+  b.connect(inc, { component: pc, pin: 'inc' });
+  b.connect(clk, { component: pc, pin: 'clk' });
+  const pcOut = { component: pc, pin: 'Q' };
+  const l = register('L', pcOut, link);
+  b.connect(l, { component: pcSource, pin: 'B' });
+
+  // The data address
+  const indexAdder = b.chip('K + X', 'add/sub 8');
+  b.connect(k, { component: indexAdder, pin: 'A' });
+  b.connect(x, { component: indexAdder, pin: 'B' });
+  b.connect(b.constant(0, 'add'), { component: indexAdder, pin: 'sub' });
+  const address = b.chip('address', 'mux 2 ×8');
+  b.connect(k, { component: address, pin: 'A' });
+  b.connect({ component: indexAdder, pin: 'S' }, { component: address, pin: 'B' });
+  b.connect(index, { component: address, pin: 's' });
+
+  b.output('PC', pcOut, 8);
+  b.output('OP', opcode, 8);
+  b.output('K', k, 8);
+  b.output('ADDR', { component: address, pin: 'Y' }, 8);
+  b.output('A', a, 8);
+  b.output('B', regB, 8);
+  b.output('X', x, 8);
+  b.output('L', l, 8);
+  for (const flag of ['Z', 'C', 'N']) b.output(flag, { component: flags, pin: flag });
+  // The register file is generated too; it lays out as the generator
+  // left it, like a library part.
+  const done = laidOut(b.build(), chips, generated);
+  return { ...done, chips: { ...done.chips, 'register file': file as Circuit } };
+}
+
 /** What `scripts/generate.ts` writes, file name by file name, under `circuits/`. */
 export function generatedFiles(): Record<string, Generated> {
   return {
     'ram-128.gessologic.json': ram(128),
-    'register-file.gessologic.json': registerFile()
+    'register-file.gessologic.json': registerFile(),
+    'datapath.gessologic.json': datapath()
   };
 }

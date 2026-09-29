@@ -41,7 +41,7 @@ import {
   sameConnectivity,
   type Fragment
 } from './DocumentEdits';
-import { adderScene, benchScene, busAdderScene, counterScene, ramScene } from './Scenes';
+import { adderScene, benchScene, busAdderScene, counterScene, datapathScene, ramScene } from './Scenes';
 import { isLibraryName, LIBRARY_PALETTE, libraryPart } from './LibraryParts';
 import { truthTable } from './TruthTable';
 import { boundsOf, boxOf, intersects, pinAt, route, shapeOf, slotOf, type KindLayout } from './Layout';
@@ -358,7 +358,9 @@ export class CircuitService {
               ? busAdderScene()
               : name === 'ram'
                 ? ramScene()
-                : { version: CIRCUIT_VERSION, components: [], wires: [] }
+                : name === 'datapath'
+                  ? datapathScene()
+                  : { version: CIRCUIT_VERSION, components: [], wires: [] }
     );
   }
 

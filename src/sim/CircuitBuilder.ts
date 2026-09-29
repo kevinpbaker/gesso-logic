@@ -75,8 +75,9 @@ export class CircuitBuilder {
   join(label: string, width: number): string {
     return this.add('join', label, { width });
   }
-  constant(value: 0 | 1, label?: string): PinRef {
-    return { component: this.add('constant', label, { value }), pin: 'out' };
+  /** A constant; with `width`, a bus holding `value`. */
+  constant(value: number, label?: string, width = 1): PinRef {
+    return { component: this.add('constant', label, { value, ...(width > 1 ? { width } : {}) }), pin: 'out' };
   }
   clock(label = 'clk'): PinRef {
     return { component: this.add('clock', label), pin: 'out' };

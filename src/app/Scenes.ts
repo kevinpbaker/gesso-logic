@@ -2,10 +2,10 @@ import type { Circuit, Component, PinRef } from '../sim/Circuit';
 import { CircuitBuilder } from '../sim/CircuitBuilder';
 import { library } from '../sim/Library';
 import { dFlipFlop } from '../sim/Parts';
-import { pinsOf } from '../sim/Chips';
+import { chipInterface, pinsOf } from '../sim/Chips';
 import { PINS, type GateKind } from '../sim/Primitives';
 import { shapeOf, sizeOf } from './Layout';
-import { ram } from './Generators';
+import { datapath, ram } from './Generators';
 
 /**
  * Circuits the application starts with, until Phase 6 opens files.
@@ -399,4 +399,28 @@ export function ramScene(): Circuit {
   b.display('hex', 'read', { in: q }, 8);
   b.output('Q', q, 8);
   return layOut({ ...b.build(), chips: { ...chips, 'RAM 128': definition as Circuit } });
+}
+
+/**
+ * Phase 15's exit, as a scene: the datapath as a chip, a switch for each
+ * control line and for the instruction word `I` and data byte `M`, a
+ * button on `clk`, and a display on everything it puts out. Set the
+ * lines, press `clk`, and watch the registers take what the lines said.
+ * `op` codes and `right`'s are in `src/cpu/Control.ts`.
+ */
+export function datapathScene(): Circuit {
+  const { chips, ...definition } = datapath();
+  const face = chipInterface(definition as Circuit);
+  const b = new CircuitBuilder();
+  const dp = b.chip('datapath', 'datapath');
+  for (const pin of face.inputs) {
+    const source = pin.name === 'clk' ? b.button('clk') : b.input(pin.name, 0, pin.width);
+    b.connect(source, { component: dp, pin: pin.name });
+  }
+  for (const pin of face.outputs) {
+    const out = { component: dp, pin: pin.name };
+    if (pin.width > 1) b.display('hex', pin.name, { in: out }, pin.width);
+    else b.output(pin.name, out);
+  }
+  return layOut({ ...b.build(), chips: { ...chips, datapath: definition as Circuit } });
 }

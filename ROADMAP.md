@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 14 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 15 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -21,8 +21,8 @@ save to files and come back after a reload. Chips, buses, a standard
 library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
-and its RAM and register file are generated. The CPU itself, Phase 15
-on, is not built.
+and its RAM and datapath are generated. The control unit, Phase 16 on,
+is not built.
 
 ---
 
@@ -1168,6 +1168,55 @@ hand from switches standing in for the control unit.
 
 **Exit:** loading two registers and adding them by flipping switches,
 the result visible on a hex display.
+
+**Done.** The toolbar's **Datapath** button loads the datapath as a
+chip. It has a switch on every control line and on the instruction word
+`I` and data byte `M`, a button on `clk`, and a hex display or LED on
+every output. In Chrome, `rst` and a `clk` press cleared every register
+from power-on's FF to 00. The spec does the exit by switches: it loads
+IR with K = 0x12, then A ← K, then B ← 0x30, then A ← A + B, and reads
+0x42 with the flags clear.
+
+It is generated (`datapath` in `src/app/Generators.ts`, written to
+`circuits/datapath.gessologic.json`) rather than dragged together by
+hand. It's still library parts and generated chips, and it opens like
+anything else. **1,323 gates:**
+
+| Part | Gates |
+| ---- | ----: |
+| A, B, X (the register file), IR's two bytes, L: six `register 8`s | 624 |
+| PC: a `counter 8` | 129 |
+| The ALU | 245 |
+| The flags: three flip-flops with load and clear | 43 |
+| Muxes: ALU left, PC source, address (`mux 2 ×8`), ALU right (`mux 4 ×8`) | 192 |
+| The index adder, K + X | 48 |
+| Synchronous reset: a clear on each loaded byte, reset ORed into each load | 42 |
+
+That's 200 over the budget's 1,120. The link register L (104) and the
+reset gating (42) weren't in the budget's 51 register bits, and the
+rest is the muxes.
+
+- **Every register loads from the ALU's `Y`.** A load is the ALU
+  passing its right operand, and a transfer passes its left. So there is
+  one bus into A, B and X, and the flags change only where `lzn` and
+  `lc` say. The ALU's right side is K, B, M or 0; its left is A or X.
+- **The ALU** decodes `op` to a line per operation. One library adder
+  does ADD, SUB, INC and DEC; for INC and DEC its right side is forced
+  to 1, which takes nine gates where a mux would take 32. The result is
+  each operation's output gated by its line and ORed.
+- **The control table is written already** (`src/cpu/Control.ts`): the
+  lines each opcode raises on its execute cycle, plus the shared fetch
+  row. Phase 16 turns it into gates.
+- **The datapath runs every test program in step with the emulator.**
+  The spec drives its switches cycle by cycle from the control table,
+  with ROM, RAM and ports in JavaScript behind `I` and `M`, and after
+  every instruction compares PC, A, B, X, the flags and all of RAM. All
+  seven programs match. A mis-wired `SHR` fails two of them.
+- **One data address serves RAM and the ROM table:** K, or K + X on
+  `index`. `LDT` reads the table through it.
+- **Reset is synchronous:** a clock edge with `rst` high loads 0 into
+  every register and flag, including IR, so opcode 0 (`HLT`) waits there
+  until the first fetch.
 
 ## Phase 16 — The control unit
 
