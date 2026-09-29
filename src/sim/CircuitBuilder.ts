@@ -25,7 +25,8 @@ const ROW = 16;
 export class CircuitBuilder {
   private readonly components: Component[] = [];
   private readonly wires: Wire[] = [];
-  private readonly used = new Set<string>();
+  /** Each component's index in `components`, by id. */
+  private readonly index = new Map<string, number>();
 
   /** A gate with nothing wired to it yet, for circuits with feedback. */
   gate(kind: GateKind, label?: string): GateHandle {
@@ -77,6 +78,15 @@ export class CircuitBuilder {
     return id;
   }
 
+  /** Moves a component, for a generator that lays its circuit out itself. */
+  position(id: string, x: number, y: number): void {
+    const at = this.index.get(id);
+    if (at === undefined) {
+      throw new Error(`No component '${id}' to position.`);
+    }
+    this.components[at] = { ...this.components[at]!, x, y };
+  }
+
   build(): Circuit {
     return { version: CIRCUIT_VERSION, components: [...this.components], wires: [...this.wires] };
   }
@@ -94,11 +104,11 @@ export class CircuitBuilder {
    */
   private add(kind: Kind, label?: string, extra: Partial<Component> = {}): string {
     let id = label ?? `${kind}${this.components.length}`;
-    if (this.used.has(id)) {
+    if (this.index.has(id)) {
       id = `${id}#${this.components.length}`;
     }
-    this.used.add(id);
     const n = this.components.length;
+    this.index.set(id, n);
     this.components.push({ id, kind, x: (n % ROW) * GRID, y: Math.floor(n / ROW) * GRID, ...(label ? { label } : {}), ...extra });
     return id;
   }

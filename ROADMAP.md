@@ -11,11 +11,11 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0, 0b, 1 and 2 done. Phase 0's findings are in
+**Status:** Phases 0 to 3 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
-changed anything. The simulator runs headless under `src/sim` and
-behind the `circuit` channel in the application worker. The screen is
-still Phase 0's spike, until Phase 3.
+changed anything. The simulator runs behind the `circuit` channel, and
+the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
+the circuit running. Nothing past Phase 3 is built.
 
 ---
 
@@ -373,6 +373,59 @@ under budget.
 from the real contract, holds 60 fps panning and zooming with the
 simulator running.
 
+**Done, with the GPU. Not in software rendering at mid zoom.**
+`src/canvas` holds the canvas, a render-side scene index and the
+painters. `src/app/Layout.ts` holds the geometry both workers share.
+`src/app/Scenes.ts` holds the bench scene: Phase 0's grid made real, a
+10-bit counter driving 99 × 100 gates, 10,000 in all. `pnpm bench`
+measures it (`scripts/bench.ts`, grown from Phase 0's runner, with the
+driver in `src/canvas/Bench.ts`). Frame cost in ms, with the circuit
+running flat out:
+
+| zoom | GPU still / pan / zoom (mean) | GPU zoom p95 | software still / pan / zoom | software zoom p95 |
+| ---- | ----------------------------- | -----------: | --------------------------- | ----------------: |
+| fit-all, 1.3 px a unit | 3.1 / 3.2 / 4.1 | 8.1 | 7.5 / 6.9 / 9.3 | 20.6 |
+| mid, 4 px a unit | 8.7 / 8.2 / 5.4 | 12.8 | **16.0 / 16.2** / 13.7 | 46.6 |
+| close, 12 px a unit | 2.0 / 2.5 / 3.3 | 6.4 | 6.0 / 7.2 / 10.3 | 36.1 |
+
+Paused, a frame costs 0.7–1.1 ms. The render worker gets 53–58
+snapshots a second with the GPU. It was checked by hand in a desktop
+Chrome as well: 60 fps at every zoom with the circuit running at about
+500 Hz. What the bench found, beyond Phase 0:
+
+- **A third level of detail.** Between 2.5 and 6 px a unit, gate
+  symbols keep their shape and the body fills with the output's value,
+  while wires go unlit into the static layer. Full detail at mid zoom
+  re-stroked about 4,300 wires every frame. Wires carry colour from 6 px
+  a unit.
+- **A grid change is spread over frames.** Crossing a zoom octave used
+  to replace every tile in one frame, up to 216 ms. The old grid now
+  stays on screen while the new one comes in four tiles a frame.
+- **Tile size matters twice.** A hysteresis wide enough to hold a
+  coarser grid left mid zoom on 12 tiles of 512 px, and its frame went
+  from 16 ms to 48 in software rendering: every live layer is redrawn
+  every frame, including the part hanging off screen. The grid keeps
+  its octave only across [0.9, 1.9).
+- **Publishing is checked inside a slice.** Nested `setTimeout(0)` is
+  clamped to 4 ms, so publishes that could land only at a slice's end
+  came 38 times a second. A `MessageChannel` avoids the clamp, and was
+  tried, but its next slice queued ahead of every command and `pause`
+  never arrived.
+- **A still, paused scene produces no frames.** Gesso draws only on
+  change, so the bench keeps a hidden binding moving to get frames to
+  measure.
+- **Loading the scene is a one-time hitch** of 1.3–2.4 s: 10,000
+  components crossing the channel, and the index built. Phase 6's.
+
+Still open: **mid zoom in software rendering** (16 ms mean, p95
+20–28) and **zoom p95 in software** (20–47 ms). The remaining cost is
+rasterising and compositing 28 tiles' layers every frame on the CPU.
+The next levers are an engine one — compositing unchanged layers
+without redrawing them — or fewer, smaller live layers. **The bench
+scene is a glitch storm**, about 52,700 evaluations a cycle from random
+XOR-heavy logic, so it runs at about 550 Hz. That's a harsh load for the
+application worker and says nothing about the CPU's speed.
+
 ## Phase 4 — Editing
 
 Place from a palette (click or drag). Drag to move, with wires
@@ -417,6 +470,15 @@ copy works unchanged, it belongs in `gesso-devtools`, and that is worth
 proposing.
 
 **Exit:** `pnpm proof` green in CI on the Phase 3 scene at full speed.
+
+**From Phase 3: the budget as written can't hold on a live canvas.** At
+mid zoom with the GPU a running frame costs about 8 ms more than a
+paused one. That isn't the simulator reaching the render thread; it's
+the cost of drawing values that change. The comparison that isolates
+the claim is full speed against a slow clock with the same picture
+changing, or the render worker's cost while the application worker is
+saturated against while it idles. Decide which before building the
+gate.
 
 ---
 

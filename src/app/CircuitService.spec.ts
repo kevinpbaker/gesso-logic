@@ -72,12 +72,15 @@ describe('CircuitService', () => {
       h.slice(16);
     }
 
-    // 62 slices 16 ms apart is 992 ms after the run started: 99 cycles
-    // due at 100 Hz.
-    expect(h.status.cycles).toBe(99);
+    // Status while running is at most one publish interval old; the
+    // rate it reports is over the last second.
     expect(h.status.running).toBe(true);
-    expect(h.status.achievedHz).toBeGreaterThanOrEqual(99);
+    expect(h.status.achievedHz).toBeGreaterThanOrEqual(98);
     expect(h.status.achievedHz).toBeLessThanOrEqual(101);
+    // 62 slices 16 ms apart is 992 ms after the run started: 99 cycles
+    // due at 100 Hz. A pause publishes at once, so it reads exactly.
+    h.service.pause();
+    expect(h.status.cycles).toBe(99);
   });
 
   it('bounds a slice at max by its budget, and handles a command between slices', () => {

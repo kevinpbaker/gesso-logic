@@ -6,6 +6,7 @@ import { isGate, PINS, type Kind } from '../sim/Primitives';
 import { Simulator } from '../sim/Simulator';
 import type { ClockRate, ComponentGeometry, DocumentSummary, Geometry, Signals, Status, WireGeometry } from './CircuitContract';
 import { connect, freshId, move, place } from './DocumentEdits';
+import { boundsOf, boxOf, intersects, pinAt, route, slotOf } from './Layout';
 import { CHUNK, packChunk } from './SignalPacking';
 
 /**
@@ -267,7 +268,20 @@ export class CircuitService {
       // The clock is read every cycle. A cycle of a 10,000-gate circuit
       // is tens of microseconds, so the read is a small share of it,
       // and a slice that overran its budget is the failure this avoids.
-      if (this.now() - started >= this.budgetMs) {
+      const at = this.now();
+      // Publishing is checked here, inside the slice, rather than only at
+      // its end. Phase 3's bench found why: nested `setTimeout(0)` is
+      // clamped to 4 ms, so 8 ms slices ran 12 ms apart, a publish could
+      // only land on every other one, and the render worker got 38
+      // snapshots a second. Checked per cycle, the interval is kept
+      // whatever the slices' spacing. (A `MessageChannel` avoids the
+      // clamp, and was tried: its next slice queued ahead of every
+      // command, and a `pause` never got in.)
+      if (at - this.lastPublishAt >= this.publishIntervalMs) {
+        this.sample(simulator);
+        this.publish(false);
+      }
+      if (at - started >= this.budgetMs) {
         break;
       }
     }
@@ -384,10 +398,13 @@ export class CircuitService {
   }
 
   /**
-   * The chunks holding a net on a component in the viewport, or every
-   * chunk before the render worker has said what it can see. A wire is
-   * on the net of the pin it leaves, and that pin's component is where
-   * it starts, so the components are enough.
+   * The chunks holding a net drawn in the viewport, or every chunk before
+   * the render worker has said what it can see.
+   *
+   * "Drawn in" by the same geometry the canvas draws with (`Layout.ts`):
+   * a component whose box meets the viewport, or a wire whose route does.
+   * A wire routed through the view from two components outside it is
+   * still lit.
    */
   private chunksToPublish(): readonly number[] {
     const netlist = this.netlist;
@@ -398,27 +415,40 @@ export class CircuitService {
       return this.visibleChunks;
     }
     const chunks = new Set<number>();
+    const add = (component: string, pin: string) => {
+      const net = netlist.pinNet.get(`${component}.${pin}`);
+      if (net !== undefined) {
+        chunks.add(Math.floor(net / CHUNK));
+      }
+    };
     const viewport = this.viewport;
     if (viewport === null) {
       for (let chunk = 0; chunk * CHUNK < netlist.netCount; chunk++) {
         chunks.add(chunk);
       }
     } else {
+      const byId = new Map(this.circuit.components.map(c => [c.id, c]));
       for (const component of this.circuit.components) {
-        if (
-          component.x < viewport.left ||
-          component.x > viewport.right ||
-          component.y < viewport.top ||
-          component.y > viewport.bottom
-        ) {
+        if (intersects(boxOf(component.kind, component.x, component.y), viewport)) {
+          const spec = PINS[component.kind];
+          for (const pin of [...spec.inputs, ...spec.outputs]) {
+            add(component.id, pin);
+          }
+        }
+      }
+      for (const wire of this.circuit.wires) {
+        const from = byId.get(wire.from.component);
+        const to = byId.get(wire.to.component);
+        if (from === undefined || to === undefined) {
           continue;
         }
-        const spec = PINS[component.kind];
-        for (const pin of [...spec.inputs, ...spec.outputs]) {
-          const net = netlist.pinNet.get(`${component.id}.${pin}`);
-          if (net !== undefined) {
-            chunks.add(Math.floor(net / CHUNK));
-          }
+        const path = route(
+          pinAt(from.kind, from.x, from.y, wire.from.pin),
+          pinAt(to.kind, to.x, to.y, wire.to.pin),
+          slotOf(wire.to.pin)
+        );
+        if (intersects(boundsOf(path), viewport)) {
+          add(wire.from.component, wire.from.pin);
         }
       }
     }

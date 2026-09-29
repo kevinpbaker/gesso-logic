@@ -38,18 +38,25 @@ runs. The third decimal did not: the same configuration moved by
 
 ```bash
 pnpm phase0:sim                # spike 3, in Node: ~20 s
+```
+
+**The harness for spikes 1 and 2 is gone, and so are those numbers'
+source.** Phase 3 replaced the spike's screen with the real canvas and
+grew `scripts/phase0.ts` into `pnpm bench`, which measures that canvas.
+Everything in §1, §2 and §5 reproduces from commit `8461fb4`, the last
+one where `src/spike`'s screen and `pnpm phase0` exist:
+
+```bash
 pnpm phase0                    # spikes 1 and 2: the full matrix, ~12 min
 pnpm phase0 --only='^confirm'  # just the runs whose label matches
 pnpm phase0 --gpu              # without forcing software rendering
 pnpm phase0 --shot=a.png --input   # a real drag and ctrl-wheel, then a screenshot
 ```
 
-`pnpm phase0` builds the page, serves it, opens it in headless Chrome
-with `?bench`, and prints a table from the JSON the render worker
-logs. Each run is appended to `phase0-results.jsonl` as it finishes. It
-is gessosheet's `scripts/phase0.ts` with a different table. `pnpm dev`
-shows the same page with the knobs on screen: paint strategy, tile
-size, level of detail, zoom raster mode, wire shape and activity.
+At that commit, `pnpm phase0` builds the page, serves it, opens it in
+headless Chrome with `?bench`, and prints a table from the JSON the
+render worker logs. Spike 3's synthetic circuit and kernel are still
+in `src/spike/sim`, because they are Phase 12's baseline.
 
 ---
 

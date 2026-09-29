@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "phase0": "node scripts/phase0.ts",
+    "bench": "node scripts/bench.ts",
     "phase0:sim": "node scripts/phase0-sim.ts"
   },
   "dependencies": {

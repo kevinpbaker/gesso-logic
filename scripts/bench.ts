@@ -1,18 +1,18 @@
 /**
- * The Phase 0 measurement for spikes 1 and 2, unattended.
+ * The canvas bench, unattended.
  *
- * Builds the spike, serves it, opens it in headless Chrome with
- * `?bench`, and prints the table of runs the render worker logs.
- * Copied from gessosheet's, which is where the shape of it was worked
- * out; what changed is the table and the two flags.
+ * Builds the app, serves it, opens it in headless Chrome with `?bench`,
+ * and prints the table of runs the render worker logs (`src/canvas/
+ * Bench.ts`). It began as Phase 0's runner, itself gessosheet's, and
+ * outlived the spike it drove: Phase 3 measures its exit with it, and
+ * Phase 7 grows it into `pnpm proof`.
  *
- *   node scripts/phase0.ts                 the matrix
- *   node scripts/phase0.ts --shot=out.png  a screenshot of the page after
- *                                          three seconds, for looking at
- *   node scripts/phase0.ts --shot=… --input  the same after a real drag and
- *                                          three notches of ctrl-wheel
- *   node scripts/phase0.ts --gpu           either, without forcing
- *                                          software rendering
+ *   pnpm bench                        the matrix
+ *   pnpm bench --only='^running-pan'  the runs whose label matches
+ *   pnpm bench --gpu                  without forcing software rendering
+ *   pnpm bench --shot=a.png           a screenshot after three seconds
+ *   pnpm bench --shot=a.png --input   the same after a real drag and
+ *                                     three notches of ctrl-wheel
  *
  * Two things are worth knowing about what it reports.
  *
@@ -25,7 +25,8 @@
  *     is its own DevTools target, so this attaches to every target the
  *     page spawns rather than reading the page's log.
  *
- * It needs Chrome on the path, or `CHROME_BIN`.
+ * It needs Chrome on the path, or `CHROME_BIN`. `BENCH_DEBUG=1` echoes
+ * every console line from every target, for when a run never reports.
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -42,10 +43,10 @@ const INPUT = process.argv.includes('--input');
 /** `--only=regex`: run just the matching runs, by label. */
 const ONLY = process.argv.find(arg => arg.startsWith('--only='))?.slice('--only='.length);
 /** Each run is appended here as it finishes, so a timeout loses nothing. */
-const RESULTS = 'phase0-results.jsonl';
+const RESULTS = 'bench-results.jsonl';
 const CHROME_CANDIDATES = ['google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser', 'chrome'];
-const BENCH_PREFIX = 'PHASE0 ';
-const BENCH_DONE = 'PHASE0-DONE';
+const BENCH_PREFIX = 'BENCH ';
+const BENCH_DONE = 'BENCH-DONE';
 
 function findChrome(): string {
   for (const candidate of process.env.CHROME_BIN ? [process.env.CHROME_BIN] : CHROME_CANDIDATES) {
@@ -107,7 +108,9 @@ class Client {
         const params = message.params as { type: string; args: { value?: unknown; description?: string }[] };
         const args = params.args;
         const text = args.map(arg => String(arg.value ?? arg.description ?? '')).join(' ');
-        if (params.type === 'error' || params.type === 'warning') {
+        if (process.env.BENCH_DEBUG) {
+          process.stderr.write(`\n[${params.type}] ${text.slice(0, 300)}`);
+        } else if (params.type === 'error' || params.type === 'warning') {
           process.stderr.write(`\n[${params.type}] ${text}\n`);
         }
         if (text.startsWith(BENCH_PREFIX)) {
@@ -182,7 +185,7 @@ async function main(): Promise<void> {
   execFileSync('node_modules/.bin/vite', ['build', '--logLevel', 'warn'], { stdio: 'inherit' });
 
   const preview = spawn('node_modules/.bin/vite', ['preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
-  const profile = mkdtempSync(join(tmpdir(), 'gessologic-phase0-'));
+  const profile = mkdtempSync(join(tmpdir(), 'gessologic-bench-'));
   let browser: ChildProcess | undefined;
   let client: Client | undefined;
   try {
@@ -257,41 +260,27 @@ async function main(): Promise<void> {
   }
 }
 
-/** The table, in the order the runs were declared. */
+/**
+ * The table, in the order the runs were declared: every field the runs
+ * report, in the order the first one reports them, with the frame's
+ * phases broken out at the end.
+ */
 function report(runs: Record<string, unknown>[]): void {
-  const columns = [
-    'run',
-    'renderer',
-    'costMs',
-    'costP95Ms',
-    'costWorstMs',
-    'gapMs',
-    'gapP95Ms',
-    'recordedPerFrame',
-    'recordMs',
-    'peakTiles',
-    'peakNodes',
-    'missFramesPct',
-    'ageMs',
-    'ageP95Ms',
-    'publishesPerSecond',
-    'nets',
-    'chunks',
-    'patchesPerPublish',
-    'bytesPerPublish',
-    'buildMs',
-    'diffMs'
-  ];
+  if (runs.length === 0) {
+    console.log('no runs reported');
+    return;
+  }
+  const columns = Object.keys(runs[0]!).filter(key => key !== 'phases');
   const phases = ['patches', 'layout', 'render'];
   const all = [...columns, ...phases];
+  const heading = (column: string) => column.replace(/PerFrame$/, '/f').replace(/PerSecond$/, '/s');
   const rows = runs.map(run =>
     all.map(column =>
       phases.includes(column) ? format((run.phases as Record<string, unknown>)?.[column]) : format(run[column])
     )
   );
-  const heading = (column: string) => column.replace(/PerPublish$/, '/pub').replace(/PerFrame$/, '/f').replace(/PerSecond$/, '/s');
   const widths = all.map((column, index) => Math.max(heading(column).length, ...rows.map(row => row[index]?.length ?? 0)));
-  const line = (cells: string[]) => cells.map((cell, index) => cell.padStart(widths[index])).join('  ');
+  const line = (cells: string[]) => cells.map((cell, index) => cell.padStart(widths[index]!)).join('  ');
   console.log(line(all.map(heading)));
   console.log(widths.map(width => '─'.repeat(width)).join('  '));
   for (const row of rows) {
