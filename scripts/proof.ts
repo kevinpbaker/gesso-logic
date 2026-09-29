@@ -68,7 +68,17 @@ const BUDGET = {
   fullSpeedOverSlow: 2,
   /** The freeze: how long it must hold the page, and what must go on behind it. */
   frozenMs: 4_500,
-  framesDuringFreeze: 10,
+  /**
+   * The worker must not go quiet during the freeze: no stretch of the
+   * block, edges included, longer than this without a frame, and a
+   * few frames at least. Stated as a gap and not a count because the
+   * count is the machine's — SwiftShader on a CI runner, with the
+   * simulator taking a core, draws about one frame a second, and this
+   * machine forty in the five — while a worker that has stopped shows
+   * the same five-second gap anywhere.
+   */
+  quietestFreezeMs: 1_500,
+  framesDuringFreeze: 3,
   cyclesDuringFreeze: 500
 };
 
@@ -185,12 +195,13 @@ async function main(): Promise<void> {
     // the frames drawn as it began and ended do not count.
     const inside = recorded.filter(f => f.at > window.start + 50 && f.at < window.end - 50);
     const after = await settleReadout(frozenPage, r => r.cycles > before);
+    // Gaps from the block's start, through each frame, to its end.
+    const stamps = [window.start, ...inside.map(f => f.at), window.end];
     let worstGap = 0;
-    for (let i = 1; i < inside.length; i++) worstGap = Math.max(worstGap, inside[i]!.at - inside[i - 1]!.at);
+    for (let i = 1; i < stamps.length; i++) worstGap = Math.max(worstGap, stamps[i]! - stamps[i - 1]!);
     console.log(
       `  blocking the main thread for five seconds…\n` +
-        `    frozen for ${frozenMs}ms · ${inside.length} frames drawn inside it` +
-        (inside.length > 1 ? ` · worst gap ${worstGap.toFixed(0)}ms` : '') +
+        `    frozen for ${frozenMs}ms · ${inside.length} frames drawn inside it · quietest ${worstGap.toFixed(0)}ms` +
         ` · ${(after.cycles - before).toLocaleString('en')} cycles run`
     );
     check(failures, `the block froze the page for only ${frozenMs}ms`, frozenMs >= BUDGET.frozenMs, BUDGET.frozenMs);
@@ -199,6 +210,12 @@ async function main(): Promise<void> {
       `only ${inside.length} frames were drawn while the main thread was blocked`,
       inside.length >= BUDGET.framesDuringFreeze,
       BUDGET.framesDuringFreeze
+    );
+    check(
+      failures,
+      `the render worker went ${worstGap.toFixed(0)}ms without a frame while the main thread was blocked`,
+      worstGap <= BUDGET.quietestFreezeMs,
+      BUDGET.quietestFreezeMs
     );
     check(
       failures,

@@ -693,8 +693,10 @@ typecheck, the specs and the proof.
   frame in the recording, including those drawn just before and after
   the block. Here the strip records the block's window on the render
   worker's clock, and only frames inside it count. The freeze runs in a
-  second browser with SwiftShader, a GPU process on any machine (about
-  40 frames inside the block). The budgets run in plain software
+  second browser with SwiftShader, a GPU process on any machine. It's
+  checked as the longest stretch of the block without a frame, at most
+  1.5 s: SwiftShader draws about 40 frames in the block here and about 5
+  on a CI runner, while a stopped worker shows a 5 s gap anywhere. The budgets run in plain software
   rendering, which is the stricter test and too fast a picture for
   SwiftShader to keep up with. The simulator running through the
   freeze is checked too: 2,000 to 3,000 cycles in 5 s.
