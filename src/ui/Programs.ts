@@ -24,3 +24,27 @@ export const PROGRAMS: readonly Program[] = Object.entries(SOURCES)
     source
   }))
   .sort((a, b) => a.name.localeCompare(b.name));
+
+const GAME_SOURCES = import.meta.glob<string>('../cpu/games/*.asm', { query: '?raw', import: 'default', eager: true });
+
+/** A game for the computer, and the clock it is played at. */
+export interface Game extends Program {
+  /** What the menu calls it: `Pong`. */
+  readonly title: string;
+  readonly rate: number;
+}
+
+/**
+ * The clock each game is played at, by file name. Pong at 15 kHz: at
+ * 30 kHz, what it was first written for, the ball crossed the screen in
+ * about a second, which was too quick to enjoy.
+ */
+const GAME_RATES: Readonly<Record<string, number>> = { 'pong.asm': 15_000 };
+
+export const GAMES: readonly Game[] = Object.entries(GAME_SOURCES)
+  .map(([path, source]) => {
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const about = /^;\s*(.+)$/m.exec(source)?.[1]?.trim() ?? '';
+    return { name, about, source, title: name.replace(/\.asm$/, '').replace(/^./, c => c.toUpperCase()), rate: GAME_RATES[name] ?? 1000 };
+  })
+  .sort((a, b) => a.name.localeCompare(b.name));

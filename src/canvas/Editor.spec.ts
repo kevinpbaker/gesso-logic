@@ -15,10 +15,10 @@ import { SceneIndex } from './SceneIndex';
  */
 const SCALE = 16;
 
-function setup() {
+function setup(button = 'push') {
   const b = new CircuitBuilder();
   b.input('a');
-  b.button('push');
+  b.button(button);
   b.gate('and', 'g');
   b.output('led', { component: 'g', pin: 'out' });
   const circuit = b.build();
@@ -27,7 +27,7 @@ function setup() {
     components: circuit.components.map(c =>
       c.id === 'a'
         ? { ...c, x: 0, y: 0 }
-        : c.id === 'push'
+        : c.id === button
           ? { ...c, x: 0, y: 10 }
           : c.id === 'g'
             ? { ...c, x: 6, y: 0 }
@@ -75,6 +75,25 @@ function setup() {
 }
 
 describe('the editor', () => {
+  it('holds a button named for an arrow while the arrow is held, with nothing selected', () => {
+    const { editor, sent, at } = setup('up');
+    expect(editor.keyDown('ArrowUp', false, false)).toBe(true);
+    expect(editor.keyDown('ArrowUp', false, false)).toBe(true); // the key's repeat
+    editor.keyUp('ArrowUp');
+    // No button is named `down`, so ArrowDown is not taken.
+    expect(editor.keyDown('ArrowDown', false, false)).toBe(false);
+    expect(sent).toEqual([
+      ['setInput', 'up', 1],
+      ['setInput', 'up', 0]
+    ]);
+    // With a selection, the arrows nudge it, as they always have.
+    editor.pointerDown(at(8, 2), 1, false);
+    editor.pointerUp(at(8, 2));
+    sent.length = 0;
+    editor.keyDown('ArrowUp', false, false);
+    expect(sent.map(s => s[0])).toEqual(['moveBy']);
+  });
+
   it('draws a wire from a pin to a pin', () => {
     const { editor, sent, at } = setup();
     // The switch's output is at (2, 1); the AND's first input at (6, 1).

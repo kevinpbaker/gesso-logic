@@ -108,6 +108,9 @@ interface Clipped extends Fragment {
   readonly gessologic: 1;
 }
 
+/** The buttons arrow keys press, by key. */
+const ARROW_BUTTONS: Readonly<Record<string, string>> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+
 export class Editor {
   /** Selected component and wire ids. */
   readonly selection = new Set<string>();
@@ -122,6 +125,8 @@ export class Editor {
   private readonly now: () => number;
   /** Whether the space bar is held, which turns a left drag into a pan. */
   private spaceHeld = false;
+  /** Arrow keys holding a button down: see `pressArrowButton`. */
+  private readonly arrowsHeld = new Set<string>();
 
   constructor(private readonly deps: EditorDeps) {
     this.now = deps.now ?? (() => performance.now());
@@ -380,7 +385,7 @@ export class Editor {
       case 'ArrowUp':
       case 'ArrowDown': {
         const ids = this.selectedComponents();
-        if (ids.length === 0) return false;
+        if (ids.length === 0) return this.pressArrowButton(key, 1);
         const step = shift ? 4 : 1;
         const dx = key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0;
         const dy = key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0;
@@ -464,6 +469,26 @@ export class Editor {
     if (key === ' ') {
       this.spaceHeld = false;
     }
+    this.pressArrowButton(key, 0);
+  }
+
+  /**
+   * With nothing selected, an arrow key held is a button held: the
+   * level's button whose id is `up`, `down`, `left` or `right`. That is
+   * how Pong's paddle is played from the keyboard. Returns whether there
+   * was such a button.
+   */
+  private pressArrowButton(key: string, value: 0 | 1): boolean {
+    const id = ARROW_BUTTONS[key];
+    if (id === undefined) return false;
+    const scene = this.deps.scene();
+    const c = scene.indexOf.get(id);
+    if (c === undefined || scene.kindOf(c) !== 'button') return false;
+    if (value === 1 && this.arrowsHeld.has(key)) return true; // a key's repeat
+    if (value === 1) this.arrowsHeld.add(key);
+    else if (!this.arrowsHeld.delete(key)) return false;
+    this.deps.send.setInput(id, value);
+    return true;
   }
 
   /** Puts a part on the pointer, to be dropped by the next click. `again` keeps it there after each drop. */

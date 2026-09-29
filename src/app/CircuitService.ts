@@ -369,10 +369,10 @@ export class CircuitService {
     );
   }
 
-  loadProgram(name: string, source: string): void {
+  loadProgram(name: string, source: string, rate = 60): void {
     let circuit: Circuit;
     try {
-      circuit = computerScene(source, 60);
+      circuit = computerScene(source, rate);
     } catch (error) {
       if (!(error instanceof AssemblyError)) throw error;
       this.message = `Couldn't assemble ${name}: ${error.message}`;

@@ -2,7 +2,7 @@
  * Pong on the reference emulator, in the terminal: Phase 19's harness,
  * for playing the game before it runs on gates.
  *
- *   pnpm pong                 → at 30 kHz, the game's intended speed
+ *   pnpm pong                 → at 15 kHz, the speed the game is played at
  *   pnpm pong 60000           → at another clock rate
  *
  * ↑ / ↓ (or w / s) move your paddle, on the left; q quits. A terminal
@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 
 import { PongHarness } from '../src/cpu/PongHarness.ts';
 
-const HZ = Number(process.argv[2] ?? 30_000);
+const HZ = Number(process.argv[2] ?? 15_000);
 const HOLD_MS = 150;
 
 if (!process.stdin.isTTY) {

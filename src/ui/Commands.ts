@@ -1,7 +1,7 @@
 import { MENU_SEPARATOR, type MenuBarMenu } from 'gesso-components';
 
 import type { ClockRate, SceneName } from '../app/CircuitContract';
-import { PROGRAMS } from './Programs';
+import { GAMES, PROGRAMS } from './Programs';
 
 /**
  * Every command the menus, the toolbar and the shortcut sheet offer,
@@ -61,6 +61,7 @@ export type CommandId =
   | `rate:${string}`
   | `example:${SceneName}`
   | `program:${string}`
+  | `game:${string}`
   | 'shortcuts'
   | 'gettingStarted'
   | 'menuBar';
@@ -124,6 +125,7 @@ export function commandLabel(id: CommandId): string {
   if (rate !== null) return `Clock: ${rateLabel(rate)}`;
   if (id.startsWith('example:')) return EXAMPLES.find(e => `example:${e.scene}` === id)?.label ?? id;
   if (id.startsWith('program:')) return `Computer running ${id.slice(8)}`;
+  if (id.startsWith('game:')) return GAMES.find(g => `game:${g.name}` === id)?.title ?? id;
   return FIXED[id]?.label ?? id;
 }
 
@@ -171,6 +173,8 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
     label: 'Examples',
     mnemonic: 'x',
     entries: [
+      ...GAMES.map((g): CommandId => `game:${g.name}`),
+      MENU_SEPARATOR,
       ...EXAMPLES.filter(e => e.scene !== 'bench').map((e): CommandId => `example:${e.scene}`),
       MENU_SEPARATOR,
       ...PROGRAMS.map((p): CommandId => `program:${p.name}`),

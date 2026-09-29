@@ -230,3 +230,27 @@ function seeded(seed: number): (below: number) => number {
     return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * below);
   };
 }
+
+// ---------------------------------------------------------------------------
+// Pong
+// ---------------------------------------------------------------------------
+
+/**
+ * A player for Pong, reading the game from the emulator's RAM by the
+ * program's names: it goes for the ball only once it's coming and within
+ * `reach` columns of the left edge. At 5 it plays about as the CPU does,
+ * and a game is close — the CPU won one 11–9.
+ */
+export function pongPlayer(lockstep: Lockstep, symbols: ReadonlyMap<string, number>, reach = 5): () => Buttons {
+  const ram = lockstep.emulator.ram;
+  const at = (name: string) => {
+    const address = symbols.get(name);
+    if (address === undefined) throw new Error(`Pong has no '${name}'.`);
+    return address;
+  };
+  const [bx, by, dx, pl] = [at('BX'), at('BY'), at('DX'), at('PL')];
+  return () => {
+    const coming = ram[dx] === 0xff && ram[bx]! < reach;
+    return { up: coming && ram[by]! < ram[pl]! + 1, down: coming && ram[by]! > ram[pl]! + 2 };
+  };
+}

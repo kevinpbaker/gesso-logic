@@ -88,8 +88,9 @@ describe('Pong, on the emulator', () => {
     // The CPU counted up to 11 (the parked paddle may still return a ball
     // that comes to it, so the player may score a point or two), and the
     // game began again.
+    // The displays are hex, and the scores BCD, so they read 10 and 11.
     const right = game.outs.filter(([port]) => port === 1).map(([, value]) => value);
-    expect(right.slice(0, 14)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1]);
+    expect(right.slice(0, 14)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x10, 0x11, 0, 1]);
   }, 120_000);
 
   it('can be beaten: a player who follows the ball returns it and scores, and the CPU returns some', () => {

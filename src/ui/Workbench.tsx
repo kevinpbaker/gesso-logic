@@ -14,7 +14,7 @@ import { confirmDiscard, gettingStarted, pasteHint, recentFiles, shortcuts, type
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
 import { palette } from './Palette';
-import { PROGRAMS } from './Programs';
+import { GAMES, PROGRAMS } from './Programs';
 import { ringingParts } from './Problems';
 
 /**
@@ -181,6 +181,15 @@ export function workbench(ctx: ComponentContext) {
       const scene = id.slice(8) as SceneName;
       const example = EXAMPLES.find(e => e.scene === scene)!;
       loadExample(example.label, () => circuit.send.loadScene(scene), scene !== 'bench');
+      return;
+    }
+    if (id.startsWith('game:')) {
+      const game = GAMES.find(g => g.name === id.slice(5));
+      if (game !== undefined) {
+        loadExample(game.title, () => circuit.send.loadProgram(game.name, game.source, game.rate), true);
+        notify(`${game.title} on the gate-level computer at ${game.rate / 1000} kHz: ↑ and ↓ move your paddle.`);
+        canvas.focus();
+      }
       return;
     }
     if (id.startsWith('program:')) {

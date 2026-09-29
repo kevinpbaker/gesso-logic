@@ -8,6 +8,7 @@ import { Circuit, type ClockRate } from '../app/CircuitContract';
 import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, type Motion } from '../canvas/Bench';
 import { circuitCanvas } from '../canvas/CircuitCanvas';
 import { paintTiming } from '../canvas/Painters';
+import { GAMES } from './Programs';
 
 /**
  * The measured pages: `/proof` and `?bench`.
@@ -206,6 +207,16 @@ export function instrumentedApp(ctx: ComponentContext, proof: boolean) {
             ? button('100 Hz', () => {
                 circuit.send.setClockHz(100);
                 circuit.send.run();
+              })
+            : null}
+          {proof
+            ? button('Pong', () => {
+                // The game on the gate-level computer, measured like the bench.
+                const pong = GAMES.find(g => g.name === 'pong.asm')!;
+                circuit.send.loadProgram(pong.name, pong.source, pong.rate);
+                circuit.send.run();
+                canvas.show('all');
+                canvas.focus();
               })
             : null}
           {button(status.pipe(map(s => `Clock: ${s.clockHz === 'max' ? 'max' : `${s.clockHz} Hz`}`)), () => {

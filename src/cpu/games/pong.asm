@@ -1,5 +1,6 @@
 ; Pong: you on the left, with the up and down buttons; the CPU on the
-; right, following the ball a beat behind. First to 11, then again.
+; right, getting back to the middle between shots and going for the
+; ball once it's close. First to 11, then again.
 ;
 ; The screen is 32 × 16. Paddles are 4 pixels tall, in columns 1 and
 ; 30; the ball moves a pixel at a time, diagonally. Every pixel is
@@ -7,10 +8,12 @@
 ; so a paddle moving a row flips two pixels, not eight.
 ;
 ; A frame is a turn of the frame tick, `IN 1`, every 512 cycles. On even
-; frames the paddles move, on odd ones the ball — and the CPU's paddle
-; only seven times in eight that it could, which is the lag that makes
-; it beatable: against a player who never misses, it returns about two
-; balls in three.
+; frames the paddles move, on odd ones the ball, a row a move each, so a
+; paddle chasing the ball only just keeps up. The CPU's paddle heads for
+; the middle while the ball goes away, and for the ball only once it
+; comes within four columns: late enough that a ball aimed at a far
+; corner can beat it. Against a player who never misses, it returns
+; about 93 balls in 100.
 
 BX    = 0x00            ; the ball
 BY    = 0x01
@@ -18,8 +21,8 @@ DX    = 0x02            ; its direction: 1 or 0xFF (-1)
 DY    = 0x03
 PL    = 0x04            ; each paddle's top row; PR must follow PL
 PR    = 0x05
-SL    = 0x06            ; the scores
-SR    = 0x07
+SL    = 0x06            ; the scores, in BCD, so the hex displays
+SR    = 0x07            ; that show them read 10 and 11, not 0A and 0B
 TICK  = 0x08            ; the frame tick, as last seen
 FRAME = 0x09            ; frames since the serve, a byte's worth
 PX    = 0x0A            ; toggle's pixel
@@ -31,7 +34,8 @@ DIR   = 0x0E            ; which way it goes: 1 up, 2 down, 0 neither
 LEFT  = 1               ; the paddles' columns
 RIGHT = 30
 LOWEST = 12             ; a paddle's top row at the bottom: 16 − 4
-WIN   = 11
+REACH = 26              ; the column the CPU goes for the ball from
+WIN   = 0x11            ; eleven, in BCD
 
 ; --- A game: scores to 0, a clear screen, paddles in the middle -----
 start:  LDA #0
@@ -95,18 +99,25 @@ paddle: LDA W                   ; (loads leave the flags: CMP sets them)
         JNZ ai
         IN 0                    ; left: the buttons, 1 up and 2 down
         JMP dir
-ai:     LDA FRAME               ; right: seven paddle frames in eight,
-        AND #14                 ; toward the ball
-        JZ still
-        LDA PR
+ai:     LDA #7                  ; right: aim at the middle, or at the
+        STA T                   ; ball once it's coming and close
+        LDA DX
+        CMP #1
+        JNZ aim
+        LDA BX
+        CMP #REACH
+        JNC aim
+        LDA BY
+        STA T
+aim:    LDA PR
         ADD #1                  ; the paddle's upper middle row
-        CMP BY
-        JNC below               ; above the ball: maybe down
+        CMP T
+        JNC below               ; above the aim: maybe down
         JZ still
         LDA #1
         JMP dir
 below:  ADD #1                  ; its lower middle row
-        CMP BY
+        CMP T
         JC still
         LDA #2
         JMP dir
@@ -197,18 +208,18 @@ bounce: LDA #0                  ; back the other way
         STA DX
         JMP draw
 pointL: LDA SL
-        ADD #1
+        CALL plus1
         STA SL
         OUT 0
         JMP scored
 pointR: LDA SR
-        ADD #1
+        CALL plus1
         STA SR
         OUT 1
 scored: CMP #WIN
         JNZ serve
-        LDX #128                ; a win: the score stays up for 128
-over:   IN 1                    ; turns of the tick, then a new game
+        LDX #64                 ; a win: the score stays up for 64 turns
+over:   IN 1                    ; of the tick, 2 s at 15 kHz, then a new game
         CMP TICK
         JZ over
         STA TICK
@@ -221,6 +232,16 @@ draw:   LDA BX                  ; on where it is
         STA PY
         CALL toggle
         JMP wait
+
+; --- plus1: A + 1 in BCD: past 9, the low digit goes to 0 ---------------
+plus1:  ADD #1
+        STA T
+        AND #0x0F
+        CMP #10
+        LDA T
+        JNZ plussed
+        ADD #6
+plussed: RET
 
 ; --- toggle: flips the pixel at (PX, PY) ------------------------------
 ; Its byte is 0x40 + 4·PY + PX / 8, its bit PX mod 8. Clobbers A, B, X.

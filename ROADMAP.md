@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 19 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 20 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -22,9 +22,9 @@ library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
 and a computer of 8,559 gates runs programs from a ROM, drawing on a
-32 × 16 LED matrix, in lockstep with the emulator. Pong is written and
-plays on the emulator (`pnpm pong`); on gates, Phase 20 on, it has not
-run yet.
+32 × 16 LED matrix, in lockstep with the emulator. Pong plays on those
+gates in the browser at 15 kHz, from Examples → Pong. The showpiece
+page, Phase 21 on, is not built.
 
 ---
 
@@ -1403,8 +1403,9 @@ ever runs on gates.
 **Exit:** playable on the emulator, and the whole program under 256
 instructions.
 
-**Done.** `src/cpu/games/pong.asm` is 208 ROM words, tables included.
-`pnpm pong` plays it in a terminal on the emulator at 30 kHz: ↑ and ↓
+**Done.** `src/cpu/games/pong.asm` is 208 ROM words, tables included
+(223 after Phase 20's changes).
+`pnpm pong` plays it in a terminal on the emulator at 15 kHz: ↑ and ↓
 move your paddle, drawn with half blocks two pixel rows a line. It runs
 through `src/cpu/PongHarness.ts`, which the specs use too. The harness's
 devices are the computer's: the buttons on `IN 0`, and on `IN 1` bit 9
@@ -1417,8 +1418,8 @@ the program's own names.
     that covers its row;
   - a point for the other side when it leaves the screen, the scores on
     `OUT 0` and `OUT 1`;
-  - first to 11 wins; the score stays up for 128 ticks, about 2 s at
-    30 kHz, and a new game starts.
+  - first to 11 wins; the score stays up for 64 ticks, about 2 s at
+    15 kHz, and a new game starts.
 
   The serve comes from the centre on a row the frame count picks, and
   goes toward the player who just lost the point.
@@ -1455,6 +1456,63 @@ game against the emulator.
 
 **Exit:** a full game played to eleven on the gate-level CPU, in the
 browser, with the frame budget green.
+
+**Done.** Examples → Pong loads the computer with `pong.asm` in its ROM,
+clocked at 15 kHz (see *Tuning* below), and runs it; ↑ and ↓ move your
+paddle. In Chrome, at 30 kHz, before it was slowed:
+- the status bar read 29,878 Hz;
+- holding ↑ for a second and a half took the paddle from the middle to
+  the top;
+- on `/proof`, whose instrument now has a **Pong** button, a game ran to
+  11 on gates. The displays read 11 – 03, then 00 – 00 as the next game
+  began.
+
+The strip stayed green throughout: the render worker at 163–165 fps,
+worst frame gap 8.7–14.5 ms, median frame work 1.1 ms. The clock held
+29,867–30,001 Hz.
+
+- **A whole game in lockstep.** `pnpm lockstep` now plays Pong to 11 on
+  the gate-level computer against the emulator, before it fuzzes. The
+  player reads the game from the emulator's RAM and goes for the ball
+  once it's within five columns, about as the CPU does. The CPU won
+  11–7: 855,102 instructions, 114 s of play at 15 kHz, run in 28 s, with
+  no divergence. CI runs it on every push, and `Lockstep.spec.ts` runs
+  the first two points.
+- **Arrow keys hold buttons.** With nothing selected, an arrow key held
+  is the level's button named `up`, `down`, `left` or `right` held:
+  pressed on the key going down, released on it coming up, the key's
+  repeats ignored. With a selection, the arrows nudge it as before. So
+  any circuit with buttons named that way plays from the keyboard.
+- **The scores are BCD** (`plus1` adds 6 past 9), so the hex displays
+  read 10 and 11 rather than 0A and 0B. Pong is now 216 words.
+- **Tuning: slowed by half, to 15 kHz.** At 30 kHz, the speed it was
+  first written for, the ball crossed the screen in about a second: too
+  quick. The frame tick is 512 cycles whatever the clock, so halving the
+  clock halves everything together — ball, paddles and the CPU's lag —
+  and the game plays the same, at half the pace. The browser read
+  14,945 Hz. The win's pause went from 128 ticks to 64 to stay about 2 s.
+- **A better opponent.** The first AI moved on seven paddle frames in
+  eight and returned only 64% of balls against a player who never
+  misses. A steady player beat it 11–0. Skipping moves is all or
+  nothing, because ball and paddle move a row a move each: a paddle a
+  move behind stays behind, and one never behind returns every ball.
+  Now the CPU's paddle heads for the middle while the ball goes away,
+  and goes for the ball once it's coming and within four columns
+  (`REACH = 26`).
+
+  | Goes for the ball from | Returns |
+  | ---------------------- | ------: |
+  | column 24 or nearer the middle | 100% |
+  | 26 | 93% |
+  | 27 | 63% |
+  | 28 | 54% |
+
+  Column 26 it is. A player who never misses still wins, at 14 points
+  to 0 in 20,000 frames. A player who reacts as late as the CPU lost
+  11–9 on the emulator and 11–7 in the lockstep. Pong is 223 words.
+- **Games are their own examples:** `src/cpu/games/*.asm`, each with the
+  clock it was written for (`GAMES` in `src/ui/Programs.ts`), at the
+  head of the Examples menu.
 
 ## Phase 21 — The showpiece page
 

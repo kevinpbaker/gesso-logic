@@ -242,7 +242,8 @@ export interface CircuitCommands {
    * assembly source from its ROM; `name` is what to call it when it
    * does not assemble.
    */
-  loadProgram(name: string, source: string): void;
+  /** The computer running `source`, clocked at `rate` (60 Hz unless it says). */
+  loadProgram(name: string, source: string, rate?: number): void;
   /** Drives an input component, as a person flipping a switch does. */
   /** Sets a switch: a bit, or for a wide one a number. */
   setInput(id: string, value: number): void;

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { assemble } from '../cpu/Assembler';
-import { Lockstep, randomButtons, randomProgram } from './Lockstep';
+import { Lockstep, pongPlayer, randomButtons, randomProgram } from './Lockstep';
 
 /**
  * Phase 18: the gate-level computer in lockstep with the emulator. The
@@ -27,6 +27,19 @@ describe('lockstep', () => {
       expect(lockstep.emulator.state.halted).toBe(true);
     }, 120_000);
   }
+
+  it('plays Pong on gates in step with the emulator, through the first points', () => {
+    // `pnpm lockstep` plays a whole game; this, the first few points.
+    const pong = assemble(readFileSync(join(programs, '../games/pong.asm'), 'utf8'));
+    const lockstep = new Lockstep(pong.rom);
+    const player = pongPlayer(lockstep, pong.symbols);
+    const [sl, sr] = [pong.symbols.get('SL')!, pong.symbols.get('SR')!];
+    while (lockstep.emulator.ram[sl]! + lockstep.emulator.ram[sr]! < 2) {
+      const divergence = lockstep.step(player());
+      expect(divergence?.message ?? null).toBe(null);
+      expect(lockstep.instructions).toBeLessThan(400_000);
+    }
+  }, 120_000);
 
   it('runs random programs with random buttons, with no divergence', () => {
     const started = performance.now();

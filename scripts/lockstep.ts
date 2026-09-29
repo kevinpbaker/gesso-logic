@@ -9,8 +9,9 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 
-import { Lockstep, randomButtons, randomProgram } from '../src/app/Lockstep.ts';
+import { Lockstep, pongPlayer, randomButtons, randomProgram } from '../src/app/Lockstep.ts';
 import { assemble } from '../src/cpu/Assembler.ts';
+import { bcd } from '../src/cpu/PongHarness.ts';
 
 const seconds = Number(process.argv[2] ?? 60);
 const programs = 'src/cpu/programs';
@@ -25,6 +26,26 @@ for (const file of readdirSync(programs).filter(f => f.endsWith('.asm'))) {
   const divergence = lockstep.run(10_000, file === 'io.asm' ? () => ({ up: false, down: true }) : undefined);
   if (divergence !== null) fail(file, divergence.message);
   console.log(`${file}: ${lockstep.instructions} instructions, no divergence`);
+}
+
+// A whole game of Pong, to 11, against a player about as good as the CPU.
+{
+  const pong = assemble(readFileSync('src/cpu/games/pong.asm', 'utf8'));
+  const lockstep = new Lockstep(pong.rom);
+  const player = pongPlayer(lockstep, pong.symbols);
+  const [sl, sr] = [pong.symbols.get('SL')!, pong.symbols.get('SR')!];
+  const began = performance.now();
+  let scores = [0, 0];
+  while (Math.max(...scores) < 11) {
+    const divergence = lockstep.step(player());
+    if (divergence !== null) fail('pong.asm', divergence.message);
+    scores = [bcd(lockstep.emulator.ram[sl]!), bcd(lockstep.emulator.ram[sr]!)];
+    if (lockstep.instructions > 3_000_000) fail('pong.asm', 'no one reached 11 in three million instructions');
+  }
+  console.log(
+    `pong.asm: a game to ${scores.join('–')}, ${lockstep.instructions.toLocaleString('en')} instructions ` +
+      `(${(lockstep.emulator.cycles / 15_000).toFixed(0)} s of play at 15 kHz) in ${((performance.now() - began) / 1000).toFixed(0)} s, no divergence`
+  );
 }
 
 const started = performance.now();

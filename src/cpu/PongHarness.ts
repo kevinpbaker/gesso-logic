@@ -20,7 +20,13 @@ export interface PongState {
   readonly ball: { readonly x: number; readonly y: number; readonly dx: number; readonly dy: number };
   readonly left: number;
   readonly right: number;
+  /** As numbers: the game keeps them in BCD, for the displays. */
   readonly scores: readonly [number, number];
+}
+
+/** A byte of BCD as a number: 0x11 is 11. */
+export function bcd(byte: number): number {
+  return (byte >> 4) * 10 + (byte & 15);
 }
 
 export class PongHarness {
@@ -28,7 +34,7 @@ export class PongHarness {
   readonly emulator: Emulator;
   up = false;
   down = false;
-  /** The scores as the `OUT` ports last showed them, and every write to them in order. */
+  /** The scores as the `OUT` ports last showed them — in BCD — and every write to them in order. */
   readonly shown: [number, number] = [0, 0];
   readonly outs: [port: number, value: number][] = [];
   /** Cycles the last frame's work took, from the tick turning to the game waiting again. */
@@ -83,7 +89,7 @@ export class PongHarness {
       ball: { x: ram[this.symbol('BX')]!, y: ram[this.symbol('BY')]!, dx: signed(ram[this.symbol('DX')]!), dy: signed(ram[this.symbol('DY')]!) },
       left: ram[this.symbol('PL')]!,
       right: ram[this.symbol('PR')]!,
-      scores: [ram[this.symbol('SL')]!, ram[this.symbol('SR')]!]
+      scores: [bcd(ram[this.symbol('SL')]!), bcd(ram[this.symbol('SR')]!)]
     };
   }
 
