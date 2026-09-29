@@ -659,8 +659,8 @@ saturated against while it idles. Decide which before building the
 gate.
 
 **Done: `pnpm proof` is green in CI.** On the runner, full speed costs 0.0–0.6 ms a frame against 4, with medians around 5 ms and the simulator at 2.7× the 100 Hz run's cycles. `/proof` is the simulator on
-the bench scene, with the sheet's strip along the top
-(`src/shell/ProofPanel.ts`): the main thread's pulse, the 5 s block,
+the bench scene, with the proof strip along the top (`proofPanel`
+from `gesso-devtools`): the main thread's pulse, the 5 s block,
 the render worker's fps, worst gap and median frame work, and the main
 thread's fps. `pnpm proof` (`scripts/proof.ts`) drives the built app in
 Chrome with real wheel events and real clicks. CI
@@ -713,12 +713,15 @@ typecheck, the specs and the proof.
   both answers to the wrong question. The sheet's proof counted frames
   either side of the block as drawn during it, which hid the same
   symptom there; its counting is fixed too.
-- **Copying the sheet's pieces:** the strip came over nearly unchanged
-  (its layout heatmap and re-measure count taken out, frame work put
-  in), and the DevTools client unchanged. The budget script couldn't
-  be copied, because the sheet's is about menus and cells. So the case
-  for `gesso-devtools` is the strip and the client, not the script. It
-  will be worth proposing once a third app wants them.
+- **The strip is Gesso's now.** It came over from the sheet nearly
+  unchanged, and the two copies were merged into `proofPanel` in
+  `gesso-devtools` (gesso `1344d95`): the pulse, the block and its recorded
+  window, the render worker's rate, worst gap and median frame work, and
+  the sheet's layout heatmap and re-measure count as an option. Both
+  apps use it. The DevTools client that drives Chrome stayed in each
+  app's `scripts/`: publishing it would give Gesso a Node entry, and
+  Node's global types in a codebase typed for the DOM. The budget
+  scripts are each app's own; the sheet's is about menus and cells.
 - **Also fixed:** Ctrl+S and Ctrl+O are now intercepted by the shell
   (`interceptKey`), as the sheet does. Without it, Chrome's own "Save
   page as" could open before the render worker heard the key.
@@ -915,6 +918,8 @@ shipped in.
 | 3     | …except a picture seen for the first time or resized, which is rasterised at once rather than drawn twice | gesso `74c24c4` |
 | 3     | Scroll layers: a scroll container whose offset is the frame's only change is shifted and its exposed strip redrawn, not redrawn whole. Built for this canvas, not used by it (it pans tiles, not a container), and kept for apps that scroll | gesso `62ef127` |
 | 7     | A picture settles for four frames before it's rasterised, so a layer that changes on most frames is never rasterised (`PaintPictureCache.draw`, `SETTLE_FRAMES`). Found by the proof's freeze: the wasted canvases stalled the render worker in software compositing | gesso `00e2efd` |
+| 7     | A scroll layer is built only after a container has scrolled quietly for three frames running, so a virtualised list that mounts rows as it scrolls never builds one (`ScrollLayerCache.wants`). Fixes 62ef127, which tripled gessosheet's scroll cost in software rendering | gesso `4bce853` |
+| 7     | `proofPanel` in `gesso-devtools`: the main-thread proof strip, merged from gessosheet's and this project's copies | gesso `1344d95` |
 
 ---
 

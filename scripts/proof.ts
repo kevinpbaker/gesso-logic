@@ -211,7 +211,7 @@ async function freeze(page: DevTools, what: string, failures: string[]): Promise
   const before = (await readout(page)).cycles;
   await page.evaluate('globalThis.gessologicProof.reset()');
   const block = await page.evaluate<{ x: number; y: number }>(
-    `(() => { const b = document.getElementById('block').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`
+    `(() => { const b = document.getElementById('gesso-proof-block').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`
   );
   await page.click(block.x, block.y);
   let frozenMs = 0;

@@ -20,10 +20,10 @@
  *     renderWorker: () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
  *   });
  */
+import { proofPanel } from 'gesso-devtools';
 import { createApp } from 'gesso-framework';
 
 import { isProofPath } from './route';
-import { proofPanel } from './shell/ProofPanel';
 
 const host = document.querySelector<HTMLElement>('#app');
 if (host === null) {
@@ -38,7 +38,7 @@ if (host === null) {
 // its frame callback can be given to `createApp`.
 const params = new URLSearchParams(location.search);
 const proof = isProofPath(location.pathname);
-const panel = proof ? proofPanel(host) : null;
+const panel = proof ? proofPanel(host, { global: 'gessologicProof' }) : null;
 const app = createApp({
   ...(panel?.options ?? {}),
   workerName: params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : proof ? 'proof' : undefined,
