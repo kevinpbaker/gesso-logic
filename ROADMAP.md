@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 18 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 19 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -22,8 +22,9 @@ library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
 and a computer of 8,559 gates runs programs from a ROM, drawing on a
-32 × 16 LED matrix, in lockstep with the emulator. Pong, Phase 19 on,
-is not built.
+32 × 16 LED matrix, in lockstep with the emulator. Pong is written and
+plays on the emulator (`pnpm pong`); on gates, Phase 20 on, it has not
+run yet.
 
 ---
 
@@ -1401,6 +1402,50 @@ ever runs on gates.
 
 **Exit:** playable on the emulator, and the whole program under 256
 instructions.
+
+**Done.** `src/cpu/games/pong.asm` is 208 ROM words, tables included.
+`pnpm pong` plays it in a terminal on the emulator at 30 kHz: ↑ and ↓
+move your paddle, drawn with half blocks two pixel rows a line. It runs
+through `src/cpu/PongHarness.ts`, which the specs use too. The harness's
+devices are the computer's: the buttons on `IN 0`, and on `IN 1` bit 9
+of the clock edges since reset. It reads the game's state from RAM by
+the program's own names.
+
+- **The game:**
+  - paddles 4 pixels tall in columns 1 and 30;
+  - a ball moving diagonally, bouncing off the walls and off a paddle
+    that covers its row;
+  - a point for the other side when it leaves the screen, the scores on
+    `OUT 0` and `OUT 1`;
+  - first to 11 wins; the score stays up for 128 ticks, about 2 s at
+    30 kHz, and a new game starts.
+
+  The serve comes from the centre on a row the frame count picks, and
+  goes toward the player who just lost the point.
+- **Every pixel is drawn by `toggle`, which flips it,** so drawing and
+  erasing are one routine. Moving a paddle a row flips two pixels, not
+  eight. A frame's work is at most 320 cycles, under the 512 between
+  ticks, so no frame is dropped. The one exception is a new game's
+  clear and redraw, once a game.
+- **Frames:** each turn of the tick is one. Paddles move on even frames
+  and the ball on odd ones. The CPU's paddle moves on seven paddle
+  frames in eight, toward the ball, which is its lag: against a player
+  who never misses, it returns 64% of balls. Moving on every frame it
+  returned 79%, and on every other frame 32%. Phase 20 tunes it on gates.
+- **One level of `CALL` shaped it:** `toggle` is the only subroutine,
+  and the two paddles share one block of code indexed by X (`PL,X`, and
+  `LDT columns,X` for their columns), instead of a subroutine each.
+- **The specs play it** (`Pong.spec.ts`), and after every frame check
+  that the screen is exactly the game's state and that the frame's work
+  fit:
+  - the paddle moves with the buttons and stops at the edges;
+  - a player parked at the bottom loses to 11, the score stays up, and
+    the game begins again;
+  - a player who follows the ball returns it and scores, and the CPU
+    returns some too.
+- **The first draft had one bug,** found on the first run: `LDA` then
+  `JZ`, when loads don't set the flags. The ISA decided that in Phase
+  13, and it cost two `CMP #0`s here.
 
 ## Phase 20 — Pong on gates
 

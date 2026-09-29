@@ -17,7 +17,8 @@
     "speed": "node --import ./scripts/lib/extensionless.mjs scripts/speed.ts",
     "asm": "node --import ./scripts/lib/extensionless.mjs scripts/asm.ts",
     "generate": "node --import ./scripts/lib/extensionless.mjs scripts/generate.ts",
-    "lockstep": "node --import ./scripts/lib/extensionless.mjs scripts/lockstep.ts"
+    "lockstep": "node --import ./scripts/lib/extensionless.mjs scripts/lockstep.ts",
+    "pong": "node --import ./scripts/lib/extensionless.mjs scripts/pong.ts"
   },
   "dependencies": {
     "gesso-components": "file:vendor/gesso-components-0.4.0-f183dffd.tgz",
