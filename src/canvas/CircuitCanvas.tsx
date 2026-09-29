@@ -84,6 +84,8 @@ export interface CanvasHandle {
   missed(): number;
   /** The scene's bounds in grid units. */
   bounds(): Box;
+  /** The definition name of the chip selected, when the selection is exactly one chip; null otherwise. */
+  selectedChip(): string | null;
   /** Selection, gestures and the keys that drive them. */
   readonly editor: Editor;
   /** Bumped whenever the editor has something new to show. */
@@ -476,8 +478,16 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     send: circuit.send,
     panBy,
     value: net => (net < 0 ? -1 : signalOf(chunks, net)),
-    copyText: text => shell.copyText(text),
-    changed: () => editorChanged.next(editorChanged.value + 1)
+    changed: () => editorChanged.next(editorChanged.value + 1),
+    chipShape: name => circuit.view.document.value.chips.find(chip => chip.name === name)?.shape
+  });
+  // What the application worker made of a copy, onto the clipboard.
+  let clipped = 0;
+  ctx.effect(circuit.view.clipboard, clip => {
+    if (clip.serial !== 0 && clip.serial !== clipped) {
+      clipped = clip.serial;
+      shell.copyText(clip.text);
+    }
   });
   // Geometry arriving can move what the overlay outlines.
   ctx.effect(revision, () => editorChanged.next(editorChanged.value + 1));
@@ -521,14 +531,29 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
   // Frame the view when a document is opened, once there is a size to
   // frame it in: not on an edit, however much it changes.
   let framedFor = -1;
+  // The view at each level of chips opened, so stepping back out of a
+  // chip returns to where it was opened from rather than to a fit.
+  const levelCameras: { x: number; y: number; scale: number }[] = [];
+  let depth = 0;
   ctx.effect(combineLatest([size.changes, circuit.view.document, revision]), ([s, document]) => {
     // Wait for the opened document's geometry: the summary and the
     // geometry are separate keys, and the summary can arrive first.
-    const waiting = document.components > 0 && scene.componentCount === 0;
+    const waiting =
+      (document.components > 0 && scene.componentCount === 0) ||
+      circuit.view.geometry.value.level !== document.path.map(level => level.id).join('/');
     if (s.width > 0 && document.opened !== framedFor && !waiting) {
       framedFor = document.opened;
+      const next = document.path.length;
+      if (next > depth) {
+        levelCameras[depth] = { ...camera.value };
+      }
+      const back = next < depth ? levelCameras[next] : undefined;
+      depth = next;
+      levelCameras.length = depth;
       // A document brought back by a reload opens where it was left.
-      if (document.camera !== null) {
+      if (back !== undefined) {
+        camera.value = back;
+      } else if (document.camera !== null) {
         camera.value = { ...document.camera };
       } else {
         show('all');
@@ -604,6 +629,11 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       return missing / visibleNets.length;
     },
     bounds: () => scene.bounds,
+    selectedChip: () => {
+      if (editor.selection.size !== 1) return null;
+      const c = scene.indexOf.get([...editor.selection][0]!);
+      return c === undefined ? null : scene.chipNames[c] ?? null;
+    },
     editor,
     editorChanged
   };

@@ -12,7 +12,9 @@ export type GateKind = 'not' | 'and' | 'or' | 'nand' | 'nor' | 'xor' | 'xnor';
 export type SourceKind = 'clock' | 'constant' | 'input' | 'button';
 /** Parts that only read: they show a value and drive nothing. */
 export type DisplayKind = 'output' | 'probe' | 'hex' | 'seg7';
-export type Kind = GateKind | SourceKind | DisplayKind;
+/** A chip: a circuit used as a part. Its pins are its definition's switches and LEDs; see `Chips.ts`. */
+export type ChipKind = 'chip';
+export type Kind = GateKind | SourceKind | DisplayKind | ChipKind;
 
 export const GATE_KINDS: readonly GateKind[] = ['not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor'];
 
@@ -44,7 +46,10 @@ export const PINS: Readonly<Record<Kind, PinSpec>> = {
   hex: { inputs: ['b0', 'b1', 'b2', 'b3'], outputs: [] },
   // One input per segment, lettered as the standard does: a across the
   // top, then clockwise, g across the middle.
-  seg7: { inputs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], outputs: [] }
+  seg7: { inputs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], outputs: [] },
+  // A chip's pins depend on its definition, so none are listed here:
+  // ask `pinsOf` in `Chips.ts`, which knows the definitions.
+  chip: { inputs: [], outputs: [] }
 };
 
 /** Parts a person drives: switches and push buttons. */

@@ -2,8 +2,8 @@ import type { PaintSurface } from 'gesso-core';
 
 import type { CircuitCommands } from '../app/CircuitContract';
 import { relabel, type Fragment } from '../app/DocumentEdits';
-import { pinAt, route, sizeOf, slotOf, type Box, type Point } from '../app/Layout';
-import type { Component, PinRef, Wire } from '../sim/Circuit';
+import { pinAt, route, sizeOf, slotOf, type Box, type KindLayout, type Point, type Shape } from '../app/Layout';
+import type { PinRef } from '../sim/Circuit';
 import { PINS, type Kind } from '../sim/Primitives';
 import type { SceneIndex } from './SceneIndex';
 
@@ -32,14 +32,30 @@ export interface EditorDeps {
   scale(): number;
   send: Pick<
     CircuitCommands,
-    'place' | 'connect' | 'moveBy' | 'rotate' | 'remove' | 'insert' | 'undo' | 'redo' | 'setInput' | 'tabulate'
+    | 'place'
+    | 'connect'
+    | 'moveBy'
+    | 'rotate'
+    | 'remove'
+    | 'insert'
+    | 'undo'
+    | 'redo'
+    | 'setInput'
+    | 'tabulate'
+    | 'makeChip'
+    | 'openChip'
+    | 'copy'
+    | 'duplicate'
   >;
+  /** A chip definition's body, by name, for placing one from the palette; undefined for a name the document lacks. */
+  chipShape(name: string): KindLayout | undefined;
   panBy(dx: number, dy: number): void;
   /** A net's value as last published: 0, 1, or -1 when it has not arrived. */
   value(net: number): -1 | 0 | 1;
-  copyText(text: string): void;
   /** Called whenever the overlay has something new to draw. */
   changed(): void;
+  /** The clock a double click is timed on; a spec passes its own. */
+  now?(): number;
 }
 
 type Hit =
@@ -50,12 +66,15 @@ type Hit =
 
 type Mode =
   | { readonly kind: 'idle' }
-  | { readonly kind: 'placing'; readonly what: Kind; readonly again: boolean }
+  | { readonly kind: 'placing'; readonly what: Kind; readonly again: boolean; readonly chip?: string }
   | { readonly kind: 'pressing'; readonly screen: Point; readonly hit: Hit; readonly additive: boolean; readonly holding?: string }
   | { readonly kind: 'moving'; readonly gesture: string; last: Point }
   | { readonly kind: 'wiring'; readonly from: PinRef; readonly fromAt: Point }
   | { readonly kind: 'marquee'; readonly from: Point; readonly additive: boolean }
   | { readonly kind: 'panning'; last: Point };
+
+/** Two clicks on one chip within this many milliseconds open it. */
+const DOUBLE_CLICK_MS = 400;
 
 /** How far a press may wander, in screen pixels, and still be a click. */
 const DRAG_THRESHOLD = 4;
@@ -96,16 +115,21 @@ export class Editor {
   /** Ids this editor has handed out and may not have seen come back yet. */
   private readonly issued = new Set<string>();
   private gestures = 0;
+  /** The last click on a component, for telling a double click. */
+  private lastClick: { id: string; at: number } | null = null;
+  private readonly now: () => number;
   /** Whether the space bar is held, which turns a left drag into a pan. */
   private spaceHeld = false;
 
-  constructor(private readonly deps: EditorDeps) {}
+  constructor(private readonly deps: EditorDeps) {
+    this.now = deps.now ?? (() => performance.now());
+  }
 
   /** A label for what the editor is doing, for the readout. */
   get status(): string {
     switch (this.mode.kind) {
       case 'placing':
-        return `placing ${this.mode.what} — click to drop, Esc to stop`;
+        return `placing ${this.mode.chip ?? this.mode.what} — click to drop, Esc to stop`;
       case 'wiring':
         return 'drawing a wire — release on a pin';
       case 'moving':
@@ -129,9 +153,10 @@ export class Editor {
     }
     if (this.mode.kind === 'placing') {
       const what = this.mode.what;
-      const id = what === 'probe' ? this.probeAt(this.pointer) : this.placeAt(what, this.pointer);
+      const chip = this.mode.chip;
+      const id = what === 'probe' ? this.probeAt(this.pointer) : this.placeAt(what, this.pointer, chip);
       this.select([id], false);
-      this.mode = shift || this.mode.again ? { kind: 'placing', what, again: this.mode.again } : { kind: 'idle' };
+      this.mode = shift || this.mode.again ? { kind: 'placing', what, again: this.mode.again, ...(chip === undefined ? {} : { chip }) } : { kind: 'idle' };
       this.deps.changed();
       return;
     }
@@ -295,6 +320,17 @@ export class Editor {
       case 'Backspace':
         this.deleteSelection();
         return true;
+      case 'm': {
+        // The selection made into a chip, in place.
+        const ids = this.selectedComponents();
+        if (ids.length > 0) {
+          this.deps.send.makeChip(ids);
+          // The selected parts are inside the chip now.
+          this.selection.clear();
+          this.deps.changed();
+        }
+        return true;
+      }
       case 't': {
         // The truth table of the selection; with nothing selected, none.
         this.deps.send.tabulate(this.selectedComponents());
@@ -336,8 +372,8 @@ export class Editor {
   }
 
   /** Puts a part on the pointer, to be dropped by the next click. `again` keeps it there after each drop. */
-  startPlacing(what: Kind, again = false): void {
-    this.mode = { kind: 'placing', what, again };
+  startPlacing(what: Kind, again = false, chip?: string): void {
+    this.mode = { kind: 'placing', what, again, ...(chip === undefined ? {} : { chip }) };
     this.deps.changed();
   }
 
@@ -424,8 +460,9 @@ export class Editor {
       surface.lineWidth(px);
       surface.stroke();
     } else if (mode.kind === 'placing') {
-      const size = sizeOf(mode.what);
-      const at = placement(mode.what, this.pointer);
+      const shape = this.shapeFor(mode.what, mode.chip);
+      const size = sizeOf(shape);
+      const at = placement(shape, this.pointer);
       surface.beginPath();
       surface.roundRect(at.x, at.y, size.width, size.height, 0.4);
       surface.strokeColor('primary');
@@ -434,7 +471,7 @@ export class Editor {
       surface.stroke();
       surface.lineDash([]);
       surface.fillColor('primary');
-      surface.text(mode.what.toUpperCase(), at.x + size.width / 2, at.y - 0.4, { fontSize: 12 * px, align: 'center' });
+      surface.text((mode.chip ?? mode.what).toUpperCase(), at.x + size.width / 2, at.y - 0.4, { fontSize: 12 * px, align: 'center' });
     }
 
     // The pin under the pointer, so drawing a wire has somewhere to aim.
@@ -471,10 +508,19 @@ export class Editor {
     return { kind: 'empty' };
   }
 
-  /** A click on a component: a switch toggles, anything else is selected. */
+  /** A click on a component: a switch toggles, a chip clicked twice opens, anything else is selected. */
   private clickComponent(id: string, additive: boolean): void {
     const scene = this.deps.scene();
     const c = scene.indexOf.get(id);
+    const now = this.now();
+    const twice = this.lastClick !== null && this.lastClick.id === id && now - this.lastClick.at < DOUBLE_CLICK_MS;
+    this.lastClick = { id, at: now };
+    if (twice && c !== undefined && scene.kindOf(c) === 'chip' && !additive) {
+      this.lastClick = null;
+      this.selection.clear();
+      this.deps.send.openChip(id);
+      return;
+    }
     if (c !== undefined && scene.kindOf(c) === 'input' && !additive && this.selection.has(id)) {
       // A second click on a selected switch flips it: the first selects it
       // so it can be moved, the second uses it.
@@ -505,17 +551,41 @@ export class Editor {
     this.deps.changed();
   }
 
+  /**
+   * Copy is the application worker's: only it has whole parts — labels,
+   * values, rates, which chip a chip is, and the definitions a chip
+   * needs — and it publishes the text for the canvas to hand the shell.
+   */
   private copy(): void {
-    const fragment = this.fragmentOfSelection();
-    if (fragment.components.length === 0) return;
-    const clipped: Clipped = { gessologic: 1, ...fragment };
-    this.deps.copyText(JSON.stringify(clipped));
+    const ids = this.selectedComponents();
+    if (ids.length > 0) this.deps.send.copy(ids);
   }
 
+  /**
+   * Duplicate, likewise, is copied by the application worker, under ids
+   * picked here so the copies can be selected the moment they are asked
+   * for: each selected part, and each wire between two of them.
+   */
   private duplicate(): void {
-    const fragment = this.fragmentOfSelection();
-    if (fragment.components.length === 0) return;
-    this.insertFragment(relabel(fragment, 2, 2, prefix => this.fresh(prefix)));
+    const ids = this.selectedComponents();
+    if (ids.length === 0) return;
+    const scene = this.deps.scene();
+    const kept = new Set(ids);
+    const rename: Record<string, string> = {};
+    for (const id of ids) {
+      const c = scene.indexOf.get(id);
+      rename[id] = this.fresh(c === undefined ? 'part' : scene.kindOf(c));
+    }
+    scene.wireIds.forEach((id, w) => {
+      const ends = scene.wireEnds[w]!;
+      if (kept.has(ends.from.component) && kept.has(ends.to.component)) rename[id] = this.fresh('w');
+    });
+    this.deps.send.duplicate(ids, rename, 2, 2);
+    this.select(
+      ids.map(id => rename[id]!),
+      false
+    );
+    this.deps.changed();
   }
 
   private insertFragment(fragment: Fragment): void {
@@ -527,32 +597,7 @@ export class Editor {
     this.deps.changed();
   }
 
-  /** The selection as a circuit fragment: its components, and the wires with both ends among them. */
-  private fragmentOfSelection(): Fragment {
-    const scene = this.deps.scene();
-    const components: Component[] = [];
-    for (const id of this.selection) {
-      const c = scene.indexOf.get(id);
-      if (c === undefined) continue;
-      const rotation = scene.rotationOf(c);
-      components.push({
-        id,
-        kind: scene.kindOf(c),
-        x: scene.x[c]!,
-        y: scene.y[c]!,
-        ...(rotation === 0 ? {} : { rotation })
-      });
-    }
-    const kept = new Set(components.map(c => c.id));
-    const wires: Wire[] = [];
-    scene.wireIds.forEach((id, w) => {
-      const ends = scene.wireEnds[w]!;
-      if (kept.has(ends.from.component) && kept.has(ends.to.component)) {
-        wires.push({ id, from: ends.from, to: ends.to });
-      }
-    });
-    return { components, wires };
-  }
+
 
   /**
    * A probe dropped on a wire clips onto it: placed just above the
@@ -569,16 +614,21 @@ export class Editor {
     if (w >= 0) {
       const ends = scene.wireEnds[w]!;
       const from = scene.indexOf.get(ends.from.component);
-      const driver = from !== undefined && PINS[scene.kindOf(from)].outputs.includes(ends.from.pin) ? ends.from : ends.to;
+      const driver = from !== undefined && scene.drives(from, ends.from.pin) ? ends.from : ends.to;
       this.deps.send.connect(driver, { component: id, pin: 'in' }, this.fresh('w'));
     }
     return id;
   }
 
-  private placeAt(what: Kind, world: Point): string {
+  /** What a part being placed is laid out as: its kind, or a chip's body from the palette. */
+  private shapeFor(what: Kind, chip: string | undefined): Shape {
+    return (chip === undefined ? undefined : this.deps.chipShape(chip)) ?? what;
+  }
+
+  private placeAt(what: Kind, world: Point, chip?: string): string {
     const id = this.fresh(what);
-    const at = placement(what, world);
-    this.deps.send.place(what, at.x, at.y, id);
+    const at = placement(this.shapeFor(what, chip), world);
+    this.deps.send.place(what, at.x, at.y, id, undefined, chip);
     return id;
   }
 
@@ -597,7 +647,7 @@ export class Editor {
 }
 
 /** Where a part dropped at a point goes: centred on it, on the grid. */
-function placement(what: Kind, world: Point): Point {
+function placement(what: Shape, world: Point): Point {
   const size = sizeOf(what);
   return { x: Math.round(world.x - size.width / 2), y: Math.round(world.y - size.height / 2) };
 }

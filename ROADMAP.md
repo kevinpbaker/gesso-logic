@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 7 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 8 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -745,6 +745,75 @@ compiler flattens the hierarchy; the renderer never does.
 **Exit:** a full adder made into a chip, eight of them chained into an
 8-bit adder, that into a chip, and the inside of the third full adder
 showing live values while the outside adds.
+
+**Done.** The **Adder** button loads the exit circuit: a full adder
+chip, eight of them in an `adder 8` chip, and that between two bytes of
+switches, a byte of LEDs and hex displays, adding 0x2B and 0x3C. Carry
+in comes from a flip-flop that toggles once a second, and with those
+two bytes the carry into bit 2 is the carry in. So running it and
+double-clicking `add` then `fa2` shows the third full adder's carry in,
+sum and carry out changing every second while the sum outside flips
+between 0x67 and 0x68. Watched in Chrome, and specced headless.
+
+- **A chip is a circuit.** Its switches are its input pins and its
+  LEDs its output pins, named by label and ordered top to bottom
+  (`src/sim/Chips.ts`). The document has one `chips` table, and a
+  `chip` component names a definition in it, at any depth. So a chip
+  file is a circuit file: the adder file's `chips` holds `full adder`
+  and `adder 8`, each written one part a line. Reading checks that
+  every `chip` names a definition and every wire a pin it has.
+- **The compiler flattens; nothing else does.** `compile` walks the
+  hierarchy. An instance's parts get its id as a prefix (`add/fa2/`),
+  and its definition's switches and LEDs become joins, not sources or
+  sinks, so a net runs straight through a chip's edge. A chip that
+  contains itself is refused, naming the loop.
+- **Opening a chip.** Double-click opens it; a breadcrumb over the
+  canvas steps back out, returning to the view it was opened from. The
+  service publishes the opened level's geometry with nets looked up
+  under the prefix, so the renderer draws one level and its values come
+  from the same simulation. Geometry says which level it is, and the
+  canvas frames a newly opened chip only once that level's geometry has
+  arrived.
+- **Make chip** (M, or the readout button). The selection's boundary
+  crossings become pins: driven from inside, an output; from outside,
+  an input. One pin per outside driver, and one per inside output.
+  Selected switches and LEDs are pins already. The selection is
+  replaced by one instance, rewired, and the definition keeps its
+  layout. Chips appear in a palette row to place like any part. Tried
+  in Chrome on the counter's decoder: nine OR gates made into a chip,
+  and it still counts.
+- **Drawn** as a body with the definition's name, pin names at close
+  zoom and the instance's label above. The wires to a chip carry the
+  values; the chip isn't filled by one.
+
+- **Editing inside a chip** changes its definition, and so every
+  instance: a NOT placed inside one full adder is in all eight (the
+  gate count went from 80 to 88). An edit is made on the opened level
+  with the document's chips attached, and folded back as that
+  definition; undo takes it back in one step. A move inside a chip is
+  still a move, not a recompile.
+- **Renaming:** select one chip and a name field appears in the
+  readout. The rename reaches the definition and every instance at
+  every depth; the palette and breadcrumb follow.
+- **Copy, cut and duplicate are the application worker's.** The render
+  worker only knows what it draws, so its copies had been dropping
+  labels, switch values, clock rates and which chip a chip is. Copy now
+  asks the application worker, which publishes the text (with every
+  chip definition the copied parts use) for the canvas to hand to the
+  shell. Duplicate sends ids the editor picked, so the copies are
+  selected straight away. Paste merges the chips it brings: a name the
+  document lacks is added, an identical definition is reused, and a
+  different one with the same name gets a number, with every reference
+  following.
+- **Insert chip…** picks a circuit file and adds it as a chip named
+  after the file, with the chips it uses; an identical one is reused,
+  and a clash is numbered.
+- **The truth table sweeps chips** as it does gates, on whichever level
+  is open. Outputs are named by the LED that shows them, wherever it
+  is.
+- **Also fixed:** the autosave's restore is asynchronous, and it used to
+  replace a document loaded or edited before the read answered. It now
+  applies only to a document nobody has touched since.
 
 ## Phase 9 — Buses
 

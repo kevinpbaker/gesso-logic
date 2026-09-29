@@ -1,4 +1,5 @@
 import { CIRCUIT_VERSION, type Circuit, type Component, type Rotation, type Wire } from './Circuit';
+import { pinsOf } from './Chips';
 import { PINS, type Kind } from './Primitives';
 
 /**
@@ -59,7 +60,8 @@ export function writeCircuit(circuit: Circuit): string {
       ...(c.rotation ? { rotation: c.rotation } : {}),
       ...(c.label !== undefined ? { label: c.label } : {}),
       ...(c.value !== undefined ? { value: c.value } : {}),
-      ...(c.rate !== undefined ? { rate: c.rate } : {})
+      ...(c.rate !== undefined ? { rate: c.rate } : {}),
+      ...(c.chip !== undefined ? { chip: c.chip } : {})
     });
   const wire = (w: Wire) =>
     JSON.stringify({
@@ -67,13 +69,25 @@ export function writeCircuit(circuit: Circuit): string {
       from: { component: w.from.component, pin: w.from.pin },
       to: { component: w.to.component, pin: w.to.pin }
     });
-  const list = (items: string[]) => (items.length === 0 ? '[]' : `[\n    ${items.join(',\n    ')}\n  ]`);
+  const list = (items: string[], indent: string) =>
+    items.length === 0 ? '[]' : `[\n${indent}  ${items.join(`,\n${indent}  `)}\n${indent}]`;
+  const body = (level: Circuit, indent: string) =>
+    `${indent}"components": ${list(level.components.map(component), indent)},\n` +
+    `${indent}"wires": ${list(level.wires.map(wire), indent)}`;
+  // Chips by name, sorted, so the same document writes the same bytes;
+  // each definition one part a line, like the top level.
+  const names = Object.keys(circuit.chips ?? {}).sort();
+  const chips =
+    names.length === 0
+      ? ''
+      : `,\n  "chips": {\n${names
+          .map(name => `    ${JSON.stringify(name)}: {\n${body(circuit.chips![name]!, '      ')}\n    }`)
+          .join(',\n')}\n  }`;
   return (
     '{\n' +
     `  "format": "${FILE_FORMAT}",\n` +
     `  "version": ${CIRCUIT_VERSION},\n` +
-    `  "components": ${list(circuit.components.map(component))},\n` +
-    `  "wires": ${list(circuit.wires.map(wire))}\n` +
+    `${body(circuit, '  ')}${chips}\n` +
     '}\n'
   );
 }
@@ -101,30 +115,60 @@ export function circuitFrom(data: unknown): Circuit {
     throw new CircuitFileError(`version ${version}: made by a newer gessologic, which this one cannot read`);
   }
 
+  // The chips first, by name, so a component can name one and a wire
+  // can be checked against its pins, whichever order the file lists them.
+  const rawChips = data['chips'];
+  if (rawChips !== undefined && !isRecord(rawChips)) {
+    throw new CircuitFileError('chips: not an object');
+  }
+  const names = new Set(Object.keys(rawChips ?? {}));
+  const chips: Record<string, Circuit> = {};
+  for (const name of [...names].sort()) {
+    chips[name] = levelFrom((rawChips as Record<string, unknown>)[name], `chips[${JSON.stringify(name)}]`, names);
+  }
+  const top = levelFrom(data, '', names);
+  const circuit: Circuit = names.size === 0 ? top : { ...top, chips };
+  for (const [at, level] of [['', top] as const, ...Object.entries(chips).map(([name, level]) => [`chips[${JSON.stringify(name)}].`, level] as const)]) {
+    checkWires(level, at, circuit.chips);
+  }
+  return circuit;
+}
+
+/**
+ * One level: the top, or a chip's definition. Everything but the pins a
+ * wire names on a chip, which wait until every definition is read.
+ */
+function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>): Circuit {
+  if (!isRecord(data)) throw new CircuitFileError(`${prefix || 'circuit'}: not an object`);
+  const at = (path: string) => (prefix === '' ? path : `${prefix}.${path}`);
   const components: Component[] = [];
   const kinds = new Map<string, Kind>();
   const ids = new Set<string>();
-  for (const [n, raw] of arrayAt(data, 'components').entries()) {
-    const at = `components[${n}]`;
-    if (!isRecord(raw)) throw new CircuitFileError(`${at}: not an object`);
-    const id = idAt(raw, at, ids);
+  for (const [n, raw] of arrayAt(data, 'components', at('components')).entries()) {
+    const here = at(`components[${n}]`);
+    if (!isRecord(raw)) throw new CircuitFileError(`${here}: not an object`);
+    const id = idAt(raw, here, ids);
     const kind = raw['kind'];
     if (typeof kind !== 'string' || !Object.hasOwn(PINS, kind)) {
-      throw new CircuitFileError(`${at}.kind: ${JSON.stringify(kind)} is not a part`);
+      throw new CircuitFileError(`${here}.kind: ${JSON.stringify(kind)} is not a part`);
     }
-    const x = integerAt(raw, 'x', at);
-    const y = integerAt(raw, 'y', at);
+    const x = integerAt(raw, 'x', here);
+    const y = integerAt(raw, 'y', here);
     const rotation = raw['rotation'];
     if (rotation !== undefined && rotation !== 0 && rotation !== 90 && rotation !== 180 && rotation !== 270) {
-      throw new CircuitFileError(`${at}.rotation: ${JSON.stringify(rotation)} is not 0, 90, 180 or 270`);
+      throw new CircuitFileError(`${here}.rotation: ${JSON.stringify(rotation)} is not 0, 90, 180 or 270`);
     }
     const label = raw['label'];
-    if (label !== undefined && typeof label !== 'string') throw new CircuitFileError(`${at}.label: not a string`);
+    if (label !== undefined && typeof label !== 'string') throw new CircuitFileError(`${here}.label: not a string`);
     const value = raw['value'];
-    if (value !== undefined && value !== 0 && value !== 1) throw new CircuitFileError(`${at}.value: not 0 or 1`);
+    if (value !== undefined && value !== 0 && value !== 1) throw new CircuitFileError(`${here}.value: not 0 or 1`);
     const rate = raw['rate'];
     if (rate !== undefined && !(typeof rate === 'number' && rate > 0 && Number.isFinite(rate))) {
-      throw new CircuitFileError(`${at}.rate: not a positive number`);
+      throw new CircuitFileError(`${here}.rate: not a positive number`);
+    }
+    const chip = raw['chip'];
+    if (kind === 'chip' && (typeof chip !== 'string' || !chipNames.has(chip))) {
+      throw new CircuitFileError(`${here}.chip: ${JSON.stringify(chip)} is not a chip this file defines`);
     }
     kinds.set(id, kind as Kind);
     components.push({
@@ -135,27 +179,23 @@ export function circuitFrom(data: unknown): Circuit {
       ...(rotation ? { rotation: rotation as Rotation } : {}),
       ...(label !== undefined ? { label } : {}),
       ...(value !== undefined ? { value } : {}),
-      ...(rate !== undefined ? { rate } : {})
+      ...(rate !== undefined ? { rate } : {}),
+      ...(kind === 'chip' ? { chip: chip as string } : {})
     });
   }
 
   const wires: Wire[] = [];
-  for (const [n, raw] of arrayAt(data, 'wires').entries()) {
-    const at = `wires[${n}]`;
-    if (!isRecord(raw)) throw new CircuitFileError(`${at}: not an object`);
-    const id = idAt(raw, at, ids);
+  for (const [n, raw] of arrayAt(data, 'wires', at('wires')).entries()) {
+    const here = at(`wires[${n}]`);
+    if (!isRecord(raw)) throw new CircuitFileError(`${here}: not an object`);
+    const id = idAt(raw, here, ids);
     const end = (side: 'from' | 'to') => {
       const ref = raw[side];
       if (!isRecord(ref) || typeof ref['component'] !== 'string' || typeof ref['pin'] !== 'string') {
-        throw new CircuitFileError(`${at}.${side}: not a pin`);
+        throw new CircuitFileError(`${here}.${side}: not a pin`);
       }
-      const kind = kinds.get(ref['component']);
-      if (kind === undefined) {
-        throw new CircuitFileError(`${at}.${side}: no component ${JSON.stringify(ref['component'])}`);
-      }
-      const pins = PINS[kind];
-      if (!pins.inputs.includes(ref['pin']) && !pins.outputs.includes(ref['pin'])) {
-        throw new CircuitFileError(`${at}.${side}: a ${kind} has no pin ${JSON.stringify(ref['pin'])}`);
+      if (!kinds.has(ref['component'])) {
+        throw new CircuitFileError(`${here}.${side}: no component ${JSON.stringify(ref['component'])}`);
       }
       return { component: ref['component'], pin: ref['pin'] };
     };
@@ -164,13 +204,29 @@ export function circuitFrom(data: unknown): Circuit {
   return { version: CIRCUIT_VERSION, components, wires };
 }
 
+/** Every wire's pins exist on their components, a chip's by its definition. */
+function checkWires(level: Circuit, prefix: string, chips: Circuit['chips']): void {
+  const byId = new Map(level.components.map(c => [c.id, c]));
+  level.wires.forEach((wire, n) => {
+    for (const side of ['from', 'to'] as const) {
+      const ref = wire[side];
+      const component = byId.get(ref.component)!;
+      const pins = pinsOf(component, chips);
+      if (!pins.inputs.includes(ref.pin) && !pins.outputs.includes(ref.pin)) {
+        const what = component.kind === 'chip' ? `chip ${JSON.stringify(component.chip)}` : `a ${component.kind}`;
+        throw new CircuitFileError(`${prefix}wires[${n}].${side}: ${what} has no pin ${JSON.stringify(ref.pin)}`);
+      }
+    }
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function arrayAt(data: Record<string, unknown>, key: string): unknown[] {
+function arrayAt(data: Record<string, unknown>, key: string, path: string = key): unknown[] {
   const value = data[key];
-  if (!Array.isArray(value)) throw new CircuitFileError(`${key}: missing or not a list`);
+  if (!Array.isArray(value)) throw new CircuitFileError(`${path}: missing or not a list`);
   return value;
 }
 

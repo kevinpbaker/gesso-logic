@@ -2,6 +2,7 @@ import { channel } from 'gesso-framework';
 
 import type { PinRef, Rotation } from '../sim/Circuit';
 import type { Fragment } from './DocumentEdits';
+import type { KindLayout } from './Layout';
 import type { Kind } from '../sim/Primitives';
 
 /**
@@ -60,6 +61,14 @@ export interface DocumentSummary {
   readonly camera: Camera | null;
   /** The last thing a file operation had to say — saved, or why an open failed — or null. */
   readonly message: string | null;
+  /**
+   * Which level is on the canvas: the chips opened from the top, each
+   * by its instance id and its definition's name. Empty at the top. A
+   * level inside a chip is shown live and read-only.
+   */
+  readonly path: readonly { readonly id: string; readonly chip: string }[];
+  /** The document's chip definitions, by name, with the body each gives an instance: for the palette. */
+  readonly chips: readonly { readonly name: string; readonly shape: KindLayout }[];
 }
 
 export interface Camera {
@@ -92,6 +101,9 @@ export interface ComponentGeometry {
   readonly label: string | null;
   /** The net each pin is on, by pin name. Empty while the document does not compile. */
   readonly nets: Readonly<Record<string, number>>;
+  /** A chip's definition name and the body it gives it; null for every other kind. */
+  readonly chip: string | null;
+  readonly shape: KindLayout | null;
 }
 
 export interface WireGeometry {
@@ -104,6 +116,13 @@ export interface WireGeometry {
 export interface Geometry {
   readonly components: Readonly<Record<string, ComponentGeometry>>;
   readonly wires: Readonly<Record<string, WireGeometry>>;
+  /**
+   * Which level this is, as the path's instance ids joined with `/`: ''
+   * at the top. The summary and the geometry are separate keys, and one
+   * can arrive before the other; a canvas framing a newly opened chip
+   * waits for geometry of that level.
+   */
+  readonly level: string;
 }
 
 export interface Signals {
@@ -116,7 +135,7 @@ export interface Signals {
 export type ClockRate = number | 'max';
 
 /** The documents the application can open by name, until Phase 6 opens files. */
-export type SceneName = 'empty' | 'bench' | 'counter';
+export type SceneName = 'empty' | 'bench' | 'counter' | 'adder';
 
 export interface Status {
   readonly running: boolean;
@@ -152,9 +171,20 @@ export interface TableView {
   readonly error: string | null;
 }
 
+/**
+ * Text for the clipboard, made by the application worker, which alone
+ * has whole parts — labels, values, rates, which chip a chip is, and the
+ * definitions it needs. As with `SaveRequest`, `serial` counts copies
+ * so the same text copied twice is two copies; 0 is none.
+ */
+export interface ClipRequest {
+  readonly serial: number;
+  readonly text: string;
+}
+
 export interface CircuitCommands {
   /** Adds a component. With no id, one is made from the kind. */
-  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation): void;
+  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string): void;
   /** Joins two pins with a wire. With no id, one is made. */
   connect(from: PinRef, to: PinRef, id?: string): void;
   move(id: string, x: number, y: number): void;
@@ -195,6 +225,20 @@ export interface CircuitCommands {
    * loads its own scene and must not overwrite a person's work.
    */
   restore(): void;
+  /** Makes the selected components into a chip, named `name` or the next free `chip N`. */
+  makeChip(ids: readonly string[], name?: string): void;
+  /** Opens a chip on the current level, to show its insides live. */
+  openChip(id: string): void;
+  /** Steps back out to `depth` levels from the top: 0 is the top. */
+  closeChip(depth: number): void;
+  /** Renames a chip definition, and every instance of it. */
+  renameChip(from: string, to: string): void;
+  /** Adds a circuit file's text to the document as a chip, named after the file, ready to place from the palette. */
+  importChip(text: string, fileName: string): void;
+  /** Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`. */
+  copy(ids: readonly string[]): void;
+  /** Copies these parts in place, moved by (dx, dy), under the new ids `rename` gives, by old id, for parts and the wires between them. */
+  duplicate(ids: readonly string[], rename: Readonly<Record<string, string>>, dx: number, dy: number): void;
 }
 
 export interface CircuitView {
@@ -204,6 +248,7 @@ export interface CircuitView {
   readonly status: Status;
   readonly table: TableView;
   readonly saving: SaveRequest;
+  readonly clipboard: ClipRequest;
 }
 
 export const EMPTY_SUMMARY: DocumentSummary = {
@@ -220,10 +265,13 @@ export const EMPTY_SUMMARY: DocumentSummary = {
   handle: null,
   dirty: false,
   camera: null,
-  message: null
+  message: null,
+  path: [],
+  chips: []
 };
 export const NO_SAVE: SaveRequest = { serial: 0, name: '', text: '', handle: null };
-export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {} };
+export const NO_CLIP: ClipRequest = { serial: 0, text: '' };
+export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {}, level: '' };
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [] };
@@ -234,5 +282,6 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   signals: EMPTY_SIGNALS,
   status: INITIAL_STATUS,
   table: NO_TABLE,
-  saving: NO_SAVE
+  saving: NO_SAVE,
+  clipboard: NO_CLIP
 });

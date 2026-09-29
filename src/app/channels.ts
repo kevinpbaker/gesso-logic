@@ -19,10 +19,11 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         signals: service.signals,
         status: service.status,
         table: service.table,
-        saving: service.saving
+        saving: service.saving,
+        clipboard: service.clipboard
       },
       commands: {
-        place: (kind, x, y, id, rotation) => service.place(kind, x, y, id, rotation),
+        place: (kind, x, y, id, rotation, chip) => service.place(kind, x, y, id, rotation, chip),
         connect: (from, to, id) => service.connect(from, to, id),
         move: (id, x, y) => service.move(id, x, y),
         moveBy: (ids, dx, dy, gesture) => service.moveBy(ids, dx, dy, gesture),
@@ -43,7 +44,14 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         requestSave: asNew => service.requestSave(asNew),
         finishSave: (saved, message) => service.finishSave(saved, message),
         rememberCamera: (x, y, scale) => service.rememberCamera(x, y, scale),
-        restore: () => void service.restore()
+        restore: () => void service.restore(),
+        makeChip: (ids, name) => service.makeChip(ids, name),
+        openChip: id => service.openChip(id),
+        closeChip: depth => service.closeChip(depth),
+        renameChip: (from, to) => service.renameChip(from, to),
+        importChip: (text, fileName) => service.importChip(text, fileName),
+        copy: ids => service.copy(ids),
+        duplicate: (ids, rename, dx, dy) => service.duplicate(ids, rename, dx, dy)
       }
     })
   ];

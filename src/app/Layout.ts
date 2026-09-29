@@ -1,4 +1,5 @@
-import type { Rotation } from '../sim/Circuit';
+import type { Circuit, Component, Rotation } from '../sim/Circuit';
+import { pinsOf } from '../sim/Chips';
 import type { Kind } from '../sim/Primitives';
 
 /**
@@ -26,7 +27,7 @@ export interface Box {
   readonly bottom: number;
 }
 
-interface KindLayout {
+export interface KindLayout {
   readonly width: number;
   readonly height: number;
   /** Each pin's offset from the component's origin. */
@@ -51,6 +52,9 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
   output: { width: 2, height: 2, pins: { in: { x: 0, y: 1 } } },
   probe: { width: 2, height: 2, pins: { in: { x: 0, y: 1 } } },
   hex: { width: 4, height: 6, pins: { b0: { x: 0, y: 1 }, b1: { x: 0, y: 2 }, b2: { x: 0, y: 3 }, b3: { x: 0, y: 4 } } },
+  // A placeholder: a chip's real shape comes from its definition, by
+  // `chipShape`, and is passed to these functions in place of the kind.
+  chip: { width: 6, height: 4, pins: {} },
   seg7: {
     width: 5,
     height: 8,
@@ -67,16 +71,50 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
 };
 
 /** A component's size once turned: a quarter turn swaps width and height. */
-export function sizeOf(kind: Kind, rotation: Rotation = 0): { width: number; height: number } {
-  const layout = LAYOUT[kind];
+/**
+ * What these functions take to know a part's size and pins: its kind, or
+ * for a chip the shape its definition gives it.
+ */
+export type Shape = Kind | KindLayout;
+
+function layoutOf(shape: Shape): KindLayout {
+  return typeof shape === 'string' ? LAYOUT[shape] : shape;
+}
+
+/**
+ * A chip's body, from its interface: inputs down the left and outputs
+ * down the right, two units apart and starting a unit down, as a gate's
+ * are; wide enough for its name. Pins sit on grid points, so a chip
+ * wires up like any part.
+ */
+export function chipShape(name: string, inputs: readonly string[], outputs: readonly string[]): KindLayout {
+  const rows = Math.max(inputs.length, outputs.length, 1);
+  const width = Math.max(6, Math.ceil(name.length * 0.6) + 2);
+  const pins: Record<string, Point> = {};
+  inputs.forEach((pin, i) => (pins[pin] = { x: 0, y: 1 + 2 * i }));
+  outputs.forEach((pin, i) => (pins[pin] = { x: width, y: 1 + 2 * i }));
+  return { width, height: Math.max(4, rows * 2), pins };
+}
+
+/** A component's shape: its kind, or for a chip its definition's body. */
+export function shapeOf(component: Component, chips: Circuit['chips']): Shape {
+  if (component.kind !== 'chip') {
+    return component.kind;
+  }
+  const pins = pinsOf(component, chips);
+  return chipShape(component.chip ?? '?', pins.inputs, pins.outputs);
+}
+
+export function sizeOf(shape: Shape, rotation: Rotation = 0): { width: number; height: number } {
+  const layout = layoutOf(shape);
   return rotation === 90 || rotation === 270
     ? { width: layout.height, height: layout.width }
     : { width: layout.width, height: layout.height };
 }
 
 /** A component's box. `x` and `y` are the turned box's top-left corner, whatever the rotation. */
-export function boxOf(kind: Kind, x: number, y: number, rotation: Rotation = 0): Box {
-  const size = sizeOf(kind, rotation);
+export function boxOf(shape: Shape, x: number, y: number, rotation: Rotation = 0): Box {
+  const size = sizeOf(shape, rotation);
   return { left: x, top: y, right: x + size.width, bottom: y + size.height };
 }
 
@@ -85,8 +123,8 @@ export function boxOf(kind: Kind, x: number, y: number, rotation: Rotation = 0):
  * Pins stay on grid points under every rotation, because every box has
  * whole-number sides.
  */
-export function pinAt(kind: Kind, x: number, y: number, pin: string, rotation: Rotation = 0): Point {
-  const layout = LAYOUT[kind];
+export function pinAt(shape: Shape, x: number, y: number, pin: string, rotation: Rotation = 0): Point {
+  const layout = layoutOf(shape);
   const offset = layout.pins[pin] ?? { x: 0, y: 0 };
   const turned = turn(offset, layout.width, layout.height, rotation);
   return { x: x + turned.x, y: y + turned.y };

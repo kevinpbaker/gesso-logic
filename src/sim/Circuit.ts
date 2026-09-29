@@ -23,6 +23,14 @@ export interface Circuit {
   readonly version: typeof CIRCUIT_VERSION;
   readonly components: readonly Component[];
   readonly wires: readonly Wire[];
+  /**
+   * The chips this circuit uses, by name, each a circuit in its own
+   * right: its switches are the chip's inputs and its LEDs its outputs
+   * (see `Chips.ts`). One table for the whole document — a chip inside a
+   * chip names its definition here too, and a definition's own `chips`
+   * is ignored — so each definition exists once however deep it is used.
+   */
+  readonly chips?: Readonly<Record<string, Circuit>>;
 }
 
 export interface Component {
@@ -52,6 +60,8 @@ export interface Component {
    * when it is saved or pasted.
    */
   readonly rate?: number;
+  /** A `chip`'s definition, by its name in the document's `chips`. */
+  readonly chip?: string;
 }
 
 export interface PinRef {

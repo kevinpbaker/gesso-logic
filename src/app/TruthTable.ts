@@ -1,6 +1,7 @@
 import { CIRCUIT_VERSION, type Circuit, type Component, type Wire } from '../sim/Circuit';
 import { compile, CircuitError } from '../sim/Netlist';
-import { isGate, isSettable, PINS } from '../sim/Primitives';
+import { pinsOf } from '../sim/Chips';
+import { isGate, isSettable } from '../sim/Primitives';
 import { Simulator } from '../sim/Simulator';
 
 /**
@@ -47,13 +48,18 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
   }
   const selected = new Set(ids);
   const chosen = circuit.components.filter(c => selected.has(c.id));
-  const gates = chosen.filter(c => isGate(c.kind));
+  // The parts that compute: gates, and chips, whose pins come from their
+  // definitions and whose insides the swept copy flattens as any circuit.
+  const gates = chosen.filter(c => isGate(c.kind) || c.kind === 'chip');
+  const pinsOfPart = (c: (typeof gates)[number]) => pinsOf(c, circuit.chips);
   const netOf = (id: string, pin: string) => netlist.pinNet.get(`${id}.${pin}`) ?? -1;
 
   // Which selected gate output drives each net.
   const driver = new Map<number, { component: string; pin: string }>();
   for (const g of gates) {
-    driver.set(netOf(g.id, 'out'), { component: g.id, pin: 'out' });
+    for (const pin of pinsOfPart(g).outputs) {
+      driver.set(netOf(g.id, pin), { component: g.id, pin });
+    }
   }
 
   const inputNets: number[] = [];
@@ -68,7 +74,7 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
     if (isSettable(c.kind)) addInput(netOf(c.id, 'out'), c.label ?? c.id);
   }
   for (const g of gates) {
-    for (const pin of PINS[g.kind].inputs) {
+    for (const pin of pinsOfPart(g).inputs) {
       const net = netOf(g.id, pin);
       if (!driver.has(net)) addInput(net, netlist.netNames[net] ?? `net ${net}`);
     }
@@ -84,10 +90,15 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
   // An output shown by a selected LED or probe goes by the LED's name.
   const shownAs = new Map<number, string>();
   for (const c of circuit.components) {
-    for (const pin of PINS[c.kind].inputs) {
+    for (const pin of pinsOf(c, circuit.chips).inputs) {
       const net = netOf(c.id, pin);
-      if (!selected.has(c.id)) readOutside.add(net);
-      else if (isGate(c.kind)) readInside.add(net);
+      if (!selected.has(c.id)) {
+        readOutside.add(net);
+        // An LED or probe outside names the output it shows, unless one
+        // inside the selection already does.
+        if ((c.kind === 'output' || c.kind === 'probe') && !shownAs.has(net)) shownAs.set(net, c.label ?? c.id);
+      }
+      else if (isGate(c.kind) || c.kind === 'chip') readInside.add(net);
       else {
         shown.add(net);
         if (c.kind === 'output' || c.kind === 'probe') shownAs.set(net, c.label ?? c.id);
@@ -106,11 +117,11 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
   }
 
   // The selected gates alone, a switch on every input.
-  const components: Component[] = gates.map(g => ({ id: g.id, kind: g.kind, x: 0, y: 0 }));
+  const components: Component[] = gates.map(g => ({ id: g.id, kind: g.kind, x: 0, y: 0, ...(g.chip === undefined ? {} : { chip: g.chip }) }));
   const wires: Wire[] = [];
   inputNets.forEach((_, i) => components.push({ id: `in${i}`, kind: 'input', x: 0, y: 0 }));
   for (const g of gates) {
-    for (const pin of PINS[g.kind].inputs) {
+    for (const pin of pinsOfPart(g).inputs) {
       const net = netOf(g.id, pin);
       const source = driver.get(net) ?? { component: `in${inputNets.indexOf(net)}`, pin: 'out' };
       wires.push({ id: `w${wires.length}`, from: source, to: { component: g.id, pin } });
@@ -118,7 +129,9 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
   }
   // A switch that drives an output directly — a selection of one switch
   // and the LED it lights — is still a table.
-  const sub = new Simulator(compile({ version: CIRCUIT_VERSION, components, wires }));
+  const sub = new Simulator(
+    compile({ version: CIRCUIT_VERSION, components, wires, ...(circuit.chips === undefined ? {} : { chips: circuit.chips }) })
+  );
   sub.settle();
   const readNet = (net: number): string => {
     const d = driver.get(net);
@@ -137,7 +150,10 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
   return {
     table: {
       inputs: inputNames,
-      outputs: outputNets.map(net => shownAs.get(net) ?? netlist.netNames[net] ?? `net ${net}`),
+      outputs: outputNets.map(net => {
+        const d = driver.get(net);
+        return shownAs.get(net) ?? (d !== undefined ? `${d.component}.${d.pin}` : (netlist.netNames[net] ?? `net ${net}`));
+      }),
       rows
     }
   };

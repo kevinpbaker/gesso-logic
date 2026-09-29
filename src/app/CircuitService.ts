@@ -12,17 +12,36 @@ import type {
   SceneName,
   Signals,
   Camera,
+  ClipRequest,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { NO_SAVE, NO_TABLE } from './CircuitContract';
+import { NO_CLIP, NO_SAVE, NO_TABLE } from './CircuitContract';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
-import { connect, freshId, insert, move, moveBy, place, remove, rotate, sameConnectivity, type Fragment } from './DocumentEdits';
-import { benchScene, counterScene } from './Scenes';
+import {
+  connect,
+  extract,
+  freshChipName,
+  freshId,
+  importChip,
+  insert,
+  makeChip,
+  move,
+  moveBy,
+  place,
+  relabel,
+  remove,
+  renameChip,
+  rotate,
+  sameConnectivity,
+  type Fragment
+} from './DocumentEdits';
+import { adderScene, benchScene, counterScene } from './Scenes';
 import { truthTable } from './TruthTable';
-import { boundsOf, boxOf, intersects, pinAt, route, slotOf } from './Layout';
+import { boundsOf, boxOf, intersects, pinAt, route, shapeOf, slotOf, type KindLayout } from './Layout';
+import { pinsOf } from '../sim/Chips';
 import { CHUNK, packChunk } from './SignalPacking';
 
 /**
@@ -122,6 +141,7 @@ export class CircuitService {
   readonly status: Observable<Status>;
   readonly table: Observable<TableView>;
   readonly saving: Observable<SaveRequest>;
+  readonly clipboard: Observable<ClipRequest>;
 
   private readonly documentSubject: BehaviorSubject<DocumentSummary>;
   private readonly geometrySubject: BehaviorSubject<Geometry>;
@@ -129,6 +149,7 @@ export class CircuitService {
   private readonly statusSubject: BehaviorSubject<Status>;
   private readonly tableSubject = new BehaviorSubject<TableView>(NO_TABLE);
   private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
+  private readonly clipboardSubject = new BehaviorSubject<ClipRequest>(NO_CLIP);
 
   private readonly schedule: Schedule;
   private readonly now: () => number;
@@ -150,6 +171,8 @@ export class CircuitService {
 
   private name: string | null = null;
   private handle: number | null = null;
+  /** The chip instances opened from the top, each on the level before; empty at the top. */
+  private readonly path: string[] = [];
   /** The revision last opened or saved; the document is dirty when it has moved on. -1 is never. */
   private savedRevision = 0;
   private openCamera: Camera | null = null;
@@ -188,6 +211,7 @@ export class CircuitService {
     this.status = this.statusSubject;
     this.table = this.tableSubject;
     this.saving = this.savingSubject;
+    this.clipboard = this.clipboardSubject;
     this.store = options.store ?? null;
     this.delay =
       options.delay ??
@@ -203,6 +227,7 @@ export class CircuitService {
     file: { name: string | null; handle: number | null; dirty?: boolean; camera?: Camera | null } = { name: null, handle: null }
   ): void {
     this.opened++;
+    this.path.length = 0;
     this.name = file.name;
     this.handle = file.handle;
     this.openCamera = file.camera ?? null;
@@ -268,10 +293,16 @@ export class CircuitService {
     if (this.autosaving || this.store === null) {
       return;
     }
+    // The read is asynchronous, and a person does not wait for it: a
+    // scene loaded, a file opened or an edit made before it answers is
+    // the document now, and the autosave must not replace it.
+    const openedAtAsk = this.opened;
+    const revisionAtAsk = this.revision;
     try {
       const { value } = await this.store.read(AUTOSAVE_KEY);
       const saved = value === null ? null : (JSON.parse(value) as Autosave);
-      if (saved !== null && saved.format === 'gessologic-autosave') {
+      const untouched = this.opened === openedAtAsk && this.revision === revisionAtAsk;
+      if (untouched && saved !== null && saved.format === 'gessologic-autosave') {
         this.load(readCircuit(saved.file), {
           name: saved.name,
           handle: saved.handle,
@@ -295,13 +326,110 @@ export class CircuitService {
         ? benchScene()
         : name === 'counter'
           ? counterScene()
-          : { version: CIRCUIT_VERSION, components: [], wires: [] }
+          : name === 'adder'
+            ? adderScene()
+            : { version: CIRCUIT_VERSION, components: [], wires: [] }
     );
   }
 
-  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation): void {
-    const placed = place(this.circuit, id ?? freshId(this.circuit, kind), kind, x, y, rotation);
-    this.edit(kind === 'clock' ? withRate(placed, this.clockHz) : placed);
+  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string): void {
+    this.editLevel(level => {
+      const placed = place(level, id ?? freshId(level, kind), kind, x, y, rotation, chip);
+      return kind === 'clock' ? withRate(placed, this.clockHz) : placed;
+    });
+  }
+
+  makeChip(ids: readonly string[], name?: string): void {
+    this.editLevel(level => makeChip(level, ids, name ?? freshChipName(this.circuit), freshId(level, 'chip')));
+  }
+
+  importChip(text: string, fileName: string): void {
+    let file: Circuit;
+    try {
+      file = readCircuit(text);
+    } catch (error) {
+      if (!(error instanceof CircuitFileError)) throw error;
+      this.message = `Couldn't insert ${fileName}: ${error.message}`;
+      this.documentSubject.next(this.summary());
+      return;
+    }
+    const name = fileName.replace(/\.gessologic\.json$|\.json$/i, '');
+    const result = importChip(this.circuit, file, name);
+    if (result.name === null) {
+      this.message = `${fileName} has no parts to make a chip of`;
+      this.documentSubject.next(this.summary());
+      return;
+    }
+    this.edit(result.circuit);
+    this.message = `Added chip "${result.name}": place it from the palette`;
+    this.documentSubject.next(this.summary());
+  }
+
+  copy(ids: readonly string[]): void {
+    const fragment = extract(this.levelWithChips(), ids);
+    if (fragment.components.length === 0) return;
+    this.clipboardSubject.next({
+      serial: this.clipboardSubject.value.serial + 1,
+      text: JSON.stringify({ gessologic: 1, ...fragment })
+    });
+  }
+
+  duplicate(ids: readonly string[], rename: Readonly<Record<string, string>>, dx: number, dy: number): void {
+    this.editLevel(level => {
+      const fragment = extract(level, ids);
+      const taken = new Set([...level.components.map(c => c.id), ...level.wires.map(w => w.id), ...Object.values(rename)]);
+      const fresh = (prefix: string, old: string) => {
+        const wanted = rename[old];
+        if (wanted !== undefined) return wanted;
+        for (let n = 1; ; n++) {
+          if (!taken.has(`${prefix}${n}`)) {
+            taken.add(`${prefix}${n}`);
+            return `${prefix}${n}`;
+          }
+        }
+      };
+      return insert(level, relabel(fragment, dx, dy, fresh));
+    });
+  }
+
+  /** The level on the canvas, with the document's chips attached, as edits and copies see it. */
+  private levelWithChips(): Circuit {
+    const { circuit } = this.level();
+    return this.path.length === 0 ? this.circuit : { ...circuit, chips: this.circuit.chips };
+  }
+
+  renameChip(from: string, to: string): void {
+    // A document-wide edit wherever it is asked from: the name is the
+    // definition's, and the breadcrumb follows it.
+    this.edit(renameChip(this.circuit, from, to));
+  }
+
+  openChip(id: string): void {
+    const { circuit } = this.level();
+    if (!circuit.components.some(c => c.id === id && c.kind === 'chip')) {
+      return;
+    }
+    this.path.push(id);
+    this.changedLevel();
+  }
+
+  closeChip(depth: number): void {
+    if (depth < 0 || depth >= this.path.length) {
+      return;
+    }
+    this.path.length = depth;
+    this.changedLevel();
+  }
+
+  /** A new level on the canvas: framed afresh, like a document opened, but the document is the same one. */
+  private changedLevel(): void {
+    this.opened++;
+    this.openCamera = null;
+    this.visibleChunks = null;
+    this.tableSubject.next(NO_TABLE);
+    this.documentSubject.next(this.summary());
+    this.geometrySubject.next(this.geometryNow());
+    this.publish(true);
   }
 
   tabulate(ids: readonly string[]): void {
@@ -309,27 +437,27 @@ export class CircuitService {
   }
 
   connect(from: PinRef, to: PinRef, id?: string): void {
-    this.edit(connect(this.circuit, id ?? freshId(this.circuit, 'w'), from, to));
+    this.editLevel(level => connect(level, id ?? freshId(level, 'w'), from, to));
   }
 
   move(id: string, x: number, y: number): void {
-    this.edit(move(this.circuit, id, x, y));
+    this.editLevel(level => move(level, id, x, y));
   }
 
   moveBy(ids: readonly string[], dx: number, dy: number, gesture?: string): void {
-    this.edit(moveBy(this.circuit, ids, dx, dy), gesture);
+    this.editLevel(level => moveBy(level, ids, dx, dy), gesture);
   }
 
   rotate(ids: readonly string[]): void {
-    this.edit(rotate(this.circuit, ids));
+    this.editLevel(level => rotate(level, ids));
   }
 
   remove(ids: readonly string[]): void {
-    this.edit(remove(this.circuit, ids));
+    this.editLevel(level => remove(level, ids));
   }
 
   insert(fragment: Fragment): void {
-    this.edit(insert(this.circuit, fragment));
+    this.editLevel(level => insert(level, fragment));
   }
 
   undo(): void {
@@ -428,6 +556,30 @@ export class CircuitService {
    * fifty pointer moves is one step back, not fifty. Any edit clears
    * what could be redone, as it does everywhere.
    */
+  /**
+   * An edit to the level on the canvas. At the top that is the document;
+   * inside a chip it is the chip's definition, which every instance of it
+   * shares — so an AND added inside one full adder is in all eight, as
+   * it would be in hardware made from one design. The edit is given the
+   * level with the document's chips attached, so a part it places or a
+   * chip it makes can name any definition, and what comes back is folded
+   * into the document as that definition.
+   */
+  private editLevel(change: (level: Circuit) => Circuit, gesture?: string): void {
+    const before = this.levelWithChips();
+    const after = change(before);
+    if (after === before) {
+      return;
+    }
+    if (this.path.length === 0) {
+      this.edit(after, gesture);
+      return;
+    }
+    const name = this.pathNow().at(-1)!.chip;
+    const { chips, ...definition } = after;
+    this.edit({ ...this.circuit, chips: { ...(chips ?? this.circuit.chips), [name]: definition } }, gesture);
+  }
+
   private edit(next: Circuit, gesture?: string): void {
     if (next === this.circuit) {
       return;
@@ -492,14 +644,15 @@ export class CircuitService {
     this.geometrySubject.next(this.geometryNow());
     const table = this.tableSubject.value;
     if (table.ids.length > 0) {
-      const ids = table.ids.filter(id => next.components.some(c => c.id === id));
+      const level = this.level().circuit;
+      const ids = table.ids.filter(id => level.components.some(c => c.id === id));
       this.tableSubject.next(ids.length === 0 ? NO_TABLE : this.tableOf(ids));
     }
     this.publish(true);
   }
 
   private tableOf(ids: readonly string[]): TableView {
-    const result = truthTable(this.circuit, ids);
+    const result = truthTable(this.levelWithChips(), ids);
     return 'table' in result
       ? { ids, ...result.table, error: null }
       : { ids, inputs: [], outputs: [], rows: [], error: result.error };
@@ -623,7 +776,8 @@ export class CircuitService {
       revision: this.revision,
       opened: this.opened,
       components: this.circuit.components.length,
-      gates: this.circuit.components.filter(c => isGate(c.kind)).length,
+      // Every gate at every depth, as the simulator counts them.
+      gates: netlist?.gateCount ?? this.circuit.components.filter(c => isGate(c.kind)).length,
       wires: this.circuit.wires.length,
       nets: netlist?.netCount ?? 0,
       error: this.error,
@@ -633,8 +787,25 @@ export class CircuitService {
       handle: this.handle,
       dirty: this.revision !== this.savedRevision,
       camera: this.openCamera,
-      message: this.message
+      message: this.message,
+      path: this.pathNow(),
+      chips: Object.keys(this.circuit.chips ?? {})
+        .sort()
+        .map(name => ({ name, shape: shapeOf({ id: '', kind: 'chip', chip: name, x: 0, y: 0 }, this.circuit.chips) as KindLayout }))
     };
+  }
+
+  /** The opened chips, each with its definition's name, for the breadcrumb. */
+  private pathNow(): { id: string; chip: string }[] {
+    this.level();
+    const out: { id: string; chip: string }[] = [];
+    let circuit = this.circuit;
+    for (const id of this.path) {
+      const chip = circuit.components.find(c => c.id === id)!;
+      out.push({ id, chip: chip.chip! });
+      circuit = this.circuit.chips![chip.chip!]!;
+    }
+    return out;
   }
 
   /**
@@ -662,35 +833,63 @@ export class CircuitService {
     }, AUTOSAVE_MS);
   }
 
+  /**
+   * The level on the canvas: the top, or the definition of the chip the
+   * path has opened, with the prefix its parts' nets are found under.
+   * A path an edit or an undo has made stale is cut back to where it
+   * still leads.
+   */
+  private level(): { circuit: Circuit; prefix: string } {
+    let circuit = this.circuit;
+    let prefix = '';
+    for (let depth = 0; depth < this.path.length; depth++) {
+      const id = this.path[depth]!;
+      const chip = circuit.components.find(c => c.id === id && c.kind === 'chip');
+      const definition = chip?.chip === undefined ? undefined : this.circuit.chips?.[chip.chip];
+      if (definition === undefined) {
+        this.path.length = depth;
+        break;
+      }
+      circuit = definition;
+      prefix += `${id}/`;
+    }
+    return { circuit, prefix };
+  }
+
   private geometryNow(): Geometry {
     const netlist = this.netlist;
+    const { circuit, prefix } = this.level();
+    const chips = this.circuit.chips;
     const components: Record<string, ComponentGeometry> = {};
-    for (const component of this.circuit.components) {
+    for (const component of circuit.components) {
       const nets: Record<string, number> = {};
+      const spec = pinsOf(component, chips);
       if (netlist !== null) {
-        const spec = PINS[component.kind];
         for (const pin of [...spec.inputs, ...spec.outputs]) {
-          nets[pin] = netlist.pinNet.get(`${component.id}.${pin}`) ?? -1;
+          nets[pin] = netlist.pinNet.get(`${prefix}${component.id}.${pin}`) ?? -1;
         }
       }
+      const shape = shapeOf(component, chips);
       components[component.id] = {
         kind: component.kind,
         x: component.x,
         y: component.y,
         rotation: component.rotation ?? 0,
         label: component.label ?? null,
-        nets
+        nets,
+        chip: component.kind === 'chip' ? (component.chip ?? null) : null,
+        shape: typeof shape === 'string' ? null : shape
       };
     }
     const wires: Record<string, WireGeometry> = {};
-    for (const wire of this.circuit.wires) {
+    for (const wire of circuit.wires) {
       wires[wire.id] = {
         from: wire.from,
         to: wire.to,
-        net: netlist?.pinNet.get(`${wire.from.component}.${wire.from.pin}`) ?? -1
+        net: netlist?.pinNet.get(`${prefix}${wire.from.component}.${wire.from.pin}`) ?? -1
       };
     }
-    return { components, wires };
+    return { components, wires, level: this.path.join('/') };
   }
 
   private signalsNow(): Signals {
@@ -723,8 +922,10 @@ export class CircuitService {
       return this.visibleChunks;
     }
     const chunks = new Set<number>();
+    const { circuit, prefix } = this.level();
+    const chips = this.circuit.chips;
     const add = (component: string, pin: string) => {
-      const net = netlist.pinNet.get(`${component}.${pin}`);
+      const net = netlist.pinNet.get(`${prefix}${component}.${pin}`);
       if (net !== undefined) {
         chunks.add(Math.floor(net / CHUNK));
       }
@@ -735,24 +936,24 @@ export class CircuitService {
         chunks.add(chunk);
       }
     } else {
-      const byId = new Map(this.circuit.components.map(c => [c.id, c]));
-      for (const component of this.circuit.components) {
-        if (intersects(boxOf(component.kind, component.x, component.y, component.rotation), viewport)) {
-          const spec = PINS[component.kind];
+      const byId = new Map(circuit.components.map(c => [c.id, c]));
+      for (const component of circuit.components) {
+        if (intersects(boxOf(shapeOf(component, chips), component.x, component.y, component.rotation), viewport)) {
+          const spec = pinsOf(component, chips);
           for (const pin of [...spec.inputs, ...spec.outputs]) {
             add(component.id, pin);
           }
         }
       }
-      for (const wire of this.circuit.wires) {
+      for (const wire of circuit.wires) {
         const from = byId.get(wire.from.component);
         const to = byId.get(wire.to.component);
         if (from === undefined || to === undefined) {
           continue;
         }
         const path = route(
-          pinAt(from.kind, from.x, from.y, wire.from.pin, from.rotation),
-          pinAt(to.kind, to.x, to.y, wire.to.pin, to.rotation),
+          pinAt(shapeOf(from, chips), from.x, from.y, wire.from.pin, from.rotation),
+          pinAt(shapeOf(to, chips), to.x, to.y, wire.to.pin, to.rotation),
           slotOf(wire.to.pin)
         );
         if (intersects(boundsOf(path), viewport)) {

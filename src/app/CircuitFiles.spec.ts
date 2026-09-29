@@ -6,9 +6,12 @@ import { AUTOSAVE_KEY, CircuitService, type AutosaveStore } from './CircuitServi
 import { counterScene } from './Scenes';
 
 /** A store in a map, and a delay fired by hand. */
-function harness(stored: Map<string, string> = new Map()) {
+function harness(stored: Map<string, string> = new Map(), gate: Promise<void> = Promise.resolve()) {
   const store: AutosaveStore = {
-    read: async key => ({ value: stored.get(key) ?? null }),
+    read: async key => {
+      await gate;
+      return { value: stored.get(key) ?? null };
+    },
     write: async (key, value) => void stored.set(key, value)
   };
   let pending: (() => void) | null = null;
@@ -102,5 +105,24 @@ describe('files', () => {
     service.place('or', 8, 0, 'h');
     flush();
     expect(stored.get(AUTOSAVE_KEY)).toContain('"kind\\":\\"or\\"');
+  });
+});
+
+describe('the autosave, restored late', () => {
+  it('does not replace a document loaded while it was being read', async () => {
+    const saved = harness();
+    await saved.service.restore();
+    saved.service.open(writeCircuit(counterScene()), 'counter.gessologic.json', 5);
+    saved.flush();
+
+    // A slow store: the read answers only when released.
+    let release!: () => void;
+    const slow = harness(saved.stored, new Promise<void>(resolve => (release = resolve)));
+
+    const restoring = slow.service.restore();
+    slow.service.loadScene('empty');
+    release();
+    await restoring;
+    expect(slow.summary()).toMatchObject({ components: 0, name: null });
   });
 });

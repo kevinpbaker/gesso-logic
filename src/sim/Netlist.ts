@@ -1,4 +1,5 @@
 import { pinName, type Circuit, type Component, type PinRef } from './Circuit';
+import { chipInterface } from './Chips';
 import { GATE_KINDS, isGate, isSettable, PINS } from './Primitives';
 
 /**
@@ -36,7 +37,7 @@ export interface Netlist {
 
 export class CircuitError extends Error {
   constructor(
-    readonly code: 'duplicate-id' | 'unknown-component' | 'unknown-pin' | 'short' | 'version',
+    readonly code: 'duplicate-id' | 'unknown-component' | 'unknown-pin' | 'short' | 'version' | 'unknown-chip' | 'recursive-chip',
     message: string
   ) {
     super(message);
@@ -54,29 +55,78 @@ export function compile(circuit: Circuit): Netlist {
   }
 
   // Every pin gets an index, in document order: component by component,
-  // inputs before outputs.
-  const byId = new Map<string, Component>();
+  // inputs before outputs, and a chip's insides after its own pins.
+  //
+  // The hierarchy is flattened here and nowhere else. A chip instance
+  // `fa3` has its own pins, which outside wires reach, and its
+  // definition's parts under the prefix `fa3/`. The definition's
+  // switches and LEDs are its interface: inside an instance they are not
+  // sources or sinks, only points its pins join — `fa3.a` to
+  // `fa3/a.out`, `fa3/s.in` to `fa3.s` — so a net runs straight through
+  // the chip's edge as if the switch were a length of wire.
   const pinIndex = new Map<string, number>();
   const pins: PinRef[] = [];
   const driving: boolean[] = [];
-  for (const component of circuit.components) {
-    if (byId.has(component.id)) {
-      throw new CircuitError('duplicate-id', `Two components have the id '${component.id}'.`);
-    }
-    byId.set(component.id, component);
-    const spec = PINS[component.kind];
-    for (const [pinList, drives] of [
-      [spec.inputs, false],
-      [spec.outputs, true]
-    ] as const) {
-      for (const pin of pinList) {
-        const ref = { component: component.id, pin };
-        pinIndex.set(pinKey(ref), pins.length);
-        pins.push(ref);
-        driving.push(drives);
+  /** Every part that does something, at every depth, under its full id. */
+  const parts: Component[] = [];
+  /** Wires, and the joins at chips' edges, as pairs of pin keys. */
+  const links: { readonly from: PinRef; readonly to: PinRef; readonly id: string }[] = [];
+  const chips = circuit.chips ?? {};
+  /** Every component at every depth, by full id, for messages that name one. */
+  const named = new Map<string, Component>();
+  const addPin = (component: string, pin: string, drives: boolean) => {
+    const ref = { component, pin };
+    pinIndex.set(pinKey(ref), pins.length);
+    pins.push(ref);
+    driving.push(drives);
+  };
+  const walk = (level: Circuit, prefix: string, inside: readonly string[]) => {
+    const ids = new Set<string>();
+    for (const component of level.components) {
+      if (ids.has(component.id)) {
+        throw new CircuitError('duplicate-id', `Two components have the id '${prefix}${component.id}'.`);
       }
+      ids.add(component.id);
+      const id = prefix + component.id;
+      named.set(id, component);
+      if (component.kind === 'chip') {
+        const name = component.chip ?? '';
+        const definition = chips[name];
+        if (definition === undefined) {
+          throw new CircuitError('unknown-chip', `Chip '${id}' uses '${name}', which the document does not define.`);
+        }
+        if (inside.includes(name)) {
+          throw new CircuitError('recursive-chip', `Chip '${name}' contains itself, by way of ${[...inside, name].join(' › ')}.`);
+        }
+        const face = chipInterface(definition);
+        for (const pin of face.inputs) addPin(id, pin.name, false);
+        for (const pin of face.outputs) addPin(id, pin.name, false);
+        walk(definition, `${id}/`, [...inside, name]);
+        for (const pin of face.inputs) {
+          links.push({ from: { component: id, pin: pin.name }, to: { component: `${id}/${pin.component}`, pin: 'out' }, id: `${id}.${pin.name}` });
+        }
+        for (const pin of face.outputs) {
+          links.push({ from: { component: `${id}/${pin.component}`, pin: 'in' }, to: { component: id, pin: pin.name }, id: `${id}.${pin.name}` });
+        }
+        continue;
+      }
+      // A chip's switches and LEDs are its edge, not parts: their pins
+      // exist for wires to reach, and drive and read nothing.
+      const edge = inside.length > 0 && (component.kind === 'input' || component.kind === 'output');
+      const spec = PINS[component.kind];
+      for (const pin of spec.inputs) addPin(id, pin, false);
+      for (const pin of spec.outputs) addPin(id, pin, !edge);
+      if (!edge) parts.push({ ...component, id });
     }
-  }
+    for (const wire of level.wires) {
+      links.push({
+        from: { component: prefix + wire.from.component, pin: wire.from.pin },
+        to: { component: prefix + wire.to.component, pin: wire.to.pin },
+        id: prefix + wire.id
+      });
+    }
+  };
+  walk(circuit, '', []);
 
   // Wires join pins into nets.
   const parent = pins.map((_, i) => i);
@@ -88,23 +138,23 @@ export function compile(circuit: Circuit): Netlist {
     return i;
   };
   const indexOf = (ref: PinRef, wire: string): number => {
-    const component = byId.get(ref.component);
-    if (component === undefined) {
-      throw new CircuitError('unknown-component', `Wire '${wire}' names a component '${ref.component}' that is not in the circuit.`);
-    }
     const index = pinIndex.get(pinKey(ref));
     if (index === undefined) {
-      const spec = PINS[component.kind];
+      const component = named.get(ref.component);
+      if (component === undefined) {
+        throw new CircuitError('unknown-component', `Wire '${wire}' names a component '${ref.component}' that is not in the circuit.`);
+      }
+      const known = pins.filter(p => p.component === ref.component).map(p => p.pin);
       throw new CircuitError(
         'unknown-pin',
-        `Wire '${wire}' names pin '${ref.pin}' on ${component.kind} '${component.label ?? component.id}', which has ${[...spec.inputs, ...spec.outputs].join(', ')}.`
+        `Wire '${wire}' names pin '${ref.pin}' on ${component.kind} '${component.label ?? ref.component}', which has ${known.join(', ')}.`
       );
     }
     return index;
   };
-  for (const wire of circuit.wires) {
-    const a = find(indexOf(wire.from, wire.id));
-    const b = find(indexOf(wire.to, wire.id));
+  for (const link of links) {
+    const a = find(indexOf(link.from, link.id));
+    const b = find(indexOf(link.to, link.id));
     if (a !== b) {
       parent[Math.max(a, b)] = Math.min(a, b);
     }
@@ -149,7 +199,7 @@ export function compile(circuit: Circuit): Netlist {
   const constants = new Map<string, { net: number; value: 0 | 1 }>();
   const clocks: number[] = [];
   const read = new Uint8Array(netCount);
-  for (const component of circuit.components) {
+  for (const component of parts) {
     const { id, kind } = component;
     if (isGate(kind)) {
       const a = netOf(id, 'a');

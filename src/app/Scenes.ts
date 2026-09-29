@@ -1,8 +1,9 @@
 import type { Circuit, Component, PinRef } from '../sim/Circuit';
 import { CircuitBuilder } from '../sim/CircuitBuilder';
-import { dFlipFlop } from '../sim/Parts';
+import { dFlipFlop, fullAdder } from '../sim/Parts';
+import { pinsOf } from '../sim/Chips';
 import { PINS, type GateKind } from '../sim/Primitives';
-import { sizeOf } from './Layout';
+import { shapeOf, sizeOf } from './Layout';
 
 /**
  * Circuits the application starts with, until Phase 6 opens files.
@@ -166,13 +167,13 @@ export function layOut(circuit: Circuit): Circuit {
   const drivers = new Map<string, string[]>();
   for (const w of circuit.wires) {
     const from = byId.get(w.from.component);
-    const [driver, reader] = from !== undefined && PINS[from.kind].outputs.includes(w.from.pin) ? [w.from, w.to] : [w.to, w.from];
+    const [driver, reader] = from !== undefined && pinsOf(from, circuit.chips).outputs.includes(w.from.pin) ? [w.from, w.to] : [w.to, w.from];
     readers.set(driver.component, [...(readers.get(driver.component) ?? []), reader.component]);
     drivers.set(reader.component, [...(drivers.get(reader.component) ?? []), driver.component]);
   }
-  const isSink = (c: Component) => PINS[c.kind].outputs.length === 0;
+  const isSink = (c: Component) => pinsOf(c, circuit.chips).outputs.length === 0;
   const level = new Map<string, number>();
-  const queue = circuit.components.filter(c => PINS[c.kind].inputs.length === 0).map(c => c.id);
+  const queue = circuit.components.filter(c => pinsOf(c, circuit.chips).inputs.length === 0).map(c => c.id);
   queue.forEach(id => level.set(id, 0));
   for (let i = 0; i < queue.length; i++) {
     const id = queue[i]!;
@@ -192,14 +193,14 @@ export function layOut(circuit: Circuit): Circuit {
     columns[isSink(c) ? deepest + 1 : (level.get(c.id) ?? 0)]!.push(c);
   }
 
-  const COLUMN = 10;
+  const COLUMN = Math.max(10, ...circuit.components.map(c => sizeOf(shapeOf(c, circuit.chips)).width + 6));
   const GAP = 2;
   const rowOf = new Map<string, number>();
   const placed = new Map<string, Component>();
   // Columns are centred on the tallest, so the displays at the end sit
   // halfway down rather than tucked into a corner.
   const heightOf = (column: Component[]) =>
-    column.reduce((h, c) => h + sizeOf(c.kind, c.rotation ?? 0).height + GAP, -GAP);
+    column.reduce((h, c) => h + sizeOf(shapeOf(c, circuit.chips), c.rotation ?? 0).height + GAP, -GAP);
   const tallest = Math.max(...columns.map(heightOf));
   columns.forEach((column, x) => {
     const weight = (c: Component) => {
@@ -209,13 +210,97 @@ export function layOut(circuit: Circuit): Circuit {
     const ordered = x === 0 ? column : [...column].sort((a, b) => weight(a) - weight(b));
     let y = Math.round((tallest - heightOf(column)) / 2);
     for (const c of ordered) {
-      const height = sizeOf(c.kind, c.rotation ?? 0).height;
+      const height = sizeOf(shapeOf(c, circuit.chips), c.rotation ?? 0).height;
       rowOf.set(c.id, y + height / 2);
       placed.set(c.id, { ...c, x: x * COLUMN, y });
       y += height + GAP;
     }
   });
   return { ...circuit, components: circuit.components.map(c => placed.get(c.id)!) };
+}
+
+/**
+ * Phase 8's exit: a full adder made into a chip, eight of them chained
+ * into an 8-bit adder, and that made into a chip too. The top level is
+ * the adder chip between two bytes of switches and a byte of LEDs, with
+ * hex displays reading each byte, set to add 0x2B and 0x3C, and carry
+ * in toggling once a second.
+ *
+ * Built in code, each level laid out by `layOut`; `makeChip` makes the
+ * same thing from a selection, which the specs check agrees.
+ */
+export const ADDER = { a: 0x2b, b: 0x3c };
+
+export function fullAdderChip(): Circuit {
+  const b = new CircuitBuilder();
+  const { sum, carry } = fullAdder(b, b.input('a'), b.input('b'), b.input('cin'), 'fa');
+  b.output('s', sum);
+  b.output('cout', carry);
+  return layOut(b.build());
+}
+
+export function adder8Chip(chips: Record<string, Circuit>): Circuit {
+  const b = new CircuitBuilder();
+  const a = Array.from({ length: 8 }, (_, i) => b.input(`a${i}`));
+  const x = Array.from({ length: 8 }, (_, i) => b.input(`b${i}`));
+  let carry = b.input('cin');
+  for (let i = 0; i < 8; i++) {
+    const fa = b.chip(`fa${i}`, 'full adder');
+    b.connect(a[i]!, { component: fa, pin: 'a' });
+    b.connect(x[i]!, { component: fa, pin: 'b' });
+    b.connect(carry, { component: fa, pin: 'cin' });
+    b.output(`s${i}`, { component: fa, pin: 's' });
+    carry = { component: fa, pin: 'cout' };
+  }
+  b.output('cout', carry);
+  return layOut({ ...b.build(), chips });
+}
+
+export function adderScene(): Circuit {
+  const full = fullAdderChip();
+  const chips: Record<string, Circuit> = { 'full adder': full };
+  const adder8 = adder8Chip(chips);
+  chips['adder 8'] = { ...adder8, chips: undefined };
+  const b = new CircuitBuilder();
+  const add = b.chip('add', 'adder 8');
+  const bits = (name: string, value: number) =>
+    Array.from({ length: 8 }, (_, i) => {
+      const pin = b.input(`${name}${i}`, ((value >> i) & 1) as 0 | 1);
+      b.connect(pin, { component: add, pin: `${name.toLowerCase()}${i}` });
+      return pin;
+    });
+  const a = bits('A', ADDER.a);
+  const x = bits('B', ADDER.b);
+  // Carry in from a flip-flop that toggles on every tick of a 1 Hz
+  // clock — a clock itself reads low between cycles, so it would never
+  // be seen high. With these two bytes the carry into bit 2 is the carry
+  // in, so running the circuit makes the inside of the third full adder
+  // change once a second while the sum flips between 0x67 and 0x68.
+  const toggle = b.gate('not', 'CIN.next');
+  const cin = dFlipFlop(b, toggle.out, b.clock('CLK'), 'CIN');
+  b.connect(cin.q, toggle.a);
+  b.connect(cin.q, { component: add, pin: 'cin' });
+  const s = Array.from({ length: 8 }, (_, i) => {
+    const out = { component: add, pin: `s${i}` };
+    b.output(`S${i}`, out);
+    return out;
+  });
+  b.output('COUT', { component: add, pin: 'cout' });
+  const hex = (label: string, from: PinRef[]) =>
+    b.display('hex', label, { b0: from[0]!, b1: from[1]!, b2: from[2]!, b3: from[3]! });
+  hex('A lo', a.slice(0, 4));
+  hex('A hi', a.slice(4));
+  hex('B lo', x.slice(0, 4));
+  hex('B hi', x.slice(4));
+  hex('S lo', s.slice(0, 4));
+  hex('S hi', s.slice(4));
+  const { chips: _, ...adderDefinition } = adder8;
+  const built = b.build();
+  return layOut({
+    ...built,
+    components: built.components.map(c => (c.kind === 'clock' ? { ...c, rate: 1 } : c)),
+    chips: { 'full adder': full, 'adder 8': adderDefinition as Circuit }
+  });
 }
 
 /** A small seeded PRNG, so the scene is the same every time. */

@@ -112,7 +112,14 @@ export function paintLive(
     // had mid zoom at 25 ms a frame in software rendering filling two
     // thousand curved bodies. Low is left unfilled; unknown is marked.
     const displays: number[] = [];
-    scene.forEach(area, c => (scene.displayNets[c] !== null ? displays.push(c) : sort(scene.valueNet[c]!, c)), null);
+    scene.forEach(
+      area,
+      c => {
+        if (scene.displayNets[c] !== null) displays.push(c);
+        else if (scene.kindOf(c) !== 'chip') sort(scene.valueNet[c]!, c);
+      },
+      null
+    );
     for (const [items, color] of [
       [unknown, 'placeholder'],
       [high, 'primary']
@@ -142,8 +149,9 @@ export function paintLive(
     return;
   }
   if (detail === 'blocks') {
-    // Every component as a block filled by the value it shows.
-    scene.forEach(area, c => sort(scene.valueNet[c]!, c), null);
+    // Every component as a block filled by the value it shows; a chip,
+    // which shows no one value, as a block of its own colour.
+    scene.forEach(area, c => (scene.kindOf(c) === 'chip' ? low.push(c) : sort(scene.valueNet[c]!, c)), null);
     for (const [items, color] of [
       [low, 'textMuted'],
       [unknown, 'placeholder'],
@@ -187,7 +195,7 @@ export function paintLive(
     area,
     c => {
       if (scene.displayNets[c] !== null) displays.push(c);
-      else if (!scene.isGate(c)) sort(scene.valueNet[c]!, c);
+      else if (!scene.isGate(c) && scene.kindOf(c) !== 'chip') sort(scene.valueNet[c]!, c);
     },
     null
   );
@@ -374,13 +382,57 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
   }
   surface.stroke();
 
-  // Outlines of switches and LEDs, whose insides the live layer fills.
-  if (others.length > 0) {
+  // Chips: a body, their definition's name inside it, and at close
+  // zoom the names of their pins along its edges. Filled, so the wires
+  // under a chip's body do not show through it.
+  const chips = others.filter(c => scene.kindOf(c) === 'chip');
+  if (chips.length > 0) {
     surface.beginPath();
-    for (const c of others) {
+    for (const c of chips) {
+      surface.roundRect(scene.x[c]!, scene.y[c]!, scene.width(c), scene.height(c), 0.5);
+    }
+    surface.fillColor('surface');
+    surface.fill();
+    surface.strokeColor('text');
+    surface.lineWidth(1.6 / scale);
+    surface.stroke();
+    if (scale >= BLOCKS_BELOW) {
+      surface.fillColor('text');
+      for (const c of chips) {
+        const name = scene.chipNames[c] ?? '?';
+        const fontSize = Math.min(1.1, Math.max(0.6, (scene.width(c) - 1) / Math.max(1, name.length) / 0.55));
+        surface.text(name, scene.x[c]! + scene.width(c) / 2, scene.y[c]! + scene.height(c) / 2 + fontSize * 0.35, {
+          fontSize,
+          align: 'center',
+          fontWeight: 600
+        });
+      }
+    }
+    if (scale >= LABELS_FROM) {
+      surface.fillColor('textMuted');
+      for (const c of chips) {
+        const turned = scene.turns[c] !== 0;
+        if (turned) continue;
+        for (const { pin, at } of scene.pins(c)) {
+          const left = at.x <= scene.x[c]! + 0.01;
+          surface.text(pin, at.x + (left ? 0.3 : -0.3), at.y + 0.2, { fontSize: 0.55, align: left ? 'left' : 'right' });
+        }
+      }
+    }
+  }
+
+  // Outlines of switches and LEDs, whose insides the live layer fills.
+  const outlined = others.filter(c => scene.kindOf(c) !== 'chip');
+  if (outlined.length > 0) {
+    surface.beginPath();
+    for (const c of outlined) {
       surface.roundRect(scene.x[c]!, scene.y[c]!, scene.width(c), scene.height(c), 0.4);
     }
+    surface.strokeColor('text');
+    surface.lineWidth(1.2 / scale);
     surface.stroke();
+  }
+  if (others.length > 0) {
     if (scale >= LABELS_FROM) {
       surface.fillColor('text');
       const style = { fontSize: 0.7, align: 'center' as const };

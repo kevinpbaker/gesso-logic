@@ -1,7 +1,7 @@
 import { combineLatest, interval, type Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { distinctUntilChanged, map } from 'rxjs/operators';
 
-import { paintPictures, percent } from 'gesso-core';
+import { paintPictures, percent, type UiKeyboardEvent, type UiTextChangeEvent } from 'gesso-core';
 import { each, FrameService, internalState, type ComponentContext, type Inputs } from 'gesso-framework';
 
 import { Circuit, type ClockRate, type TableView } from './app/CircuitContract';
@@ -63,6 +63,23 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
   const files = isBench() || proof ? null : fileActions(ctx);
   const canvas = circuitCanvas(ctx, files);
   const showRecent = internalState(false);
+  // The name box for the selected chip: filled with its name whenever the
+  // selection becomes a chip, renaming it on Enter or the button.
+  const selectedChip = canvas.editorChanged.pipe(
+    map(() => canvas.selectedChip()),
+    distinctUntilChanged()
+  );
+  const chipName = internalState('');
+  let renaming: string | null = null;
+  ctx.effect(selectedChip, name => {
+    renaming = name;
+    chipName.value = name ?? '';
+  });
+  const rename = () => {
+    if (renaming !== null && chipName.value.trim() !== '' && chipName.value !== renaming) {
+      circuit.send.renameChip(renaming, chipName.value);
+    }
+  };
   const readout = internalState<Readout>({ fps: 0, frameMs: 0, worstMs: 0, recorded: 0, tiles: 0, missed: 0 });
 
   // ---------------------------------------------------------------------
@@ -257,10 +274,67 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
         <row gap={6} y="center">
           {PALETTE.map(([kind, label, key]) => button(`${label} ${key}`, () => canvas.editor.startPlacing(kind)))}
         </row>
+        {/* The document's chips, to place like any part; empty until one is made. */}
+        <row gap={6} y="center">
+          {each(
+            document.pipe(map(d => d.chips.map(chip => chip.name))),
+            name => name,
+            name => button(`▣ ${name}`, () => canvas.editor.startPlacing('chip', false, name))
+          )}
+        </row>
+        {/* The selected chip's name, to rename it. Only while one chip is selected. */}
+        <row gap={6} y="center">
+          {selectedChip.pipe(
+            map(name =>
+              name === null
+                ? []
+                : [
+                    <text key="label" text="Chip" fontSize={12} color="textMuted" />,
+                    <editabletext
+                      key="name"
+                      value={chipName as never}
+                      width={160}
+                      fontSize={12}
+                      color="text"
+                      textWrap="none"
+                      backgroundColor="background"
+                      borderColor="border"
+                      borderWidth={1}
+                      padding={4}
+                      role="textbox"
+                      label="Chip name"
+                      onInput={(event: UiTextChangeEvent) => (chipName.value = event.value)}
+                      onKeyDown={(event: UiKeyboardEvent) => {
+                        if (event.key === 'Enter') {
+                          rename();
+                          event.preventDefault();
+                        }
+                      }}
+                    />,
+                    <row key="button">{button('Rename', rename)}</row>
+                  ]
+            )
+          )}
+        </row>
+        {/* Where the canvas is: the top, and each chip opened from it. Only inside a chip. */}
+        <row gap={4} y="center">
+          {each(
+            document.pipe(
+              map(d =>
+                d.path.length === 0
+                  ? []
+                  : [{ key: 'top', label: 'Top', depth: 0 }, ...d.path.map((level, i) => ({ key: `${i}:${level.id}`, label: `› ${level.id} (${level.chip})`, depth: i + 1 }))]
+              )
+            ),
+            'key',
+            crumb => button(crumb.label, () => circuit.send.closeChip(crumb.depth))
+          )}
+        </row>
         {files === null ? null : (
           <row gap={6} y="center">
             {button('New', () => circuit.send.loadScene('empty'))}
             {button('Open… ⌃O', () => files.open())}
+            {button('Insert chip…', () => files.insertChip())}
             {button('Save ⌃S', () => files.save(false))}
             {button('Save as… ⌃⇧S', () => files.save(true))}
             {button('Recent', () => {
@@ -300,8 +374,10 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
           {button('Undo', () => circuit.send.undo(), document.pipe(map(d => d.canUndo)))}
           {button('Redo', () => circuit.send.redo(), document.pipe(map(d => d.canRedo)))}
           {button('Counter', () => circuit.send.loadScene('counter'))}
+          {button('Adder', () => circuit.send.loadScene('adder'))}
           {button('Bench scene', () => circuit.send.loadScene('bench'))}
           {button('Truth table T', () => circuit.send.tabulate([...canvas.editor.selection]))}
+          {button('Make chip M', () => canvas.editor.keyDown('m', false, false))}
           <text text={canvas.editorChanged.pipe(map(() => canvas.editor.status))} fontSize={12} color="textMuted" />
         </row>
       </column>

@@ -60,3 +60,23 @@ describe('the truth table', () => {
     expect(result.table.rows).toHaveLength(4);
   });
 });
+
+describe('the truth table of a chip', () => {
+  it('sweeps a full adder chip as it would the gates inside it', async () => {
+    const { makeChip } = await import('./DocumentEdits');
+    const b = new CircuitBuilder();
+    const [a, bb, cin] = [b.input('a'), b.input('b'), b.input('cin')];
+    const { sum, carry } = fullAdder(b, a, bb, cin, 'fa');
+    b.output('s', sum);
+    b.output('c', carry);
+    const drawn = b.build();
+    // The five gates made into a chip, between the switches and LEDs.
+    const circuit = makeChip(drawn, drawn.components.filter(c => c.id.startsWith('fa.')).map(c => c.id), 'adder', 'fa');
+
+    const result = truthTable(circuit, ['fa']);
+    if (!('table' in result)) throw new Error(result.error);
+    expect(result.table.inputs.map(name => name.replace('.out', ''))).toEqual(['a', 'b', 'cin']);
+    expect(result.table.outputs).toEqual(['s', 'c']);
+    expect(result.table.rows).toEqual(['00', '10', '10', '01', '10', '01', '01', '11']);
+  });
+});

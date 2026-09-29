@@ -72,6 +72,10 @@ export class CircuitBuilder {
   clock(label = 'clk'): PinRef {
     return { component: this.add('clock', label), pin: 'out' };
   }
+  /** An instance of a chip, by its name in the document's `chips`, which the caller supplies with `build`. */
+  chip(label: string, name: string): string {
+    return this.add('chip', label, { chip: name });
+  }
   button(label: string): PinRef {
     return { component: this.add('button', label), pin: 'out' };
   }

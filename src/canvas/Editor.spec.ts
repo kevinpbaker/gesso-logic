@@ -45,7 +45,6 @@ function setup() {
     (...args: unknown[]) => {
       sent.push([name, ...args]);
     };
-  let clipboard = '';
   const editor = new Editor({
     scene: () => scene,
     toWorld: p => ({ x: p.x / SCALE, y: p.y / SCALE }),
@@ -60,15 +59,19 @@ function setup() {
       undo: record('undo'),
       redo: record('redo'),
       setInput: record('setInput'),
-      tabulate: record('tabulate')
+      tabulate: record('tabulate'),
+      makeChip: record('makeChip'),
+      openChip: record('openChip'),
+      copy: record('copy'),
+      duplicate: record('duplicate')
     },
+    chipShape: () => undefined,
     panBy: record('panBy'),
     value: () => 0,
-    copyText: text => (clipboard = text),
     changed: () => {}
   });
   const at = (x: number, y: number) => ({ x: x * SCALE, y: y * SCALE });
-  return { editor, sent, at, clipboard: () => clipboard };
+  return { editor, sent, at };
 }
 
 describe('the editor', () => {
@@ -141,7 +144,7 @@ describe('the editor', () => {
     editor.keyDown('x', false, false);
     editor.pointerDown(at(20, 20), 1, false);
 
-    expect(sent).toEqual([['place', 'xor', 18, 18, 'xor1']]);
+    expect(sent).toEqual([['place', 'xor', 18, 18, 'xor1', undefined, undefined]]);
     expect(editor.selection).toEqual(new Set(['xor1']));
   });
 
@@ -157,18 +160,46 @@ describe('the editor', () => {
     expect(sent).toEqual([['rotate', ['g']], ['remove', ['g']], ['undo'], ['redo']]);
   });
 
-  it('copies a selection and pastes it under fresh ids with its inner wires', () => {
-    const { editor, sent, at, clipboard } = setup();
+  it('asks for a copy of the selection, and pastes text under fresh ids with its inner wires and chips', () => {
+    const { editor, sent, at } = setup();
     editor.keyDown('a', true, false);
     editor.keyDown('c', true, false);
-    editor.pointerMove(at(30, 30));
-    expect(editor.paste(clipboard())).toBe(true);
+    expect(sent.at(-1)![0]).toBe('copy');
+    expect((sent.at(-1)![1] as string[]).sort()).toEqual(['a', 'g', 'led', 'push']);
 
-    const inserted = sent.find(s => s[0] === 'insert')![1] as { components: { id: string; x: number }[]; wires: unknown[] };
-    expect(inserted.components.map(c => c.id).sort()).toEqual(['and1', 'button1', 'input1', 'output1']);
-    expect(Math.min(...inserted.components.map(c => c.x))).toBe(30);
-    expect(inserted.wires).toHaveLength(1);
+    // Text as the application worker writes it: parts, a wire, and the
+    // chip one of them uses.
+    const text = JSON.stringify({
+      gessologic: 1,
+      components: [
+        { id: 'k', kind: 'input', x: 0, y: 0, label: 'key' },
+        { id: 'box', kind: 'chip', chip: 'inverter', x: 6, y: 0 }
+      ],
+      wires: [{ id: 'w9', from: { component: 'k', pin: 'out' }, to: { component: 'box', pin: 'in' } }],
+      chips: { inverter: { version: 1, components: [], wires: [] } }
+    });
+    editor.pointerMove(at(30, 30));
+    expect(editor.paste(text)).toBe(true);
+    const inserted = sent.find(s => s[0] === 'insert')![1] as {
+      components: { id: string; x: number; label?: string; chip?: string }[];
+      wires: { from: { component: string } }[];
+      chips: Record<string, unknown>;
+    };
+    expect(inserted.components.map(c => c.id).sort()).toEqual(['chip1', 'input1']);
+    expect(inserted.components.find(c => c.id === 'input1')).toMatchObject({ x: 30, label: 'key' });
+    expect(inserted.components.find(c => c.id === 'chip1')).toMatchObject({ chip: 'inverter' });
+    expect(inserted.wires[0]!.from.component).toBe('input1');
+    expect(Object.keys(inserted.chips)).toEqual(['inverter']);
     expect(editor.paste('not a circuit')).toBe(false);
+  });
+
+  it('duplicates under ids it picks, and selects the copies', () => {
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(8, 2), 1, false);
+    editor.pointerUp(at(8, 2));
+    editor.keyDown('d', true, false);
+    expect(sent).toEqual([['duplicate', ['g'], { g: 'and1' }, 2, 2]]);
+    expect(editor.selection).toEqual(new Set(['and1']));
   });
 
   it('pans with the middle button, and with space held', () => {

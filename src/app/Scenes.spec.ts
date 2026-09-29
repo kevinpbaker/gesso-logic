@@ -69,11 +69,23 @@ describe('the counter scene', () => {
 
 describe('both scenes, as files', () => {
   it('round-trip, and write the same bytes twice', async () => {
-    for (const circuit of [benchScene(), (await import('./Scenes')).counterScene()]) {
+    for (const circuit of [benchScene(), (await import('./Scenes')).counterScene(), (await import('./Scenes')).adderScene()]) {
       const text = writeCircuit(circuit);
       expect(readCircuit(text)).toEqual(circuit);
       expect(writeCircuit(readCircuit(text))).toBe(text);
     }
   });
 
+});
+
+describe('chips in a file', () => {
+  it('refuses a chip the file does not define, and a wire to a pin its chip lacks', async () => {
+    const { adderScene } = await import('./Scenes');
+    const data = JSON.parse(writeCircuit(adderScene()));
+    const without = { ...data, chips: { 'full adder': data.chips['full adder'] } };
+    expect(() => readCircuit(JSON.stringify(without))).toThrow(/components\[\d+\]\.chip: "adder 8" is not a chip this file defines/);
+    const wrongPin = structuredClone(data);
+    wrongPin.wires[0].to.pin = 'zz';
+    expect(() => readCircuit(JSON.stringify(wrongPin))).toThrow(/chip "adder 8" has no pin "zz"/);
+  });
 });

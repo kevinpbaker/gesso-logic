@@ -24,6 +24,8 @@ import { FILE_TYPE } from '../sim/CircuitFile';
  */
 export interface FileActions {
   open(): void;
+  /** Picks a circuit file and adds it to the document as a chip. */
+  insertChip(): void;
   save(asNew: boolean): void;
   /** Opens files dropped on the canvas: the first, if it reads as a circuit. */
   openDropped(files: readonly { readonly name: string; readonly bytes?: ArrayBuffer }[]): void;
@@ -83,6 +85,15 @@ export function fileActions(ctx: ComponentContext): FileActions {
   return {
     open: () => void shell.openFiles({ accept: [FILE_TYPE] }).then(result => opened(result, 'the file')),
     save: asNew => circuit.send.requestSave(asNew),
+    insertChip: () =>
+      void shell.openFiles({ accept: [FILE_TYPE] }).then(result => {
+        const file = result.files[0];
+        if (result.outcome === 'ok' && file !== undefined) {
+          circuit.send.importChip(decoder.decode(file.bytes), file.name);
+        } else if (result.outcome !== 'cancelled') {
+          circuit.send.finishSave(null, `Couldn't insert that file: ${result.error ?? result.outcome}`);
+        }
+      }),
     openDropped: files => {
       const file = files[0];
       if (file?.bytes !== undefined) {

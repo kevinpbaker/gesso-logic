@@ -1,5 +1,5 @@
 import type { Geometry } from '../app/CircuitContract';
-import { boundsOf, boxOf, LAYOUT, pinAt, route, sizeOf, slotOf, type Box, type Point } from '../app/Layout';
+import { boundsOf, boxOf, LAYOUT, pinAt, route, sizeOf, slotOf, type Box, type KindLayout, type Point, type Shape } from '../app/Layout';
 import type { PinRef, Rotation } from '../sim/Circuit';
 import { GATE_KINDS, isGate, PINS, type Kind } from '../sim/Primitives';
 
@@ -32,9 +32,10 @@ export const KIND_INDEX: Readonly<Record<Kind, number>> = {
   button: 11,
   probe: 12,
   hex: 13,
-  seg7: 14
+  seg7: 14,
+  chip: 15
 };
-export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7'];
+export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7', 'chip'];
 
 export class SceneIndex {
   readonly componentCount: number;
@@ -43,6 +44,10 @@ export class SceneIndex {
   readonly y: Float32Array;
   /** The net a component shows: a gate's or source's output, an output's input. -1 while it does not compile. */
   readonly valueNet: Int32Array;
+  /** A chip's body and pins, from its definition; null for every other kind. */
+  readonly shapes: readonly (KindLayout | null)[];
+  /** A chip's definition name; null for every other kind. */
+  readonly chipNames: readonly (string | null)[];
   /** A hex or seven-segment display's input nets, in pin order; null for everything else. */
   readonly displayNets: readonly (Int32Array | null)[];
   readonly labels: readonly (string | null)[];
@@ -89,6 +94,8 @@ export class SceneIndex {
     this.valueNet = new Int32Array(ids.length);
     const labels: (string | null)[] = [];
     const displayNets: (Int32Array | null)[] = [];
+    const shapes: (KindLayout | null)[] = [];
+    const chipNames: (string | null)[] = [];
     const boxes: Box[] = [];
     ids.forEach((id, n) => {
       const c = geometry.components[id]!;
@@ -101,10 +108,14 @@ export class SceneIndex {
         c.kind === 'hex' || c.kind === 'seg7' ? Int32Array.from(PINS[c.kind].inputs, pin => c.nets[pin] ?? -1) : null
       );
       labels.push(isGate(c.kind) ? null : (c.label ?? id));
-      boxes.push(boxOf(c.kind, c.x, c.y, c.rotation));
+      shapes.push(c.shape);
+      chipNames.push(c.chip);
+      boxes.push(boxOf(c.shape ?? c.kind, c.x, c.y, c.rotation));
     });
     this.labels = labels;
     this.displayNets = displayNets;
+    this.shapes = shapes;
+    this.chipNames = chipNames;
 
     const starts: number[] = [0];
     const points: number[] = [];
@@ -119,8 +130,8 @@ export class SceneIndex {
         continue;
       }
       const path = route(
-        pinAt(from.kind, from.x, from.y, wire.from.pin, from.rotation),
-        pinAt(to.kind, to.x, to.y, wire.to.pin, to.rotation),
+        pinAt(from.shape ?? from.kind, from.x, from.y, wire.from.pin, from.rotation),
+        pinAt(to.shape ?? to.kind, to.x, to.y, wire.to.pin, to.rotation),
         slotOf(wire.to.pin)
       );
       for (const p of path) {
@@ -180,20 +191,38 @@ export class SceneIndex {
 
   /** Width and height as drawn: a quarter turn swaps them. */
   width(component: number): number {
-    return sizeOf(this.kindOf(component), this.rotationOf(component)).width;
+    return sizeOf(this.shapeOf(component), this.rotationOf(component)).width;
   }
 
   height(component: number): number {
-    return sizeOf(this.kindOf(component), this.rotationOf(component)).height;
+    return sizeOf(this.shapeOf(component), this.rotationOf(component)).height;
   }
 
   /** The pins a component has, where they are now. */
   pins(component: number): { readonly pin: string; readonly at: Point }[] {
-    const kind = this.kindOf(component);
-    return Object.keys(LAYOUT[kind].pins).map(pin => ({
+    const shape = this.shapeOf(component);
+    const layout = typeof shape === 'string' ? LAYOUT[shape] : shape;
+    return Object.keys(layout.pins).map(pin => ({
       pin,
-      at: pinAt(kind, this.x[component]!, this.y[component]!, pin, this.rotationOf(component))
+      at: pinAt(shape, this.x[component]!, this.y[component]!, pin, this.rotationOf(component))
     }));
+  }
+
+  /**
+   * Whether a pin drives its net: an output of its kind, or on a chip,
+   * a pin down the right of the unturned body, where a chip's outputs are.
+   */
+  drives(component: number, pin: string): boolean {
+    const shape = this.shapes[component];
+    if (shape === null || shape === undefined) {
+      return PINS[this.kindOf(component)].outputs.includes(pin);
+    }
+    return shape.pins[pin]?.x === shape.width;
+  }
+
+  /** What the layout functions take for this component: its kind, or a chip's body. */
+  shapeOf(component: number): Shape {
+    return this.shapes[component] ?? this.kindOf(component);
   }
 
   // -------------------------------------------------------------------------

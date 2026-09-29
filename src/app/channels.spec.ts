@@ -50,7 +50,9 @@ describe('the circuit channel', () => {
       handle: null,
       dirty: true,
       camera: null,
-      message: null
+      message: null,
+      path: [],
+      chips: []
     });
     const led = () => {
       const net = circuit.view.geometry.value.components.led?.nets.in;
