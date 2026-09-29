@@ -1,9 +1,8 @@
 # Typecheck, specs, and Phase 7's frame budget.
 #
-# The proof runs headed, in a virtual display: headless Chrome stops a
-# worker's animation frames whenever the page's main thread is blocked,
-# so the one check that blocks it — the render worker must go on drawing
-# — can only be made with a display. See scripts/proof.ts.
+# The proof's freeze check runs Chrome with SwiftShader, so there is a
+# GPU process to drive the render worker's frames while the page's main
+# thread is blocked; the runner has no GPU. See scripts/proof.ts.
 name: ci
 
 on:
@@ -26,4 +25,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - name: Frame budget
-        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" env PROOF_HEADED=1 pnpm proof
+        run: pnpm proof

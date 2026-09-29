@@ -1,7 +1,7 @@
 /**
  * Driving headless Chrome over the DevTools protocol.
  *
- * Copied unchanged from gessosheet's `scripts/lib/devtools.ts`, itself a
+ * Copied from gessosheet's `scripts/lib/devtools.ts`, with `args` added, itself a
  * trimmed copy of the launcher in the Gesso repository. `scripts/bench.ts`
  * has an older client of its own, from Phase 0, and is left alone. Node has a `WebSocket` built
  * in, so driving the protocol directly costs a dependency less than a
@@ -185,6 +185,8 @@ export interface BrowserOptions {
   readonly devtoolsPort: number;
   readonly windowSize: readonly [number, number];
   readonly profileDir: string;
+  /** More switches for Chrome: the proof's freeze session asks for a GPU process this way. */
+  readonly args?: readonly string[];
 }
 
 /** Starts Chrome on `url` and returns the process with a client attached to its page. */
@@ -195,13 +197,14 @@ export async function openPage(
   const browser = spawn(
     chrome,
     [
-      ...(process.env.PROOF_HEADED === undefined ? ['--headless=new'] : []),
+      '--headless=new',
       '--no-first-run',
       '--no-default-browser-check',
       '--hide-scrollbars',
       '--force-device-scale-factor=1',
-      ...(process.env.PROOF_FRAME_LIMIT === undefined ? ['--disable-frame-rate-limit'] : []),
+      '--disable-frame-rate-limit',
       `--window-size=${options.windowSize[0]},${options.windowSize[1]}`,
+      ...(options.args ?? []),
       `--user-data-dir=${options.profileDir}`,
       `--remote-debugging-port=${options.devtoolsPort}`,
       options.url

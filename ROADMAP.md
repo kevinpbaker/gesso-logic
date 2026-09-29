@@ -682,20 +682,28 @@ typecheck, the specs and the proof.
   "Full speed" and "100 Hz" buttons to the canvas. Its clock and cycle
   readouts are live regions there, so the script reads them from the
   accessibility tree.
-- **Blocking the main thread needs a real display to prove anything.**
-  In headed Chrome the render worker draws straight through a 5 s block
-  (921 frames, worst gap 12 ms, measured by hand). Headless Chrome
-  stops a worker's animation frames along with its page's, so there it
-  draws nothing. The sheet's proof passes this check headless only
-  because it counts every frame in the recording, including those drawn
-  just before and after the block. Here the strip records the block's
-  window on the render worker's clock, and only frames inside it count.
-  Headless, the script says the check can't be made. CI runs it headed
-  under `xvfb-run`, where it's enforced. Either way, the simulator
-  running through the freeze is checked: about 3,000 cycles in 5 s.
+- **Blocking the main thread needs a GPU process to prove anything.**
+  With a GPU process, the display compositor drives the render worker's
+  animation frames, and the worker draws straight through a 5 s block:
+  921 frames by hand in a real browser, 719 headless on this machine's
+  GPU. With software compositing (a CI runner, headless or headed
+  under xvfb; CI's first run tried the latter), Chrome drives them from
+  the page's main thread, and the worker draws nothing. The sheet's
+  proof passes this check without a GPU only because it counts every
+  frame in the recording, including those drawn just before and after
+  the block. Here the strip records the block's window on the render
+  worker's clock, and only frames inside it count. The freeze runs in a
+  second browser with SwiftShader, a GPU process on any machine (about
+  40 frames inside the block). The budgets run in plain software
+  rendering, which is the stricter test and too fast a picture for
+  SwiftShader to keep up with. The simulator running through the
+  freeze is checked too: 2,000 to 3,000 cycles in 5 s.
 - **Gesso needed no change.** A watchdog on the worker's own
-  `requestAnimationFrame` path looked like the fix until the headed
-  measurement. Gesso's spec forbidding one is right.
+  `requestAnimationFrame` path looked like the fix until the GPU
+  measurement. Gesso's spec forbidding one is right where there's a
+  GPU process. Without one, a worker's frames still stop with its page,
+  which is worth telling Gesso: the hosted path's watchdog would cover
+  it, and the local path has none.
 - **Copying the sheet's pieces:** the strip came over nearly unchanged
   (its layout heatmap and re-measure count taken out, frame work put
   in), and the DevTools client unchanged. The budget script couldn't
