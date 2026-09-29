@@ -39,6 +39,13 @@ const DEVTOOLS_PORT = 9343;
 const SHOT = process.argv.find(arg => arg.startsWith('--shot='))?.slice('--shot='.length);
 /** `--profile`: CPU-profile every worker for the whole run, and print where the time went. */
 const PROFILE = process.argv.includes('--profile');
+/**
+ * `--trace`: a Chrome trace of the whole run, summarised per thread by
+ * the native events that took the time. A JavaScript profile stops at
+ * the edge of the engine; the raster and commit work behind a canvas is
+ * only visible here.
+ */
+const TRACE = process.argv.includes('--trace');
 const GPU = process.argv.includes('--gpu');
 /** With `--shot`: drag and ctrl-wheel the canvas through real input events before the shot. */
 const INPUT = process.argv.includes('--input');
@@ -113,6 +120,14 @@ class Client {
         void this.send('Target.setAutoAttach', AUTO_ATTACH, session);
         return;
       }
+      if (message.method === 'Tracing.dataCollected') {
+        this.traceEvents.push(...(message.params as { value: TraceEvent[] }).value);
+        return;
+      }
+      if (message.method === 'Tracing.tracingComplete') {
+        this.traceDone?.();
+        return;
+      }
       if (message.method === 'Runtime.exceptionThrown') {
         const details = (message.params as { exceptionDetails: { text: string; exception?: { description?: string } } })
           .exceptionDetails;
@@ -155,6 +170,26 @@ class Client {
       this.pending.set(id, resolve);
       this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
+  }
+
+  private traceEvents: TraceEvent[] = [];
+  private traceDone: (() => void) | null = null;
+
+  async startTrace(): Promise<void> {
+    await this.send('Tracing.start', {
+      traceConfig: {
+        includedCategories: ['toplevel', 'cc', 'gpu', 'blink', 'blink.canvas', 'skia', 'viz', 'disabled-by-default-devtools.timeline'],
+        recordMode: 'recordContinuously'
+      },
+      transferMode: 'ReportEvents'
+    });
+  }
+
+  async stopTrace(): Promise<TraceEvent[]> {
+    const done = new Promise<void>(resolve => (this.traceDone = resolve));
+    await this.send('Tracing.end');
+    await done;
+    return this.traceEvents;
   }
 
   finished(timeoutMs: number): Promise<void> {
@@ -225,6 +260,9 @@ async function main(): Promise<void> {
     client = await Client.connect(await waitForTarget());
     await client.send('Runtime.enable');
     await client.send('Target.setAutoAttach', AUTO_ATTACH);
+    if (TRACE) {
+      await client.startTrace();
+    }
     if (SHOT) {
       await sleep(3000);
       if (INPUT) {
@@ -265,6 +303,9 @@ async function main(): Promise<void> {
       if (PROFILE) {
         await summariseProfiles(client);
       }
+      if (TRACE) {
+        summariseTrace(await client.stopTrace());
+      }
     } finally {
       process.stderr.write('\n');
       report(client.lines.map(line => JSON.parse(line) as Record<string, unknown>));
@@ -303,6 +344,66 @@ function report(runs: Record<string, unknown>[]): void {
   console.log(widths.map(width => '─'.repeat(width)).join('  '));
   for (const row of rows) {
     console.log(line(row));
+  }
+}
+
+interface TraceEvent {
+  name: string;
+  cat: string;
+  ph: string;
+  pid: number;
+  tid: number;
+  ts: number;
+  dur?: number;
+  args?: { name?: string };
+}
+
+/**
+ * Per thread, the complete events that took the most time, counting
+ * each event's own time — its duration less its children's — so a
+ * top-level task does not hide what it spent the time on.
+ */
+function summariseTrace(events: TraceEvent[]): void {
+  const names = new Map<string, string>();
+  for (const e of events) {
+    if (e.ph === 'M' && e.name === 'thread_name') names.set(`${e.pid}:${e.tid}`, e.args?.name ?? '');
+  }
+  const byThread = new Map<string, TraceEvent[]>();
+  for (const e of events) {
+    if (e.ph !== 'X' || e.dur === undefined) continue;
+    const key = `${e.pid}:${e.tid}`;
+    (byThread.get(key) ?? byThread.set(key, []).get(key)!).push(e);
+  }
+  const rows: { thread: string; total: number; self: Map<string, number>; count: Map<string, number> }[] = [];
+  for (const [key, list] of byThread) {
+    list.sort((a, b) => a.ts - b.ts || b.dur! - a.dur!);
+    const self = new Map<string, number>();
+    const count = new Map<string, number>();
+    const stack: { end: number; name: string; child: number }[] = [];
+    let total = 0;
+    const close = (until: number) => {
+      while (stack.length > 0 && stack[stack.length - 1]!.end <= until) {
+        stack.pop();
+      }
+    };
+    for (const e of list) {
+      close(e.ts);
+      const parent = stack[stack.length - 1];
+      if (parent === undefined) total += e.dur!;
+      else self.set(parent.name, (self.get(parent.name) ?? 0) - e.dur!);
+      self.set(e.name, (self.get(e.name) ?? 0) + e.dur!);
+      count.set(e.name, (count.get(e.name) ?? 0) + 1);
+      stack.push({ end: e.ts + e.dur!, name: e.name, child: 0 });
+    }
+    rows.push({ thread: names.get(key) ?? key, total, self, count });
+  }
+  rows.sort((a, b) => b.total - a.total);
+  for (const row of rows.slice(0, 6)) {
+    console.log(`\n${row.thread}: ${(row.total / 1000).toFixed(0)} ms busy`);
+    for (const [name, us] of [...row.self].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+      const n = row.count.get(name) ?? 1;
+      console.log(`  ${(us / 1000).toFixed(1).padStart(8)} ms  ${String(n).padStart(6)} × ${(us / 1000 / n).toFixed(2).padStart(6)} ms  ${name}`);
+    }
   }
 }
 

@@ -70,6 +70,10 @@ export interface CanvasHandle {
   clampScale(scale: number): number;
   /** Tiles mounted now. */
   tileCount(): number;
+  /** Tiles made since construction, for telling frames that made tiles from frames that did not. */
+  tilesMade(): number;
+  /** Share of the view's tiles with nothing drawn on their ground yet, 0..1: the price of queueing new tiles. */
+  blank(): number;
   /** Share of on-screen nets with no value yet, 0..1. */
   missed(): number;
   /** The scene's bounds in grid units. */
@@ -81,8 +85,15 @@ const MIN_SCALE = 0.25;
 const MAX_SCALE = 48;
 /** How long the zoom must be still before tiles are redrawn at the new size. */
 const SETTLE_MS = 150;
-/** The most tiles redrawn at the new size in one frame. */
+/** The most tiles redrawn at the new size in one frame, once a zoom settles. */
 const REFRESH_PER_FRAME = 4;
+/**
+ * The most new tiles brought into view in one frame; see the queue below.
+ * Three, measured against one and two: one tile a frame left up to 60%
+ * of a zooming view blank for a frame gain lost in the noise, and three
+ * keeps the blank ground under 2% on average.
+ */
+const NEW_PER_FRAME = 3;
 
 interface Tile {
   readonly key: string;
@@ -165,19 +176,32 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
   });
 
   /**
-   * A grid change, made a few tiles a frame instead of all at once.
+   * New tiles, brought in a few a frame instead of all at once.
    *
-   * A new octave means a new tile grid, and making every tile of it in
-   * one frame was Phase 3's worst frame: 103 ms with the GPU, 216 ms
-   * without. So the old grid stays on screen — its tiles are still placed
-   * and scaled correctly — and the new grid's tiles are brought in over
-   * it `REFRESH_PER_FRAME` at a time, from the middle out. When the new
-   * grid covers the view the old one is dropped.
+   * A tile's layers are rasterised on the frame it first appears, and a
+   * frame that brings in many tiles pays for all of them. Phase 3 met
+   * this twice. A new grid (a zoom crossing an octave) made every tile in
+   * one frame: 103 ms with the GPU, 216 ms without. And in software
+   * rendering, the frames after a pan or zoom brought in a column of
+   * tiles averaged 21–27 ms against 17–18 otherwise.
+   *
+   * So a tile becomes visible only when the frame loop promotes it, at
+   * most `NEW_PER_FRAME` a frame, nearest the middle of the view first.
+   * Until then its ground shows the old grid's tile if a grid change is
+   * under way, and the background if not: at the edge of a pan, a sliver
+   * a frame or two late, which is the price map viewers pay for the
+   * same reason. Two cases skip the queue, because there is nothing on
+   * screen to protect: a view with no tile shown at all (the first
+   * frame, a jump), and an edit, whose tiles are all new at once.
    */
   let previousOctave: number | null = null;
   let lastOctave = gridOctave.value;
-  const ready = new Set<string>();
+  let lastRevision = -1;
+  let ready = new Set<string>();
   let pending: { key: string; tx: number; ty: number; world: number }[] = [];
+  /** Of the tiles the view wants, how many have nothing on their ground, and out of how many. */
+  let blankCells = 0;
+  let wantedCells = 0;
   const promoted = internalState(0);
   ctx.effect(gridOctave, octave => {
     if (octave === lastOctave) return;
@@ -185,10 +209,13 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
       previousOctave = lastOctave;
     }
     lastOctave = octave;
-    ready.clear();
   });
 
+  /** When the camera's scale last changed, for telling a zoom in progress from a view at rest. */
+  let scaleChangedAt = 0;
+  let tilesMade = 0;
   const makeTile = (key: string, tx: number, ty: number, world: number, scale: number): Tile => {
+    tilesMade++;
     const area: Box = { left: tx * world, top: ty * world, right: (tx + 1) * world, bottom: (ty + 1) * world };
     const nets = scene.netsIn(area);
     const place = (surface: PaintSurface, box: PaintBox) => {
@@ -231,7 +258,14 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
   const made = (cell: { key: string; tx: number; ty: number; world: number }, scale: number): Tile => {
     let tile = tiles.get(cell.key);
     if (tile === undefined) {
-      tile = makeTile(cell.key, cell.tx, cell.ty, cell.world, scale);
+      // A tile made while a zoom is under way is drawn at half the
+      // resolution: a quarter of the pixels to rasterise on the frame it
+      // arrives, which Phase 3's trace found was what made a zoom's
+      // frames late in software rendering. It is on screen only while
+      // the view moves, scaled up and slightly soft, and settle zoom
+      // redraws it sharp once the zoom stops.
+      const zooming = performance.now() - scaleChangedAt < SETTLE_MS;
+      tile = makeTile(cell.key, cell.tx, cell.ty, cell.world, zooming ? scale / 2 : scale);
       tiles.set(cell.key, tile);
     }
     return tile;
@@ -243,17 +277,43 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
         return [];
       }
       const current = cells(octave, c, s, rev);
-      let list: Tile[];
-      if (previousOctave === null) {
-        pending = [];
-        list = current.map(cell => made(cell, c.scale));
+      if (rev !== lastRevision) {
+        // An edit, or the scene arriving: every tile is new, and the old
+        // ones describe a circuit that no longer exists.
+        lastRevision = rev;
+        previousOctave = null;
+        ready = new Set(current.map(cell => cell.key));
       } else {
-        // Mid-change: the old grid's tiles that are still cached, under
-        // the new grid's that are ready. Old tiles are not made for
-        // newly uncovered ground — that is the new grid's job.
-        const old = cells(previousOctave, c, s, rev).flatMap(cell => tiles.get(cell.key) ?? []);
-        pending = current.filter(cell => !ready.has(cell.key));
-        list = [...old, ...current.filter(cell => ready.has(cell.key)).map(cell => made(cell, c.scale))];
+        // Forget what has left the view, so a tile coming back is queued
+        // again: its layers were dropped with it and are drawn afresh.
+        ready = new Set(current.filter(cell => ready.has(cell.key)).map(cell => cell.key));
+      }
+      pending = current.filter(cell => !ready.has(cell.key));
+      // The old grid's tiles stay only over ground whose new tile is not
+      // ready: drawing both grids everywhere for a whole change doubled
+      // the tiles composited on every frame of a zoom.
+      const covers = (tile: Tile, cell: { tx: number; ty: number; world: number }) =>
+        cell.tx * cell.world < tile.area.right &&
+        (cell.tx + 1) * cell.world > tile.area.left &&
+        cell.ty * cell.world < tile.area.bottom &&
+        (cell.ty + 1) * cell.world > tile.area.top;
+      const old =
+        previousOctave === null
+          ? []
+          : cells(previousOctave, c, s, rev)
+              .flatMap(cell => tiles.get(cell.key) ?? [])
+              .filter(tile => pending.some(cell => covers(tile, cell)));
+      let list = [...old, ...current.filter(cell => ready.has(cell.key)).map(cell => made(cell, c.scale))];
+      wantedCells = current.length;
+      blankCells = pending.filter(cell => !old.some(tile => covers(tile, cell))).length;
+      if (list.length === 0 && current.length > 0) {
+        // Nothing on screen at all: a jump, or the first frame. Queueing
+        // would show an empty canvas filling in; there is nothing to keep
+        // smooth, so everything comes in now.
+        ready = new Set(current.map(cell => cell.key));
+        pending = [];
+        blankCells = 0;
+        list = current.map(cell => made(cell, c.scale));
       }
       // Only what is shown is kept: a tile that scrolled away is rebuilt
       // if it comes back, which is an index walk and nothing more.
@@ -280,8 +340,13 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
     return (
       <stack
         position="absolute"
-        left={camera.pipe(map(c => (tile.area.left - c.x) * c.scale))}
-        top={camera.pipe(map(c => (tile.area.top - c.y) * c.scale))}
+        // Whole pixels. A bitmap drawn at a fractional position is
+        // resampled on every draw, and in software rendering that alone
+        // made a full redraw 3.5× dearer: 8.6 ms against 2.5 in the
+        // engine's measurement. The half pixel this moves a tile is not
+        // visible; the resampling was.
+        left={camera.pipe(map(c => Math.round((tile.area.left - c.x) * c.scale)))}
+        top={camera.pipe(map(c => Math.round((tile.area.top - c.y) * c.scale)))}
         width={box.pipe(map(b => b.side))}
         height={box.pipe(map(b => b.side))}
         transform={box.pipe(map(b => (b.scale === 1 ? undefined : { scaleX: b.scale, scaleY: b.scale })))}>
@@ -294,7 +359,6 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
 
   // Settle zoom: once the scale has been still for a moment, redraw
   // shown tiles at it, a few a frame, the middle of the view first.
-  let scaleChangedAt = 0;
   ctx.effect(
     camera.pipe(
       map(c => c.scale),
@@ -310,19 +374,30 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
     const distanceTo = (area: { left: number; right: number; top: number; bottom: number }) =>
       Math.hypot((area.left + area.right) / 2 - cx, (area.top + area.bottom) / 2 - cy);
 
-    // A grid change in progress takes this frame's budget.
-    if (previousOctave !== null) {
-      if (pending.length === 0) {
-        previousOctave = null;
-        ready.clear();
-      } else {
-        const byDistance = pending
-          .map(cell => ({ cell, d: distanceTo({ left: cell.tx * cell.world, right: (cell.tx + 1) * cell.world, top: cell.ty * cell.world, bottom: (cell.ty + 1) * cell.world }) }))
-          .sort((a, b) => a.d - b.d);
-        for (const { cell } of byDistance.slice(0, REFRESH_PER_FRAME)) {
-          ready.add(cell.key);
-        }
+    // Tiles waiting to come in take this frame's budget, before any
+    // settle-zoom redraw: both are a tile's layers rasterised, and a
+    // frame should pay for a few of them, not for both queues at once.
+    if (pending.length > 0) {
+      const byDistance = pending
+        .map(cell => ({
+          cell,
+          d: distanceTo({
+            left: cell.tx * cell.world,
+            right: (cell.tx + 1) * cell.world,
+            top: cell.ty * cell.world,
+            bottom: (cell.ty + 1) * cell.world
+          })
+        }))
+        .sort((a, b) => a.d - b.d);
+      for (const { cell } of byDistance.slice(0, NEW_PER_FRAME)) {
+        ready.add(cell.key);
       }
+      promoted.value++;
+      return;
+    }
+    if (previousOctave !== null) {
+      // The new grid covers the view; the old one goes.
+      previousOctave = null;
       promoted.value++;
       return;
     }
@@ -418,6 +493,8 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
     ready: () => scene.componentCount > 0 && size.current.width > 0,
     clampScale: (scale: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)),
     tileCount: () => shown.length,
+    tilesMade: () => tilesMade,
+    blank: () => (wantedCells === 0 ? 0 : blankCells / wantedCells),
     missed: () => {
       if (visibleNets.length === 0) return 0;
       let missing = 0;

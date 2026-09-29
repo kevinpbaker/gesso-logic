@@ -381,16 +381,19 @@ measures it (`scripts/bench.ts`, grown from Phase 0's runner, with the
 driver in `src/canvas/Bench.ts`). Frame cost in ms, with the circuit
 running flat out, after the engine change below:
 
-| zoom | GPU still / pan / zoom (mean) | GPU zoom p95 | software still / pan / zoom | software zoom gap |
-| ---- | ----------------------------- | -----------: | --------------------------- | ----------------: |
-| fit-all, 1.3 px a unit | 2.3 / 2.6 / 3.2 | 7.0 | 3.2 / 3.3 / 4.5 | 19.1 ms |
-| mid, 4 px a unit | 1.6 / 2.0 / 2.9 | 9.2 | 2.3 / 2.6 / 4.5 | 19.2 ms |
-| close, 12 px a unit | 1.4 / 1.7 / 2.3 | 4.9 | 2.2 / 2.5 / 4.1 | 19.3 ms |
+| zoom | GPU still / pan / zoom (cost) | software still / pan / zoom (frame gap) |
+| ---- | ---------------------------- | --------------------------------------- |
+| fit-all, 1.3 px a unit | 2.7 / 2.9 / 2.6 ms | 16.8 / 16.8 / 18.2 ms |
+| mid, 4 px a unit | 1.5 / 1.5 / 1.8 ms | 16.9 / 16.7 / 17.0 ms |
+| close, 12 px a unit | 1.5 / 1.6 / 1.3 ms | 16.7 / 17.0 / 17.1 ms |
 
-With the GPU every run holds 60 fps. In software rendering still and pan
-hold 60 fps at every zoom, and a continuous zoom runs at about 52 fps.
-The CPU resamples every scaled tile bitmap each frame of a zoom, and
-that's the one number still over budget.
+With the GPU every run holds 60 fps at a cost of at most 2.9 ms. In
+software rendering every run holds 60 fps, give or take a vsync, except
+zooming at fit-all, at about 55 fps: that sweep crosses the most octaves
+and makes the most new tiles. Software numbers are frame gaps, not cost,
+because replaying onto the frame moves raster work to the commit,
+outside the worker's timer; `pnpm bench --trace` shows it as
+`FinalizeFrame`.
 
 **The engine change that closed most of it** (gesso, `PaintPictureCache.draw`):
 Gesso rasterised every painted node's new recording into a bitmap of
@@ -404,10 +407,31 @@ only on the first frame it holds still. Mid zoom in software went from
 keeps the bitmap path, and Gesso's parity gate still compares the
 settled bitmaps both backends draw.
 
-**And the app change that finished it:** at the gates level of detail
-the live layer fills a rectangle inside each gate, a lit core, not the
-curved body. The bodies are filled once in the static layer beneath.
-That took mid zoom in software from 7.8 ms to 2.3.
+**And the app changes that finished it:**
+- **Lit cores.** At the gates level of detail the live layer fills a
+  rectangle inside each gate, not the curved body; the bodies are
+  filled once in the static layer beneath. Mid zoom in software went
+  from 7.8 ms to 2.3.
+- **Whole-pixel tiles.** A bitmap drawn at a fractional position is
+  resampled on every draw. Rounding each tile's position took a paused
+  pan at mid zoom from 17.5 ms to 60 fps.
+- **New tiles queued.** A tile's layers are rasterised on the frame it
+  first appears, and frames that brought in a column of tiles ran 21–27
+  ms. Tiles now come in three a frame, nearest the middle first, with
+  the old grid covering their ground during a zoom. The blank ground
+  that leaves averages under 2%; one a frame left up to 60%.
+- **Half-resolution tiles during a zoom**, redrawn sharp when the zoom
+  settles: a quarter of the raster on the frame a tile arrives. Mid and
+  close zoom went from 18 ms to 60 fps.
+- **Two layers a tile, not three.** The grid moves into the layer that
+  is drawn anyway. That made no measurable frame difference, but it's a
+  third less bitmap memory.
+
+A retained compositor in the engine was also built and tried: scroll
+layers, which shift a scroll container's previous pixels instead of
+redrawing them. It works, but this canvas pans by moving tiles, not by
+scrolling a container, and once tiles sat on whole pixels pan already
+held 60 fps, so the canvas doesn't use it.
 
 Paused, a frame costs 0.7–1.1 ms. The render worker gets 53–58
 snapshots a second with the GPU. It was checked by hand in a desktop
@@ -438,12 +462,8 @@ Chrome as well: 60 fps at every zoom with the circuit running at about
 - **Loading the scene is a one-time hitch** of 1.3–2.4 s: 10,000
   components crossing the channel, and the index built. Phase 6's.
 
-Still open: **continuous zoom in software rendering** runs at about 52
-fps, with a gap p95 of 31–35 ms, because the CPU resamples scaled tile
-bitmaps every frame. And the frame gap there exceeds the measured cost,
-because replaying onto the frame moves raster work to the frame's
-commit, outside the worker's timer. The gap is the honest number for
-software rendering now. **The bench scene is a glitch storm**, about 52,700 evaluations a cycle from random
+Still open: **zooming at fit-all in software rendering**, at about 55
+fps. **The bench scene is a glitch storm**, about 52,700 evaluations a cycle from random
 XOR-heavy logic, so it runs at about 550 Hz. That's a harsh load for the
 application worker and says nothing about the CPU's speed.
 
@@ -690,6 +710,8 @@ shipped in.
 | 0b    | `overscrollBehavior="contain"` works on an app's root and on any node, not only scroll containers, so a canvas can keep the wheel (`UiWheelController`, `GessoRuntime`) | gesso `94bb672` |
 | 0b    | `applyPatches` copies each container once per batch, not once per patch (`StorePatch`) | gesso `9327bcb` |
 | 3     | On Canvas2D a painted node's new recording is replayed onto the frame, and rasterised into a bitmap only once it holds still (`PaintPictureCache.draw`) | gesso `d3b0040` |
+| 3     | …except a picture seen for the first time or resized, which is rasterised at once rather than drawn twice | gesso `74c24c4` |
+| 3     | Scroll layers: a scroll container whose offset is the frame's only change is shifted and its exposed strip redrawn, not redrawn whole. Built for this canvas, not used by it (it pans tiles, not a container), and kept for apps that scroll | gesso `62ef127` |
 
 ---
 

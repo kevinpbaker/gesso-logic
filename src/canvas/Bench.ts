@@ -43,6 +43,10 @@ export interface BenchSample {
   readonly recordMs: number;
   readonly missed: number;
   readonly tiles: number;
+  /** Cumulative tiles made. */
+  readonly tilesMade: number;
+  /** Share of the view's tiles with nothing drawn yet, 0..1. */
+  readonly blank: number;
   /** Cumulative signal snapshots received, and the simulator's own report. */
   readonly snapshots: number;
   readonly cycles: number;
@@ -57,7 +61,13 @@ export function benchMatrix(): BenchRun[] {
   const runs: BenchRun[] = [
     // The floor: the circuit paused, nothing arriving.
     { label: 'paused-still-all', zoom: 'all', motion: 'still', running: false },
-    { label: 'paused-pan-all', zoom: 'all', motion: 'pan', running: false }
+    { label: 'paused-pan-all', zoom: 'all', motion: 'pan', running: false },
+    // Paused motion at mid zoom: every layer a cached bitmap, so what a
+    // frame costs here is compositing alone — the baseline a running
+    // frame's live drawing is priced against.
+    { label: 'paused-zoom-all', zoom: 'all', motion: 'zoom', running: false },
+    { label: 'paused-pan-mid', zoom: 'mid', motion: 'pan', running: false },
+    { label: 'paused-zoom-mid', zoom: 'mid', motion: 'zoom', running: false }
   ];
   // The exit: running flat out, at every zoom, still and moving.
   for (const zoom of ['all', 'mid', 'close'] as ZoomPreset[]) {
@@ -83,6 +93,12 @@ export class BenchDriver {
   private missedFrames = 0;
   private peakTiles = 0;
   private start: BenchSample | null = null;
+  /** Per frame: whether the frame before it made tiles, and this frame's gap. */
+  private afterMaking: number[] = [];
+  private afterNot: number[] = [];
+  private lastMade = 0;
+  private madeLast = false;
+  private blanks: number[] = [];
 
   constructor(
     private readonly runs: readonly BenchRun[],
@@ -115,10 +131,20 @@ export class BenchDriver {
         this.missedFrames = 0;
         this.peakTiles = 0;
         this.start = sample;
+        this.afterMaking = [];
+        this.afterNot = [];
+        this.blanks = [];
+        this.lastMade = sample.tilesMade;
       }
       return;
     }
     this.knobs.move(run, sample.gapMs);
+    // The gap a frame reports is what the frame before it cost, commit
+    // and all, so it is filed under whether that frame made tiles.
+    (this.madeLast ? this.afterMaking : this.afterNot).push(sample.gapMs);
+    this.madeLast = sample.tilesMade > this.lastMade;
+    this.blanks.push(sample.blank);
+    this.lastMade = sample.tilesMade;
     this.gaps.push(sample.gapMs);
     this.costs.push(sample.durationMs);
     this.recordMs.push(sample.recordMs);
@@ -149,6 +175,13 @@ export class BenchDriver {
         recordedPerFrame: per(sample.recorded - started.recorded),
         recordMs: round(mean(this.recordMs)),
         peakTiles: this.peakTiles,
+        tilesMade: sample.tilesMade - started.tilesMade,
+        gapAfterMakingMs: round(mean(this.afterMaking)),
+        gapAfterMakingCount: this.afterMaking.length,
+        gapAfterNotMs: round(mean(this.afterNot)),
+        blankFramesPct: round((100 * this.blanks.filter(b => b > 0).length) / Math.max(1, this.blanks.length)),
+        blankMeanPct: round(100 * mean(this.blanks)),
+        blankWorstPct: round(100 * Math.max(0, ...this.blanks)),
         missFramesPct: per(100 * this.missedFrames),
         snapshotsPerSecond: round(((sample.snapshots - started.snapshots) * 1000) / RUN_MS),
         simCyclesPerSecond: round(((sample.cycles - started.cycles) * 1000) / RUN_MS),

@@ -8,14 +8,21 @@ import type { SceneIndex } from './SceneIndex';
  * Drawing a rectangle of the circuit onto a `PaintSurface`, in grid
  * units, as the three layers of a tile.
  *
- *   - **under** — the dot grid; below full detail the wires, unlit; at
- *     the gates level the gates' bodies. Changes on an edit.
+ *   - **under** — below full detail, the dot grid and the wires,
+ *     unlit, and at the gates level the gate symbols too. Changes on an
+ *     edit.
  *   - **live** — whatever shows a value: wires in their colours, the
  *     insides of switches and LEDs, the gates' lit cores, and at the
  *     blocks level the gates themselves. Changes whenever a chunk it
  *     reads changes.
- *   - **over** — gate symbols and the outlines of everything else.
- *     Changes on an edit.
+ *   - **over** — at full detail only, the grid and the gate symbols
+ *     over the lit wires. Changes on an edit.
+ *
+ * At most two of the three draw anything at a given level, and an empty
+ * layer costs nothing. That matters in software rendering, where the
+ * renderer blits every layer's bitmap back onto the canvas every frame:
+ * Phase 3's trace found compositing alone past a frame's budget at mid
+ * zoom, with nothing changing, when every tile had three.
  *
  * Phase 0 measured why: recording is cheap and rasterising is not, and
  * a layer whose inputs did not change is not rasterised at all. So what
@@ -57,42 +64,25 @@ export const paintTiming = { recordMs: 0 };
 
 
 export function paintUnder(surface: PaintSurface, scene: SceneIndex, area: Box, scale: number): void {
-  const started = performance.now();
-  // Dots every unit when that is at least twelve pixels, every four
-  // units when that is, and none below.
-  const spacing = scale >= 12 ? 1 : scale * 4 >= 12 ? 4 : 0;
-  if (spacing > 0) {
-    const size = 1.2 / scale;
-    surface.beginPath();
-    for (let y = Math.ceil(area.top / spacing) * spacing; y <= area.bottom; y += spacing) {
-      for (let x = Math.ceil(area.left / spacing) * spacing; x <= area.right; x += spacing) {
-        surface.rect(x - size / 2, y - size / 2, size, size);
-      }
-    }
-    surface.fillColor('border');
-    surface.fill();
-  }
   const detail = detailAt(scale);
-  if (detail !== 'full') {
-    surface.lineWidth(Math.min(1.5, scale / 2) / scale);
-    surface.beginPath();
-    scene.forEach(area, null, w => traceWire(surface, scene, w));
-    surface.strokeColor('border');
-    surface.stroke();
+  // At full detail this layer is empty, and an empty layer makes no
+  // bitmap and costs no composite: the grid moves to the over layer.
+  if (detail === 'full') {
+    return;
   }
+  const started = performance.now();
+  drawGrid(surface, area, scale);
+  surface.lineWidth(Math.min(1.5, scale / 2) / scale);
+  surface.beginPath();
+  scene.forEach(area, null, w => traceWire(surface, scene, w));
+  surface.strokeColor('border');
+  surface.stroke();
   if (detail === 'gates') {
-    // The gates' bodies, filled once here rather than every frame in the
-    // live layer, which draws only the lit cores over them.
-    surface.beginPath();
-    scene.forEach(
-      area,
-      c => {
-        if (scene.isGate(c)) traceGateBody(surface, scene.kind[c]!, scene.x[c]!, scene.y[c]!);
-      },
-      null
-    );
-    surface.fillColor('surface');
-    surface.fill();
+    // The gates themselves, filled and outlined once here rather than in
+    // a layer of their own: the live layer's lit cores sit inside the
+    // bodies and never touch an outline, so nothing has to be drawn over
+    // them.
+    drawSymbols(surface, scene, area, scale);
   }
   paintTiming.recordMs += performance.now() - started;
 }
@@ -212,25 +202,49 @@ export function paintLive(
 }
 
 export function paintOver(surface: PaintSurface, scene: SceneIndex, area: Box, scale: number): void {
-  const detail = detailAt(scale);
-  if (detail === 'blocks') {
+  // Only full detail draws over the live layer: wires there run under
+  // gate symbols, and cross the bodies of gates between their ends.
+  if (detailAt(scale) !== 'full') {
     return;
   }
   const started = performance.now();
+  // The grid first. It belongs under the wires, but a layer of its own
+  // under them would be a whole tile composited every frame for a
+  // scatter of dots, and a 1.2 px dot over a wire does not show.
+  drawGrid(surface, area, scale);
+  drawSymbols(surface, scene, area, scale);
+  paintTiming.recordMs += performance.now() - started;
+}
+
+/** Dots every unit when that is at least twelve pixels, every four units when that is, and none below. */
+function drawGrid(surface: PaintSurface, area: Box, scale: number): void {
+  const spacing = scale >= 12 ? 1 : scale * 4 >= 12 ? 4 : 0;
+  if (spacing === 0) {
+    return;
+  }
+  const size = 1.2 / scale;
+  surface.beginPath();
+  for (let y = Math.ceil(area.top / spacing) * spacing; y <= area.bottom; y += spacing) {
+    for (let x = Math.ceil(area.left / spacing) * spacing; x <= area.right; x += spacing) {
+      surface.rect(x - size / 2, y - size / 2, size, size);
+    }
+  }
+  surface.fillColor('border');
+  surface.fill();
+}
+
+/** Gate symbols, filled and outlined, and the outlines and labels of everything else. */
+function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale: number): void {
   const gates: number[] = [];
   const others: number[] = [];
   scene.forEach(area, c => (scene.isGate(c) ? gates : others).push(c), null);
 
-  // Bodies: one path, outlined — and filled only at full detail, because
-  // at the gates level the live layer beneath fills them with their value.
   surface.beginPath();
   for (const g of gates) {
     traceGateBody(surface, scene.kind[g]!, scene.x[g]!, scene.y[g]!);
   }
-  if (detail === 'full') {
-    surface.fillColor('surface');
-    surface.fill();
-  }
+  surface.fillColor('surface');
+  surface.fill();
   surface.strokeColor('text');
   surface.lineWidth(1.2 / scale);
   surface.stroke();
@@ -260,7 +274,6 @@ export function paintOver(surface: PaintSurface, scene: SceneIndex, area: Box, s
       }
     }
   }
-  paintTiming.recordMs += performance.now() - started;
 }
 
 function traceWire(surface: PaintSurface, scene: SceneIndex, w: number): void {

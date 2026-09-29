@@ -137,6 +137,8 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
       recordMs: paintTiming.recordMs,
       missed,
       tiles: canvas.tileCount(),
+      tilesMade: canvas.tilesMade(),
+      blank: canvas.blank(),
       snapshots,
       cycles: status.cycles,
       achievedHz: status.achievedHz
