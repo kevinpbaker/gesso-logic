@@ -6,6 +6,7 @@ import { each, FrameService, internalState, type ComponentContext, type Inputs }
 
 import { Circuit, type ClockRate, type TableView } from './app/CircuitContract';
 import type { Kind } from './sim/Primitives';
+import { WIDENABLE } from './app/DocumentEdits';
 import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, isProof, type Motion } from './canvas/Bench';
 import { circuitCanvas } from './canvas/CircuitCanvas';
 import { fileActions } from './canvas/Files';
@@ -37,6 +38,8 @@ const PALETTE: readonly (readonly [Kind, string, string])[] = [
   ['probe', 'Probe', 'P'],
   ['hex', 'Hex', 'H'],
   ['seg7', '7-seg', '7'],
+  ['split', 'Split', 'S'],
+  ['join', 'Join', 'J'],
   ['not', 'NOT', 'N'],
   ['and', 'AND', 'A'],
   ['or', 'OR', 'O'],
@@ -75,6 +78,55 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
     renaming = name;
     chipName.value = name ?? '';
   });
+  // The width of the one part selected, when a width means something for
+  // it, and a wide switch's value.
+  const selectedPart = canvas.editorChanged.pipe(
+    map(() => {
+      const part = canvas.selectedPart();
+      return part !== null && WIDENABLE.has(part.kind) ? part : null;
+    }),
+    distinctUntilChanged((a, b) => a?.id === b?.id && a?.width === b?.width)
+  );
+  const widthText = internalState('');
+  const valueText = internalState('');
+  let widening: { id: string; kind: Kind; width: number } | null = null;
+  ctx.effect(selectedPart, part => {
+    widening = part;
+    widthText.value = part === null ? '' : String(part.width);
+    valueText.value = '';
+  });
+  const applyWidth = () => {
+    const width = Number.parseInt(widthText.value, 10);
+    if (widening !== null && Number.isInteger(width) && width !== widening.width) circuit.send.setWidth([widening.id], width);
+  };
+  const applyValue = () => {
+    const text = valueText.value.trim();
+    const value = /^0x/i.test(text) ? Number.parseInt(text.slice(2), 16) : Number.parseInt(text, 10);
+    if (widening !== null && Number.isInteger(value) && value >= 0) circuit.send.setInput(widening.id, value);
+  };
+  const field = (key: string, label: string, text: typeof widthText, width: number, apply: () => void) => (
+    <editabletext
+      key={key}
+      value={text as never}
+      width={width}
+      fontSize={12}
+      color="text"
+      textWrap="none"
+      backgroundColor="background"
+      borderColor="border"
+      borderWidth={1}
+      padding={4}
+      role="textbox"
+      label={label}
+      onInput={(event: UiTextChangeEvent) => (text.value = event.value)}
+      onKeyDown={(event: UiKeyboardEvent) => {
+        if (event.key === 'Enter') {
+          apply();
+          event.preventDefault();
+        }
+      }}
+    />
+  );
   const rename = () => {
     if (renaming !== null && chipName.value.trim() !== '' && chipName.value !== renaming) {
       circuit.send.renameChip(renaming, chipName.value);
@@ -316,6 +368,22 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
             )
           )}
         </row>
+        {/* The selected part's width, and a wide switch's value. Only while one such part is selected. */}
+        <row gap={6} y="center">
+          {selectedPart.pipe(
+            map(part =>
+              part === null
+                ? []
+                : [
+                    <text key="w-label" text="Width" fontSize={12} color="textMuted" />,
+                    field('width', 'Width in bits', widthText, 48, applyWidth),
+                    ...(part.kind === 'input' && part.width > 1
+                      ? [<text key="v-label" text="Value" fontSize={12} color="textMuted" />, field('value', 'Value, 0x for hex', valueText, 80, applyValue)]
+                      : [])
+                  ]
+            )
+          )}
+        </row>
         {/* Where the canvas is: the top, and each chip opened from it. Only inside a chip. */}
         <row gap={4} y="center">
           {each(
@@ -375,6 +443,7 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
           {button('Redo', () => circuit.send.redo(), document.pipe(map(d => d.canRedo)))}
           {button('Counter', () => circuit.send.loadScene('counter'))}
           {button('Adder', () => circuit.send.loadScene('adder'))}
+          {button('Bus adder', () => circuit.send.loadScene('bus adder'))}
           {button('Bench scene', () => circuit.send.loadScene('bench'))}
           {button('Truth table T', () => circuit.send.tabulate([...canvas.editor.selection]))}
           {button('Make chip M', () => canvas.editor.keyDown('m', false, false))}

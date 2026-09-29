@@ -49,10 +49,18 @@ export interface Component {
    */
   readonly rotation?: Rotation;
   /**
-   * The value a `constant` drives, or an `input` starts at. Ignored by
-   * every other kind.
+   * The value a `constant` drives, or an `input` starts at: a bit, or for
+   * one wider than a bit a number, least significant bit first. Ignored
+   * by every other kind.
    */
-  readonly value?: 0 | 1;
+  readonly value?: number;
+  /**
+   * How many bits wide a switch, constant, LED, probe or hex display is,
+   * or how wide a bus a `split` takes or a `join` gives. Absent is one
+   * bit — for a hex display, its four one-bit pins; for a split or join,
+   * eight. A chip's pins take the widths of its switches and LEDs.
+   */
+  readonly width?: number;
   /**
    * A `clock`'s rate in cycles a second; absent is as fast as it will go.
    * One rate drives every clock — the simulator has one clock domain —

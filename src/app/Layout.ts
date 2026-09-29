@@ -55,6 +55,9 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
   // A placeholder: a chip's real shape comes from its definition, by
   // `chipShape`, and is passed to these functions in place of the kind.
   chip: { width: 6, height: 4, pins: {} },
+  // Placeholders too: a split's or join's shape depends on its width; see `busShape`.
+  split: { width: 2, height: 9, pins: { in: { x: 0, y: 1 } } },
+  join: { width: 2, height: 9, pins: { out: { x: 2, y: 1 } } },
   seg7: {
     width: 5,
     height: 8,
@@ -96,13 +99,49 @@ export function chipShape(name: string, inputs: readonly string[], outputs: read
   return { width, height: Math.max(4, rows * 2), pins };
 }
 
-/** A component's shape: its kind, or for a chip its definition's body. */
+/**
+ * A split's or join's body: two units wide, the bus pin a unit down one
+ * side and a bit a unit apart down the other, least significant at the
+ * top.
+ */
+export function busShape(kind: 'split' | 'join', bits: readonly string[]): KindLayout {
+  const pins: Record<string, Point> = {};
+  bits.forEach((bit, i) => (pins[bit] = { x: kind === 'split' ? 2 : 0, y: 1 + i }));
+  pins[kind === 'split' ? 'in' : 'out'] = { x: kind === 'split' ? 0 : 2, y: 1 };
+  return { width: 2, height: bits.length + 1, pins };
+}
+
+/**
+ * A component's shape: its kind's, or one its width or definition
+ * decides — a chip's body, a split's or join's, a hex display with as
+ * many digits as its bus needs, and switches, constants, LEDs and probes
+ * wide enough to write a bus's value in.
+ */
 export function shapeOf(component: Component, chips: Circuit['chips']): Shape {
-  if (component.kind !== 'chip') {
-    return component.kind;
+  const width = component.width ?? 1;
+  switch (component.kind) {
+    case 'chip': {
+      const pins = pinsOf(component, chips);
+      return chipShape(component.chip ?? '?', pins.inputs, pins.outputs);
+    }
+    case 'split':
+      return busShape('split', pinsOf(component, chips).outputs);
+    case 'join':
+      return busShape('join', pinsOf(component, chips).inputs);
+    case 'input':
+    case 'constant':
+      return width > 1 ? { width: 4, height: 2, pins: { out: { x: 4, y: 1 } } } : component.kind;
+    case 'output':
+    case 'probe':
+      return width > 1 ? { width: 4, height: 2, pins: { in: { x: 0, y: 1 } } } : component.kind;
+    case 'hex': {
+      if (component.width === undefined) return 'hex';
+      const digits = Math.max(1, Math.ceil(width / 4));
+      return { width: 2 + 2 * digits, height: 6, pins: { in: { x: 0, y: 3 } } };
+    }
+    default:
+      return component.kind;
   }
-  const pins = pinsOf(component, chips);
-  return chipShape(component.chip ?? '?', pins.inputs, pins.outputs);
 }
 
 export function sizeOf(shape: Shape, rotation: Rotation = 0): { width: number; height: number } {

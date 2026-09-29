@@ -23,7 +23,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         clipboard: service.clipboard
       },
       commands: {
-        place: (kind, x, y, id, rotation, chip) => service.place(kind, x, y, id, rotation, chip),
+        place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
         connect: (from, to, id) => service.connect(from, to, id),
         move: (id, x, y) => service.move(id, x, y),
         moveBy: (ids, dx, dy, gesture) => service.moveBy(ids, dx, dy, gesture),
@@ -34,6 +34,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         redo: () => service.redo(),
         loadScene: name => service.loadScene(name),
         setInput: (id, value) => service.setInput(id, value),
+        setWidth: (ids, width) => service.setWidth(ids, width),
         run: () => service.run(),
         pause: () => service.pause(),
         step: () => service.step(),

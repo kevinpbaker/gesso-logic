@@ -14,13 +14,38 @@ export type SourceKind = 'clock' | 'constant' | 'input' | 'button';
 export type DisplayKind = 'output' | 'probe' | 'hex' | 'seg7';
 /** A chip: a circuit used as a part. Its pins are its definition's switches and LEDs; see `Chips.ts`. */
 export type ChipKind = 'chip';
-export type Kind = GateKind | SourceKind | DisplayKind | ChipKind;
+/**
+ * A bus's ends: `split` takes a bus and gives its bits, `join` takes bits
+ * and gives a bus. Wiring, not logic — the compiler joins their pins, and
+ * they cost no gate and no tick.
+ */
+export type BusKind = 'split' | 'join';
+export type Kind = GateKind | SourceKind | DisplayKind | ChipKind | BusKind;
 
 export const GATE_KINDS: readonly GateKind[] = ['not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor'];
 
 export interface PinSpec {
   readonly inputs: readonly string[];
   readonly outputs: readonly string[];
+  /** Pins wider than one bit, by name; a pin not listed is one bit. */
+  readonly widths?: Readonly<Record<string, number>>;
+}
+
+/** The widest a bus may be. */
+export const MAX_WIDTH = 32;
+
+/** A pin's width in bits: 1 unless its spec says otherwise. */
+export function widthOf(spec: PinSpec, pin: string): number {
+  return spec.widths?.[pin] ?? 1;
+}
+
+/**
+ * A pin's bits, as the compiler names them: the pin itself when it is one
+ * bit wide, and `pin[0]`, `pin[1]`, … when it is a bus, least significant
+ * first.
+ */
+export function bitPins(pin: string, width: number): string[] {
+  return width === 1 ? [pin] : Array.from({ length: width }, (_, i) => `${pin}[${i}]`);
 }
 
 const TWO_INPUT: PinSpec = { inputs: ['a', 'b'], outputs: ['out'] };
@@ -49,7 +74,10 @@ export const PINS: Readonly<Record<Kind, PinSpec>> = {
   seg7: { inputs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], outputs: [] },
   // A chip's pins depend on its definition, so none are listed here:
   // ask `pinsOf` in `Chips.ts`, which knows the definitions.
-  chip: { inputs: [], outputs: [] }
+  chip: { inputs: [], outputs: [] },
+  // Their pins depend on their width; ask `pinsOf`. These are an 8-bit one's shape without the bits.
+  split: { inputs: ['in'], outputs: [] },
+  join: { inputs: [], outputs: ['out'] }
 };
 
 /** Parts a person drives: switches and push buttons. */

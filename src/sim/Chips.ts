@@ -23,6 +23,8 @@ export interface ChipPin {
   readonly name: string;
   /** The switch or LED inside that it is. */
   readonly component: string;
+  /** Its width in bits: the switch's or LED's. */
+  readonly width: number;
 }
 
 export interface ChipInterface {
@@ -35,19 +37,52 @@ export function chipInterface(definition: Circuit): ChipInterface {
     definition.components
       .filter(c => c.kind === kind)
       .sort((a, b) => a.y - b.y || a.x - b.x)
-      .map(c => ({ name: c.label ?? c.id, component: c.id }));
+      .map(c => ({ name: c.label ?? c.id, component: c.id, width: c.width ?? 1 }));
   return { inputs: pinsOfKind('input'), outputs: pinsOfKind('output') };
 }
 
-/** A component's pins: its kind's, or for a chip its definition's. Empty for a chip whose definition is missing. */
+/** How wide a split or join is when its width is not given. */
+export const DEFAULT_BUS_WIDTH = 8;
+
+/**
+ * A component's pins and their widths: its kind's, sized by its
+ * `width`, or for a chip its definition's. Empty for a chip whose
+ * definition is missing.
+ */
 export function pinsOf(component: Component, chips: Circuit['chips']): PinSpec {
-  if (component.kind !== 'chip') {
-    return PINS[component.kind];
+  const width = component.width ?? 1;
+  const wide = (pin: string, w: number) => (w > 1 ? { widths: { [pin]: w } } : {});
+  switch (component.kind) {
+    case 'input':
+    case 'constant':
+      return { inputs: [], outputs: ['out'], ...wide('out', width) };
+    case 'output':
+    case 'probe':
+      return { inputs: ['in'], outputs: [], ...wide('in', width) };
+    case 'hex':
+      // With a width, one bus pin; without, the four one-bit pins it always had.
+      return component.width === undefined ? PINS.hex : { inputs: ['in'], outputs: [], ...wide('in', width) };
+    case 'split': {
+      const bits = component.width ?? DEFAULT_BUS_WIDTH;
+      return { inputs: ['in'], outputs: Array.from({ length: bits }, (_, i) => `b${i}`), widths: { in: bits } };
+    }
+    case 'join': {
+      const bits = component.width ?? DEFAULT_BUS_WIDTH;
+      return { inputs: Array.from({ length: bits }, (_, i) => `b${i}`), outputs: ['out'], widths: { out: bits } };
+    }
+    case 'chip': {
+      const definition = component.chip === undefined ? undefined : chips?.[component.chip];
+      if (definition === undefined) {
+        return PINS.chip;
+      }
+      const face = chipInterface(definition);
+      const widths: Record<string, number> = {};
+      for (const pin of [...face.inputs, ...face.outputs]) {
+        if (pin.width > 1) widths[pin.name] = pin.width;
+      }
+      return { inputs: face.inputs.map(p => p.name), outputs: face.outputs.map(p => p.name), widths };
+    }
+    default:
+      return PINS[component.kind];
   }
-  const definition = component.chip === undefined ? undefined : chips?.[component.chip];
-  if (definition === undefined) {
-    return PINS.chip;
-  }
-  const face = chipInterface(definition);
-  return { inputs: face.inputs.map(p => p.name), outputs: face.outputs.map(p => p.name) };
 }

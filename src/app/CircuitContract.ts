@@ -103,14 +103,20 @@ export interface ComponentGeometry {
   readonly nets: Readonly<Record<string, number>>;
   /** A chip's definition name and the body it gives it; null for every other kind. */
   readonly chip: string | null;
+  /** How many bits wide it is: its `width`, or 1. */
+  readonly width: number;
   readonly shape: KindLayout | null;
 }
 
 export interface WireGeometry {
   readonly from: PinRef;
   readonly to: PinRef;
-  /** The net the wire is on, or -1 while the document does not compile. */
+  /** The net the wire is on, or -1 while the document does not compile; for a bus, its first bit's. */
   readonly net: number;
+  /** How many bits wide it is. */
+  readonly width: number;
+  /** A bus's nets, least significant bit first; empty for a one-bit wire. */
+  readonly bits: readonly number[];
 }
 
 export interface Geometry {
@@ -123,6 +129,8 @@ export interface Geometry {
    * waits for geometry of that level.
    */
   readonly level: string;
+  /** The document's `opened` count when this was published: a canvas framing a document just opened waits for its geometry. */
+  readonly opened: number;
 }
 
 export interface Signals {
@@ -135,7 +143,7 @@ export interface Signals {
 export type ClockRate = number | 'max';
 
 /** The documents the application can open by name, until Phase 6 opens files. */
-export type SceneName = 'empty' | 'bench' | 'counter' | 'adder';
+export type SceneName = 'empty' | 'bench' | 'counter' | 'adder' | 'bus adder';
 
 export interface Status {
   readonly running: boolean;
@@ -184,7 +192,7 @@ export interface ClipRequest {
 
 export interface CircuitCommands {
   /** Adds a component. With no id, one is made from the kind. */
-  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string): void;
+  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void;
   /** Joins two pins with a wire. With no id, one is made. */
   connect(from: PinRef, to: PinRef, id?: string): void;
   move(id: string, x: number, y: number): void;
@@ -201,7 +209,10 @@ export interface CircuitCommands {
   /** Replaces the document with a named one, and forgets its history. */
   loadScene(name: SceneName): void;
   /** Drives an input component, as a person flipping a switch does. */
-  setInput(id: string, value: 0 | 1): void;
+  /** Sets a switch: a bit, or for a wide one a number. */
+  setInput(id: string, value: number): void;
+  /** Makes these components `width` bits wide; see `setWidth` in `DocumentEdits`. */
+  setWidth(ids: readonly string[], width: number): void;
   run(): void;
   pause(): void;
   /** One clock cycle, while paused. */
@@ -271,7 +282,7 @@ export const EMPTY_SUMMARY: DocumentSummary = {
 };
 export const NO_SAVE: SaveRequest = { serial: 0, name: '', text: '', handle: null };
 export const NO_CLIP: ClipRequest = { serial: 0, text: '' };
-export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {}, level: '' };
+export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {}, level: '', opened: 0 };
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [] };

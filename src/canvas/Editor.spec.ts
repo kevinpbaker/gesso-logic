@@ -239,7 +239,7 @@ describe('the editor', () => {
     editor.pointerDown(at(12, 2), 1, false);
 
     expect(sent).toEqual([
-      ['place', 'probe', 13, -1, 'probe1'],
+      ['place', 'probe', 13, -1, 'probe1', undefined, undefined, undefined],
       ['connect', { component: 'g', pin: 'out' }, { component: 'probe1', pin: 'in' }, 'w1']
     ]);
   });

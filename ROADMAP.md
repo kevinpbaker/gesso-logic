@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 8 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 9 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -822,6 +822,47 @@ joiners, and multi-bit pins on chips. A bus value shows as hex on hover
 and on a probe.
 
 **Exit:** the 8-bit adder rebuilt with bus pins, feeding a hex display.
+
+**Done.** The **Bus adder** button loads the exit circuit. The `bus
+adder` chip has 8-bit pins A and B, a carry in, an 8-bit S and a carry
+out. Inside, splits take A and B apart into the eight full adders and a
+join puts their sums back together into S. At the top, 8-bit switches
+feed it, and S feeds a two-digit hex display and an 8-bit LED. In
+Chrome, setting A to 0xFF in its value field showed 3C on the sum with
+carry out lit (with carry in 1), and hovering the A bus showed `0x2B`
+before that. Specced headless too.
+
+- **The simulator stays a bit a net.** A bus is a bundle of nets, and
+  `compile` expands it, as it flattens chips. A bus pin is one pin per
+  bit (`S[0]`…), a bus wire one link per bit, and a chip's bus pin joins
+  its switch or LED bit by bit.
+- **Widths live on parts.** Switches, constants, LEDs, probes and hex
+  displays take a `width` (up to 32); a switch's value is a number. A
+  chip's pins take the widths of its switches and LEDs, which is what
+  gives chips bus pins. A hex display with a width has one bus pin and a
+  digit per four bits; without one, it keeps its four one-bit pins.
+- **Splits and joins are wiring** (S and J): joins in the compiler, no
+  gates and no ticks. The bus adder is 50 gates, as the adder was.
+- **A wire is as wide as its pins.** Drawing a wire between pins of
+  different widths is refused; a file with one is rejected, and so is
+  compiling one. Changing a part's width drops the wires it leaves
+  mismatched and trims a switch's value to fit.
+- **Drawn:**
+  - bus wires three times as thick, lit while their value isn't zero,
+    and unknown until every bit has arrived;
+  - a slash and the width near a bus's driver;
+  - the value in hex on wide switches, constants, LEDs and probes;
+  - the value in hex beside the pointer when hovering a bus.
+
+  A probe dropped on a bus is as wide as the bus.
+- **Width and value fields** appear in the readout for one selected
+  part that takes a width; a wide switch's value accepts `0x` hex.
+- **The truth table works in bits.** A bus from outside is one wide
+  switch in the swept copy, and its bits are columns (`A[0]`…); the
+  limit of eight counts bits.
+- **Also fixed:** loading a scene could frame the view using the
+  previous document's geometry. Geometry now carries the `opened` count
+  it belongs to, and the canvas waits for it.
 
 ## Phase 10 — The standard library
 

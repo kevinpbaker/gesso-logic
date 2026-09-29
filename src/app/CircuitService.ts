@@ -2,7 +2,7 @@ import { BehaviorSubject, type Observable } from 'rxjs';
 
 import { CIRCUIT_VERSION, type Circuit, type PinRef, type Rotation } from '../sim/Circuit';
 import { CircuitError, compile, type Netlist } from '../sim/Netlist';
-import { isGate, PINS, type Kind } from '../sim/Primitives';
+import { bitPins, isGate, widthOf, type Kind } from '../sim/Primitives';
 import { Simulator } from '../sim/Simulator';
 import type {
   ClockRate,
@@ -35,10 +35,11 @@ import {
   remove,
   renameChip,
   rotate,
+  setWidth,
   sameConnectivity,
   type Fragment
 } from './DocumentEdits';
-import { adderScene, benchScene, counterScene } from './Scenes';
+import { adderScene, benchScene, busAdderScene, counterScene } from './Scenes';
 import { truthTable } from './TruthTable';
 import { boundsOf, boxOf, intersects, pinAt, route, shapeOf, slotOf, type KindLayout } from './Layout';
 import { pinsOf } from '../sim/Chips';
@@ -328,13 +329,15 @@ export class CircuitService {
           ? counterScene()
           : name === 'adder'
             ? adderScene()
-            : { version: CIRCUIT_VERSION, components: [], wires: [] }
+            : name === 'bus adder'
+              ? busAdderScene()
+              : { version: CIRCUIT_VERSION, components: [], wires: [] }
     );
   }
 
-  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string): void {
+  place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void {
     this.editLevel(level => {
-      const placed = place(level, id ?? freshId(level, kind), kind, x, y, rotation, chip);
+      const placed = place(level, id ?? freshId(level, kind), kind, x, y, rotation, chip, width);
       return kind === 'clock' ? withRate(placed, this.clockHz) : placed;
     });
   }
@@ -480,7 +483,11 @@ export class CircuitService {
     this.apply(next);
   }
 
-  setInput(id: string, value: 0 | 1): void {
+  setWidth(ids: readonly string[], width: number): void {
+    this.editLevel(level => setWidth(level, ids, width));
+  }
+
+  setInput(id: string, value: number): void {
     const simulator = this.simulator;
     if (simulator === null || !this.netlist?.inputs.has(id)) {
       return;
@@ -865,8 +872,12 @@ export class CircuitService {
       const nets: Record<string, number> = {};
       const spec = pinsOf(component, chips);
       if (netlist !== null) {
+        // A bus pin under its own name has its first bit's net, and each
+        // bit under `pin[i]`.
         for (const pin of [...spec.inputs, ...spec.outputs]) {
-          nets[pin] = netlist.pinNet.get(`${prefix}${component.id}.${pin}`) ?? -1;
+          const bits = bitPins(pin, widthOf(spec, pin)).map(bit => netlist.pinNet.get(`${prefix}${component.id}.${bit}`) ?? -1);
+          nets[pin] = bits[0]!;
+          if (bits.length > 1) bits.forEach((net, i) => (nets[`${pin}[${i}]`] = net));
         }
       }
       const shape = shapeOf(component, chips);
@@ -878,18 +889,19 @@ export class CircuitService {
         label: component.label ?? null,
         nets,
         chip: component.kind === 'chip' ? (component.chip ?? null) : null,
+        width: component.width ?? 1,
         shape: typeof shape === 'string' ? null : shape
       };
     }
     const wires: Record<string, WireGeometry> = {};
+    const byId = new Map(circuit.components.map(c => [c.id, c]));
     for (const wire of circuit.wires) {
-      wires[wire.id] = {
-        from: wire.from,
-        to: wire.to,
-        net: netlist?.pinNet.get(`${prefix}${wire.from.component}.${wire.from.pin}`) ?? -1
-      };
+      const from = byId.get(wire.from.component);
+      const width = from === undefined ? 1 : widthOf(pinsOf(from, chips), wire.from.pin);
+      const bits = bitPins(wire.from.pin, width).map(bit => netlist?.pinNet.get(`${prefix}${wire.from.component}.${bit}`) ?? -1);
+      wires[wire.id] = { from: wire.from, to: wire.to, net: bits[0]!, width, bits: width > 1 ? bits : [] };
     }
-    return { components, wires, level: this.path.join('/') };
+    return { components, wires, level: this.path.join('/'), opened: this.opened };
   }
 
   private signalsNow(): Signals {
@@ -941,7 +953,7 @@ export class CircuitService {
         if (intersects(boxOf(shapeOf(component, chips), component.x, component.y, component.rotation), viewport)) {
           const spec = pinsOf(component, chips);
           for (const pin of [...spec.inputs, ...spec.outputs]) {
-            add(component.id, pin);
+            for (const bit of bitPins(pin, widthOf(spec, pin))) add(component.id, bit);
           }
         }
       }
@@ -957,7 +969,7 @@ export class CircuitService {
           slotOf(wire.to.pin)
         );
         if (intersects(boundsOf(path), viewport)) {
-          add(wire.from.component, wire.from.pin);
+          for (const bit of bitPins(wire.from.pin, widthOf(pinsOf(from, chips), wire.from.pin))) add(wire.from.component, bit);
         }
       }
     }

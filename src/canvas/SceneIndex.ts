@@ -33,9 +33,11 @@ export const KIND_INDEX: Readonly<Record<Kind, number>> = {
   probe: 12,
   hex: 13,
   seg7: 14,
-  chip: 15
+  chip: 15,
+  split: 16,
+  join: 17
 };
-export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7', 'chip'];
+export const KINDS: readonly Kind[] = [...GATE_KINDS, 'input', 'clock', 'constant', 'output', 'button', 'probe', 'hex', 'seg7', 'chip', 'split', 'join'];
 
 export class SceneIndex {
   readonly componentCount: number;
@@ -48,7 +50,14 @@ export class SceneIndex {
   readonly shapes: readonly (KindLayout | null)[];
   /** A chip's definition name; null for every other kind. */
   readonly chipNames: readonly (string | null)[];
-  /** A hex or seven-segment display's input nets, in pin order; null for everything else. */
+  /** Each component's width in bits. */
+  readonly widths: Uint8Array;
+  /**
+   * The nets a component shows more than one of, in order: a hex or
+   * seven-segment display's pins, or the bits of a wide switch, constant,
+   * LED, probe or hex display, least significant first. Null for
+   * everything that shows one bit, or none.
+   */
   readonly displayNets: readonly (Int32Array | null)[];
   readonly labels: readonly (string | null)[];
   /** Each component's id, and its index by id. */
@@ -65,6 +74,9 @@ export class SceneIndex {
   readonly wireStart: Int32Array;
   readonly wirePoints: Float32Array;
   readonly wireNet: Int32Array;
+  /** Each wire's width in bits, and a bus's nets, least significant first; null for a one-bit wire. */
+  readonly wireWidth: Uint8Array;
+  readonly wireBits: readonly (Int32Array | null)[];
 
   /** The world the circuit covers. */
   readonly bounds: Box;
@@ -92,6 +104,7 @@ export class SceneIndex {
     this.x = new Float32Array(ids.length);
     this.y = new Float32Array(ids.length);
     this.valueNet = new Int32Array(ids.length);
+    this.widths = new Uint8Array(ids.length);
     const labels: (string | null)[] = [];
     const displayNets: (Int32Array | null)[] = [];
     const shapes: (KindLayout | null)[] = [];
@@ -104,8 +117,14 @@ export class SceneIndex {
       this.y[n] = c.y;
       this.turns[n] = c.rotation / 90;
       this.valueNet[n] = (c.kind === 'output' || c.kind === 'probe' ? c.nets.in : c.nets.out) ?? -1;
+      this.widths[n] = c.width;
+      const busPin = c.kind === 'input' || c.kind === 'constant' ? 'out' : 'in';
       displayNets.push(
-        c.kind === 'hex' || c.kind === 'seg7' ? Int32Array.from(PINS[c.kind].inputs, pin => c.nets[pin] ?? -1) : null
+        c.width > 1 && (c.kind === 'input' || c.kind === 'constant' || c.kind === 'output' || c.kind === 'probe' || c.kind === 'hex')
+          ? Int32Array.from({ length: c.width }, (_, i) => c.nets[`${busPin}[${i}]`] ?? -1)
+          : c.kind === 'hex' || c.kind === 'seg7'
+            ? Int32Array.from(PINS[c.kind].inputs, pin => c.nets[pin] ?? -1)
+            : null
       );
       labels.push(isGate(c.kind) ? null : (c.label ?? id));
       shapes.push(c.shape);
@@ -120,6 +139,8 @@ export class SceneIndex {
     const starts: number[] = [0];
     const points: number[] = [];
     const nets: number[] = [];
+    const widthsOfWires: number[] = [];
+    const bitsOfWires: (Int32Array | null)[] = [];
     const wireBoxes: Box[] = [];
     const wireIds: string[] = [];
     const wireEnds: { from: PinRef; to: PinRef }[] = [];
@@ -139,6 +160,8 @@ export class SceneIndex {
       }
       starts.push(points.length);
       nets.push(wire.net);
+      widthsOfWires.push(wire.width);
+      bitsOfWires.push(wire.bits.length > 0 ? Int32Array.from(wire.bits) : null);
       wireIds.push(wireId);
       wireEnds.push({ from: wire.from, to: wire.to });
       wireBoxes.push(boundsOf(path));
@@ -147,6 +170,8 @@ export class SceneIndex {
     this.wireStart = Int32Array.from(starts);
     this.wirePoints = Float32Array.from(points);
     this.wireNet = Int32Array.from(nets);
+    this.wireWidth = Uint8Array.from(widthsOfWires);
+    this.wireBits = bitsOfWires;
     this.wireIds = wireIds;
     this.wireEnds = wireEnds;
 
@@ -359,6 +384,9 @@ export class SceneIndex {
       w => {
         const net = this.wireNet[w]!;
         if (net >= 0) nets.add(net);
+        for (const bit of this.wireBits[w] ?? []) {
+          if (bit >= 0) nets.add(bit);
+        }
       }
     );
     return [...nets].sort((a, b) => a - b);

@@ -56,6 +56,9 @@ export type Detail = 'blocks' | 'gates' | 'full';
 export function detailAt(scale: number): Detail {
   return scale < BLOCKS_BELOW ? 'blocks' : scale < WIRES_FROM ? 'gates' : 'full';
 }
+/** Parts that show no one value of their own: chips, and a bus's splits and joins. */
+const WIRING: ReadonlySet<string> = new Set(['chip', 'split', 'join']);
+
 /** At or above this, switches and LEDs carry their labels. */
 const LABELS_FROM = 10;
 
@@ -72,11 +75,20 @@ export function paintUnder(surface: PaintSurface, scene: SceneIndex, area: Box, 
   }
   const started = performance.now();
   drawGrid(surface, area, scale);
-  surface.lineWidth(Math.min(1.5, scale / 2) / scale);
+  const thin = Math.min(1.5, scale / 2) / scale;
+  const buses: number[] = [];
+  surface.lineWidth(thin);
   surface.beginPath();
-  scene.forEach(area, null, w => traceWire(surface, scene, w));
+  scene.forEach(area, null, w => (scene.wireWidth[w]! > 1 ? buses.push(w) : traceWire(surface, scene, w)));
   surface.strokeColor('border');
   surface.stroke();
+  if (buses.length > 0) {
+    surface.lineWidth(thin * BUS_THICKNESS);
+    surface.beginPath();
+    for (const w of buses) traceWire(surface, scene, w);
+    surface.stroke();
+    if (detail === 'gates') drawBusMarks(surface, scene, buses, scale);
+  }
   if (detail === 'gates') {
     // The gates themselves, filled and outlined once here rather than in
     // a layer of their own: the live layer's lit cores sit inside the
@@ -116,7 +128,7 @@ export function paintLive(
       area,
       c => {
         if (scene.displayNets[c] !== null) displays.push(c);
-        else if (scene.kindOf(c) !== 'chip') sort(scene.valueNet[c]!, c);
+        else if (!WIRING.has(scene.kindOf(c))) sort(scene.valueNet[c]!, c);
       },
       null
     );
@@ -151,7 +163,7 @@ export function paintLive(
   if (detail === 'blocks') {
     // Every component as a block filled by the value it shows; a chip,
     // which shows no one value, as a block of its own colour.
-    scene.forEach(area, c => (scene.kindOf(c) === 'chip' ? low.push(c) : sort(scene.valueNet[c]!, c)), null);
+    scene.forEach(area, c => (WIRING.has(scene.kindOf(c)) ? low.push(c) : sort(scene.valueNet[c]!, c)), null);
     for (const [items, color] of [
       [low, 'textMuted'],
       [unknown, 'placeholder'],
@@ -169,8 +181,28 @@ export function paintLive(
     return;
   }
 
-  scene.forEach(area, null, w => sort(scene.wireNet[w]!, w));
+  const buses: number[] = [];
+  scene.forEach(area, null, w => (scene.wireWidth[w]! > 1 ? buses.push(w) : sort(scene.wireNet[w]!, w)));
   const width = 1.5 / scale;
+  // A bus is lit while its value is not zero, and unknown until every
+  // bit of it has arrived.
+  const busGroups: [number[], number[], number[]] = [[], [], []];
+  for (const w of buses) {
+    const value = busValue(scene.wireBits[w]!, chunks);
+    busGroups[value === null ? 1 : value === 0 ? 0 : 2].push(w);
+  }
+  for (const [items, color] of [
+    [busGroups[0], 'border'],
+    [busGroups[1], 'placeholder'],
+    [busGroups[2], 'primary']
+  ] as const) {
+    if (items.length === 0) continue;
+    surface.lineWidth(width * BUS_THICKNESS);
+    surface.beginPath();
+    for (const w of items) traceWire(surface, scene, w);
+    surface.strokeColor(color);
+    surface.stroke();
+  }
   for (const [items, color, thickness] of [
     [low, 'border', width],
     [unknown, 'placeholder', width],
@@ -195,7 +227,7 @@ export function paintLive(
     area,
     c => {
       if (scene.displayNets[c] !== null) displays.push(c);
-      else if (!scene.isGate(c) && scene.kindOf(c) !== 'chip') sort(scene.valueNet[c]!, c);
+      else if (!scene.isGate(c) && !WIRING.has(scene.kindOf(c))) sort(scene.valueNet[c]!, c);
     },
     null
   );
@@ -307,22 +339,27 @@ function drawDisplays(
     surface.fillColor(color);
     surface.fill();
   }
-  // A hex display's digit. Text is not worth drawing below a few pixels
-  // a unit, where a digit would be a smudge; the face stays blank.
+  // A hex display's digits, and a wide part's value, in hex. Text is
+  // not worth drawing below a few pixels a unit, where a digit would be a
+  // smudge; the face stays blank.
   if (scale < BLOCKS_BELOW) return;
-  surface.fillColor('primary');
-  const style = { fontSize: 3.6, align: 'center' as const, fontWeight: 700, fontFamily: 'monospace' };
+  const digitStyle = { fontSize: 3.6, align: 'center' as const, fontWeight: 700, fontFamily: 'monospace' };
+  const valueStyle = { fontSize: 1.1, align: 'center' as const, fontWeight: 700, fontFamily: 'monospace' };
   for (const c of displays) {
-    if (scene.kindOf(c) !== 'hex') continue;
-    let digit = 0;
-    let known = true;
-    scene.displayNets[c]!.forEach((net, bit) => {
-      const v = valueOf(net);
-      if (v < 0) known = false;
-      digit |= (v === 1 ? 1 : 0) << bit;
-    });
+    const kind = scene.kindOf(c);
+    if (kind === 'seg7') continue;
+    const nets = scene.displayNets[c]!;
+    const value = busValue(nets, chunks);
+    const text = busHex(value, nets.length);
+    surface.fillColor(kind === 'hex' || (value ?? 0) !== 0 ? 'primary' : 'text');
     turned(surface, scene, c, (x, y) => {
-      surface.text(known ? digit.toString(16).toUpperCase() : '?', x + 2.4, y + 4.3, style);
+      if (kind === 'hex') {
+        const width = scene.turns[c]! % 2 === 1 ? scene.height(c) : scene.width(c);
+        surface.text(text, x + 0.4 + (width - 0.4) / 2, y + 4.3, digitStyle);
+      } else {
+        const width = scene.turns[c]! % 2 === 1 ? scene.height(c) : scene.width(c);
+        surface.text(text, x + width / 2, y + 1.4, valueStyle);
+      }
     });
   }
 }
@@ -339,7 +376,68 @@ export function paintOver(surface: PaintSurface, scene: SceneIndex, area: Box, s
   // scatter of dots, and a 1.2 px dot over a wire does not show.
   drawGrid(surface, area, scale);
   drawSymbols(surface, scene, area, scale);
+  const buses: number[] = [];
+  scene.forEach(area, null, w => {
+    if (scene.wireWidth[w]! > 1) buses.push(w);
+  });
+  drawBusMarks(surface, scene, buses, scale);
   paintTiming.recordMs += performance.now() - started;
+}
+
+/** How much thicker a bus is drawn than a one-bit wire. */
+const BUS_THICKNESS = 3;
+
+/** A bus's value from its bits, least significant first; null until every bit is known. */
+export function busValue(bits: Int32Array, chunks: Readonly<Record<string, string>>): number | null {
+  let value = 0;
+  for (let i = 0; i < bits.length; i++) {
+    const net = bits[i]!;
+    const bit = net < 0 ? -1 : signalOf(chunks, net);
+    if (bit < 0) return null;
+    value |= bit << i;
+  }
+  return value >>> 0;
+}
+
+/** A bus's value in hex, as many digits as its width needs. */
+export function busHex(value: number | null, width: number): string {
+  const digits = Math.max(1, Math.ceil(width / 4));
+  return value === null ? '?'.repeat(digits) : value.toString(16).toUpperCase().padStart(digits, '0');
+}
+
+/**
+ * The mark a drawn bus carries: a short slash across it a little way
+ * from its driver, and its width beside the slash, as a schematic marks
+ * one. Static, so in the layer that changes on an edit.
+ */
+function drawBusMarks(surface: PaintSurface, scene: SceneIndex, buses: readonly number[], scale: number): void {
+  if (buses.length === 0 || scale < BLOCKS_BELOW) return;
+  surface.beginPath();
+  const labels: [number, number, number][] = [];
+  for (const w of buses) {
+    const start = scene.wireStart[w]!;
+    const p = scene.wirePoints;
+    const x0 = p[start]!;
+    const y0 = p[start + 1]!;
+    const x1 = p[start + 2] ?? x0 + 1;
+    const y1 = p[start + 3] ?? y0;
+    const length = Math.hypot(x1 - x0, y1 - y0) || 1;
+    const along = Math.min(0.8, length / 2);
+    const mx = x0 + ((x1 - x0) / length) * along;
+    const my = y0 + ((y1 - y0) / length) * along;
+    surface.moveTo(mx - 0.3, my + 0.4);
+    surface.lineTo(mx + 0.3, my - 0.4);
+    labels.push([mx, my, scene.wireWidth[w]!]);
+  }
+  surface.strokeColor('text');
+  surface.lineWidth(1.2 / scale);
+  surface.stroke();
+  if (scale >= 6) {
+    surface.fillColor('textMuted');
+    for (const [x, y, width] of labels) {
+      surface.text(String(width), x + 0.1, y - 0.5, { fontSize: 0.6, align: 'left' });
+    }
+  }
 }
 
 /** Dots every unit when that is at least twelve pixels, every four units when that is, and none below. */
@@ -421,8 +519,19 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
     }
   }
 
+  // A bus's splits and joins: filled bars, the bits fanning off one side.
+  const bars = others.filter(c => scene.kindOf(c) === 'split' || scene.kindOf(c) === 'join');
+  if (bars.length > 0) {
+    surface.beginPath();
+    for (const c of bars) {
+      surface.roundRect(scene.x[c]! + 0.3, scene.y[c]! + 0.3, scene.width(c) - 0.6, scene.height(c) - 0.6, 0.3);
+    }
+    surface.fillColor('text');
+    surface.fill();
+  }
+
   // Outlines of switches and LEDs, whose insides the live layer fills.
-  const outlined = others.filter(c => scene.kindOf(c) !== 'chip');
+  const outlined = others.filter(c => !WIRING.has(scene.kindOf(c)));
   if (outlined.length > 0) {
     surface.beginPath();
     for (const c of outlined) {

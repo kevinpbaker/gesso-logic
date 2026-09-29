@@ -23,6 +23,7 @@ import { Circuit, type Signals } from '../app/CircuitContract';
 import { intersects, type Box } from '../app/Layout';
 import { signalOf } from '../app/SignalPacking';
 import { Editor } from './Editor';
+import type { Kind } from '../sim/Primitives';
 import type { FileActions } from './Files';
 import { paintLive, paintOver, paintUnder } from './Painters';
 import { CELL, changedAreas, SceneIndex } from './SceneIndex';
@@ -86,6 +87,8 @@ export interface CanvasHandle {
   bounds(): Box;
   /** The definition name of the chip selected, when the selection is exactly one chip; null otherwise. */
   selectedChip(): string | null;
+  /** The one component selected — its id, kind and width — or null for none or several. */
+  selectedPart(): { readonly id: string; readonly kind: Kind; readonly width: number } | null;
   /** Selection, gestures and the keys that drive them. */
   readonly editor: Editor;
   /** Bumped whenever the editor has something new to show. */
@@ -538,9 +541,11 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
   ctx.effect(combineLatest([size.changes, circuit.view.document, revision]), ([s, document]) => {
     // Wait for the opened document's geometry: the summary and the
     // geometry are separate keys, and the summary can arrive first.
+    const geometry = circuit.view.geometry.value;
     const waiting =
       (document.components > 0 && scene.componentCount === 0) ||
-      circuit.view.geometry.value.level !== document.path.map(level => level.id).join('/');
+      geometry.opened !== document.opened ||
+      geometry.level !== document.path.map(level => level.id).join('/');
     if (s.width > 0 && document.opened !== framedFor && !waiting) {
       framedFor = document.opened;
       const next = document.path.length;
@@ -629,6 +634,12 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       return missing / visibleNets.length;
     },
     bounds: () => scene.bounds,
+    selectedPart: () => {
+      if (editor.selection.size !== 1) return null;
+      const id = [...editor.selection][0]!;
+      const c = scene.indexOf.get(id);
+      return c === undefined ? null : { id, kind: scene.kindOf(c), width: scene.widths[c]! };
+    },
     selectedChip: () => {
       if (editor.selection.size !== 1) return null;
       const c = scene.indexOf.get([...editor.selection][0]!);

@@ -1,6 +1,6 @@
 import { pinName, type Circuit, type Component, type PinRef } from './Circuit';
-import { chipInterface } from './Chips';
-import { GATE_KINDS, isGate, isSettable, PINS } from './Primitives';
+import { chipInterface, pinsOf } from './Chips';
+import { bitPins, GATE_KINDS, isGate, isSettable, widthOf, type PinSpec } from './Primitives';
 
 /**
  * A circuit compiled for running: nets as integers, gates as rows of
@@ -24,8 +24,8 @@ export interface Netlist {
   readonly fanStart: Int32Array;
   readonly fanGate: Int32Array;
   /** Nets driven by sources, by component id, with the value each starts at. */
-  readonly inputs: ReadonlyMap<string, { readonly net: number; readonly value: 0 | 1 }>;
-  readonly constants: ReadonlyMap<string, { readonly net: number; readonly value: 0 | 1 }>;
+  readonly inputs: ReadonlyMap<string, Source>;
+  readonly constants: ReadonlyMap<string, Source>;
   readonly clocks: readonly number[];
   /** The net each pin is on, keyed `component.pin` by id. */
   readonly pinNet: ReadonlyMap<string, number>;
@@ -35,9 +35,28 @@ export interface Netlist {
   readonly floating: readonly number[];
 }
 
+/**
+ * A switch or constant: the nets it drives, least significant bit first,
+ * and the value it starts at. `net` is the first, which is all there is
+ * for one a bit wide.
+ */
+export interface Source {
+  readonly net: number;
+  readonly nets: readonly number[];
+  readonly value: number;
+}
+
 export class CircuitError extends Error {
   constructor(
-    readonly code: 'duplicate-id' | 'unknown-component' | 'unknown-pin' | 'short' | 'version' | 'unknown-chip' | 'recursive-chip',
+    readonly code:
+      | 'duplicate-id'
+      | 'unknown-component'
+      | 'unknown-pin'
+      | 'short'
+      | 'version'
+      | 'unknown-chip'
+      | 'recursive-chip'
+      | 'width',
     message: string
   ) {
     super(message);
@@ -82,6 +101,8 @@ export function compile(circuit: Circuit): Netlist {
   };
   const walk = (level: Circuit, prefix: string, inside: readonly string[]) => {
     const ids = new Set<string>();
+    /** Each component's pins on this level, for the widths of the wires between them. */
+    const specs = new Map<string, PinSpec>();
     for (const component of level.components) {
       if (ids.has(component.id)) {
         throw new CircuitError('duplicate-id', `Two components have the id '${prefix}${component.id}'.`);
@@ -99,30 +120,70 @@ export function compile(circuit: Circuit): Netlist {
           throw new CircuitError('recursive-chip', `Chip '${name}' contains itself, by way of ${[...inside, name].join(' › ')}.`);
         }
         const face = chipInterface(definition);
-        for (const pin of face.inputs) addPin(id, pin.name, false);
-        for (const pin of face.outputs) addPin(id, pin.name, false);
-        walk(definition, `${id}/`, [...inside, name]);
-        for (const pin of face.inputs) {
-          links.push({ from: { component: id, pin: pin.name }, to: { component: `${id}/${pin.component}`, pin: 'out' }, id: `${id}.${pin.name}` });
+        specs.set(component.id, pinsOf(component, chips));
+        for (const pin of [...face.inputs, ...face.outputs]) {
+          for (const bit of bitPins(pin.name, pin.width)) addPin(id, bit, false);
         }
-        for (const pin of face.outputs) {
-          links.push({ from: { component: `${id}/${pin.component}`, pin: 'in' }, to: { component: id, pin: pin.name }, id: `${id}.${pin.name}` });
+        walk(definition, `${id}/`, [...inside, name]);
+        for (const [pins, inner] of [
+          [face.inputs, 'out'],
+          [face.outputs, 'in']
+        ] as const) {
+          for (const pin of pins) {
+            const outer = bitPins(pin.name, pin.width);
+            const edge = bitPins(inner, pin.width);
+            outer.forEach((bit, i) => {
+              links.push({ from: { component: id, pin: bit }, to: { component: `${id}/${pin.component}`, pin: edge[i]! }, id: `${id}.${pin.name}` });
+            });
+          }
         }
         continue;
       }
       // A chip's switches and LEDs are its edge, not parts: their pins
       // exist for wires to reach, and drive and read nothing.
       const edge = inside.length > 0 && (component.kind === 'input' || component.kind === 'output');
-      const spec = PINS[component.kind];
-      for (const pin of spec.inputs) addPin(id, pin, false);
-      for (const pin of spec.outputs) addPin(id, pin, !edge);
-      if (!edge) parts.push({ ...component, id });
+      // A split or join is wiring: its pins drive nothing, and its bus
+      // pin's bits are joined to its one-bit pins.
+      const bus = component.kind === 'split' || component.kind === 'join';
+      const spec = pinsOf(component, chips);
+      specs.set(component.id, spec);
+      for (const pin of spec.inputs) {
+        for (const bit of bitPins(pin, widthOf(spec, pin))) addPin(id, bit, false);
+      }
+      for (const pin of spec.outputs) {
+        for (const bit of bitPins(pin, widthOf(spec, pin))) addPin(id, bit, !edge && !bus);
+      }
+      if (bus) {
+        const busPin = component.kind === 'split' ? 'in' : 'out';
+        const ones = component.kind === 'split' ? spec.outputs : spec.inputs;
+        bitPins(busPin, widthOf(spec, busPin)).forEach((bit, i) => {
+          links.push({ from: { component: id, pin: bit }, to: { component: id, pin: ones[i]! }, id: `${id}.${ones[i]}` });
+        });
+      } else if (!edge) {
+        parts.push({ ...component, id });
+      }
     }
     for (const wire of level.wires) {
-      links.push({
-        from: { component: prefix + wire.from.component, pin: wire.from.pin },
-        to: { component: prefix + wire.to.component, pin: wire.to.pin },
-        id: prefix + wire.id
+      // A wire is as wide as its pins, which must agree; a bus wire is a
+      // link per bit.
+      const fromSpec = specs.get(wire.from.component);
+      const toSpec = specs.get(wire.to.component);
+      const fromWidth = fromSpec === undefined ? 1 : widthOf(fromSpec, wire.from.pin);
+      const toWidth = toSpec === undefined ? 1 : widthOf(toSpec, wire.to.pin);
+      if (fromSpec !== undefined && toSpec !== undefined && fromWidth !== toWidth) {
+        throw new CircuitError(
+          'width',
+          `Wire '${prefix}${wire.id}' joins ${wire.from.component}.${wire.from.pin}, ${fromWidth} bits wide, to ${wire.to.component}.${wire.to.pin}, ${toWidth}.`
+        );
+      }
+      const fromBits = bitPins(wire.from.pin, fromWidth);
+      const toBits = bitPins(wire.to.pin, toWidth);
+      fromBits.forEach((bit, i) => {
+        links.push({
+          from: { component: prefix + wire.from.component, pin: bit },
+          to: { component: prefix + wire.to.component, pin: toBits[i]! },
+          id: prefix + wire.id
+        });
       });
     }
   };
@@ -195,8 +256,9 @@ export function compile(circuit: Circuit): Netlist {
   const ins0: number[] = [];
   const ins1: number[] = [];
   const outs: number[] = [];
-  const inputs = new Map<string, { net: number; value: 0 | 1 }>();
-  const constants = new Map<string, { net: number; value: 0 | 1 }>();
+  const inputs = new Map<string, Source>();
+  const constants = new Map<string, Source>();
+  const bitsOf = (id: string, pin: string, width: number) => bitPins(pin, width).map(bit => netOf(id, bit));
   const clocks: number[] = [];
   const read = new Uint8Array(netCount);
   for (const component of parts) {
@@ -210,15 +272,15 @@ export function compile(circuit: Circuit): Netlist {
       outs.push(netOf(id, 'out'));
       read[a] = 1;
       read[b] = 1;
-    } else if (isSettable(kind)) {
-      inputs.set(id, { net: netOf(id, 'out'), value: component.value ?? 0 });
-    } else if (kind === 'constant') {
-      constants.set(id, { net: netOf(id, 'out'), value: component.value ?? 0 });
+    } else if (isSettable(kind) || kind === 'constant') {
+      const nets = bitsOf(id, 'out', kind === 'button' ? 1 : (component.width ?? 1));
+      (kind === 'constant' ? constants : inputs).set(id, { net: nets[0]!, nets, value: component.value ?? 0 });
     } else if (kind === 'clock') {
       clocks.push(netOf(id, 'out'));
     } else {
-      for (const pin of PINS[kind].inputs) {
-        read[netOf(id, pin)] = 1;
+      const spec = pinsOf(component, chips);
+      for (const pin of spec.inputs) {
+        for (const net of bitsOf(id, pin, widthOf(spec, pin))) read[net] = 1;
       }
     }
   }

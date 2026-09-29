@@ -98,7 +98,9 @@ const PART_KEYS: Readonly<Record<string, Kind>> = {
   b: 'button',
   p: 'probe',
   h: 'hex',
-  '7': 'seg7'
+  '7': 'seg7',
+  s: 'split',
+  j: 'join'
 };
 
 /** What copy puts on the clipboard: marked, so a paste can tell a circuit from any other text. */
@@ -484,6 +486,32 @@ export class Editor {
       surface.lineWidth(2 * px);
       surface.stroke();
     }
+
+    // A bus under the pointer says what it holds, in hex.
+    if (this.hover.kind === 'wire' && mode.kind === 'idle') {
+      const w = scene.wireIds.indexOf(this.hover.id);
+      const bits = w < 0 ? null : scene.wireBits[w];
+      if (bits !== null && bits !== undefined) {
+        let value: number | null = 0;
+        for (let i = 0; i < bits.length && value !== null; i++) {
+          const bit = this.deps.value(bits[i]!);
+          value = bit < 0 ? null : value | (bit << i);
+        }
+        const digits = Math.ceil(bits.length / 4);
+        const text = value === null ? '?'.repeat(digits) : `0x${(value >>> 0).toString(16).toUpperCase().padStart(digits, '0')}`;
+        const x = this.pointer.x + 12 * px;
+        const y = this.pointer.y - 10 * px;
+        surface.beginPath();
+        surface.roundRect(x - 4 * px, y - 14 * px, (text.length * 8 + 8) * px, 20 * px, 4 * px);
+        surface.fillColor('surface');
+        surface.fill();
+        surface.strokeColor('border');
+        surface.lineWidth(px);
+        surface.stroke();
+        surface.fillColor('text');
+        surface.text(text, x, y, { fontSize: 13 * px, fontFamily: 'monospace', fontWeight: 600 });
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -610,7 +638,9 @@ export class Editor {
     const w = scene.wireNear(world, WIRE_REACH / this.deps.scale());
     const id = this.fresh('probe');
     const at = w < 0 ? placement('probe', world) : { x: Math.round(world.x) + 1, y: Math.round(world.y) - 3 };
-    this.deps.send.place('probe', at.x, at.y, id);
+    // On a bus, a probe as wide as the bus, to show its value in hex.
+    const width = w < 0 ? 1 : scene.wireWidth[w]!;
+    this.deps.send.place('probe', at.x, at.y, id, undefined, undefined, width > 1 ? width : undefined);
     if (w >= 0) {
       const ends = scene.wireEnds[w]!;
       const from = scene.indexOf.get(ends.from.component);

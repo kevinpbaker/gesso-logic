@@ -303,6 +303,65 @@ export function adderScene(): Circuit {
   });
 }
 
+/**
+ * Phase 9's exit: the 8-bit adder rebuilt with bus pins. The `bus adder`
+ * chip takes two 8-bit buses, A and B, and a carry in, and gives an
+ * 8-bit S and a carry out. Inside, splits take A and B apart into the
+ * eight full adders and a join puts their sums together into S. At the
+ * top, 8-bit switches feed it and S feeds a two-digit hex display, with
+ * carry in toggling once a second as in the adder scene.
+ */
+export function busAdderChip(): Circuit {
+  const b = new CircuitBuilder();
+  const a = b.input('A', 0, 8);
+  const x = b.input('B', 0, 8);
+  let carry = b.input('cin');
+  const splitA = b.split('A bits', 8);
+  const splitB = b.split('B bits', 8);
+  const joinS = b.join('S bits', 8);
+  b.connect(a, { component: splitA, pin: 'in' });
+  b.connect(x, { component: splitB, pin: 'in' });
+  for (let i = 0; i < 8; i++) {
+    const fa = b.chip(`fa${i}`, 'full adder');
+    b.connect({ component: splitA, pin: `b${i}` }, { component: fa, pin: 'a' });
+    b.connect({ component: splitB, pin: `b${i}` }, { component: fa, pin: 'b' });
+    b.connect(carry, { component: fa, pin: 'cin' });
+    b.connect({ component: fa, pin: 's' }, { component: joinS, pin: `b${i}` });
+    carry = { component: fa, pin: 'cout' };
+  }
+  b.output('S', { component: joinS, pin: 'out' }, 8);
+  b.output('cout', carry);
+  return layOut({ ...b.build(), chips: { 'full adder': fullAdderChip() } });
+}
+
+export function busAdderScene(): Circuit {
+  const full = fullAdderChip();
+  const { chips: _, ...busAdder } = busAdderChip();
+  const chips = { 'full adder': full, 'bus adder': busAdder as Circuit };
+  const b = new CircuitBuilder();
+  const add = b.chip('add', 'bus adder');
+  const a = b.input('A', ADDER.a, 8);
+  const x = b.input('B', ADDER.b, 8);
+  b.connect(a, { component: add, pin: 'A' });
+  b.connect(x, { component: add, pin: 'B' });
+  const toggle = b.gate('not', 'CIN.next');
+  const cin = dFlipFlop(b, toggle.out, b.clock('CLK'), 'CIN');
+  b.connect(cin.q, toggle.a);
+  b.connect(cin.q, { component: add, pin: 'cin' });
+  const s = { component: add, pin: 'S' };
+  b.display('hex', 'A', { in: a }, 8);
+  b.display('hex', 'B', { in: x }, 8);
+  b.display('hex', 'sum', { in: s }, 8);
+  b.output('S', s, 8);
+  b.output('COUT', { component: add, pin: 'cout' });
+  const built = b.build();
+  return layOut({
+    ...built,
+    components: built.components.map(c => (c.kind === 'clock' ? { ...c, rate: 1 } : c)),
+    chips
+  });
+}
+
 /** A small seeded PRNG, so the scene is the same every time. */
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;

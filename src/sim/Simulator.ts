@@ -94,12 +94,13 @@ export class Simulator {
   }
 
   /** Drives an input. Takes effect on the next tick. */
-  set(input: string, value: 0 | 1): void {
+  /** Sets a switch: a bit, or for one wider than a bit a number, least significant bit first. */
+  set(input: string, value: number): void {
     const source = this.netlist.inputs.get(input);
     if (source === undefined) {
       throw new Error(`'${input}' is not an input.`);
     }
-    this.drive(source.net, value);
+    source.nets.forEach((net, bit) => this.drive(net, ((value >>> bit) & 1) as 0 | 1));
   }
 
   /** Drives every clock. Takes effect on the next tick. */
@@ -130,8 +131,8 @@ export class Simulator {
         this.value[net] = previous.value[old];
       }
     }
-    for (const { net, value } of this.netlist.constants.values()) {
-      this.value[net] = value;
+    for (const { nets, value } of this.netlist.constants.values()) {
+      nets.forEach((net, bit) => (this.value[net] = (value >>> bit) & 1));
     }
     this.clockLevel = previous.clockLevel;
     for (const net of this.netlist.clocks) {
@@ -298,8 +299,8 @@ export class Simulator {
   private powerOn(): void {
     const { type, in0, in1, out, gateCount, constants, inputs } = this.netlist;
     const value = this.value;
-    for (const { net, value: v } of [...constants.values(), ...inputs.values()]) {
-      value[net] = v;
+    for (const { nets, value: v } of [...constants.values(), ...inputs.values()]) {
+      nets.forEach((net, bit) => (value[net] = (v >>> bit) & 1));
     }
     for (let pass = 0; pass < POWER_ON_PASSES; pass++) {
       let moved = false;

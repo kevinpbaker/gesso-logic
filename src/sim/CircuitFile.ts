@@ -1,6 +1,9 @@
-import { CIRCUIT_VERSION, type Circuit, type Component, type Rotation, type Wire } from './Circuit';
+import { CIRCUIT_VERSION, type Circuit, type Component, type PinRef, type Rotation, type Wire } from './Circuit';
 import { pinsOf } from './Chips';
-import { PINS, type Kind } from './Primitives';
+import { MAX_WIDTH, PINS, widthOf, type Kind } from './Primitives';
+
+/** The kinds that may have a width. */
+const WIDTHED: ReadonlySet<Kind> = new Set(['input', 'constant', 'output', 'probe', 'hex', 'split', 'join']);
 
 /**
  * The circuit file: a circuit document as JSON, marked and versioned.
@@ -60,6 +63,7 @@ export function writeCircuit(circuit: Circuit): string {
       ...(c.rotation ? { rotation: c.rotation } : {}),
       ...(c.label !== undefined ? { label: c.label } : {}),
       ...(c.value !== undefined ? { value: c.value } : {}),
+      ...(c.width !== undefined ? { width: c.width } : {}),
       ...(c.rate !== undefined ? { rate: c.rate } : {}),
       ...(c.chip !== undefined ? { chip: c.chip } : {})
     });
@@ -160,8 +164,19 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
     }
     const label = raw['label'];
     if (label !== undefined && typeof label !== 'string') throw new CircuitFileError(`${here}.label: not a string`);
+    const width = raw['width'];
+    if (width !== undefined) {
+      if (!WIDTHED.has(kind as Kind)) throw new CircuitFileError(`${here}.width: a ${kind} has no width`);
+      const least = kind === 'split' || kind === 'join' ? 2 : 1;
+      if (typeof width !== 'number' || !Number.isInteger(width) || width < least || width > MAX_WIDTH) {
+        throw new CircuitFileError(`${here}.width: not a whole number from ${least} to ${MAX_WIDTH}`);
+      }
+    }
     const value = raw['value'];
-    if (value !== undefined && value !== 0 && value !== 1) throw new CircuitFileError(`${here}.value: not 0 or 1`);
+    const bits = typeof width === 'number' ? width : 1;
+    if (value !== undefined && !(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 2 ** bits)) {
+      throw new CircuitFileError(`${here}.value: not a whole number that fits in ${bits} bit${bits === 1 ? '' : 's'}`);
+    }
     const rate = raw['rate'];
     if (rate !== undefined && !(typeof rate === 'number' && rate > 0 && Number.isFinite(rate))) {
       throw new CircuitFileError(`${here}.rate: not a positive number`);
@@ -179,6 +194,7 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
       ...(rotation ? { rotation: rotation as Rotation } : {}),
       ...(label !== undefined ? { label } : {}),
       ...(value !== undefined ? { value } : {}),
+      ...(width !== undefined ? { width } : {}),
       ...(rate !== undefined ? { rate } : {}),
       ...(kind === 'chip' ? { chip: chip as string } : {})
     });
@@ -216,6 +232,10 @@ function checkWires(level: Circuit, prefix: string, chips: Circuit['chips']): vo
         const what = component.kind === 'chip' ? `chip ${JSON.stringify(component.chip)}` : `a ${component.kind}`;
         throw new CircuitFileError(`${prefix}wires[${n}].${side}: ${what} has no pin ${JSON.stringify(ref.pin)}`);
       }
+    }
+    const width = (ref: PinRef) => widthOf(pinsOf(byId.get(ref.component)!, chips), ref.pin);
+    if (width(wire.from) !== width(wire.to)) {
+      throw new CircuitFileError(`${prefix}wires[${n}]: joins a ${width(wire.from)}-bit pin to a ${width(wire.to)}-bit one`);
     }
   });
 }

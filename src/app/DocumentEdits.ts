@@ -1,6 +1,7 @@
 import type { Circuit, Component, PinRef, Rotation, Wire } from '../sim/Circuit';
 import type { Kind } from '../sim/Primitives';
-import { pinsOf } from '../sim/Chips';
+import { DEFAULT_BUS_WIDTH, pinsOf } from '../sim/Chips';
+import { MAX_WIDTH, widthOf } from '../sim/Primitives';
 
 /**
  * Edits to a circuit document, as functions from one document to the
@@ -25,7 +26,16 @@ export interface Fragment {
   readonly chips?: Readonly<Record<string, Circuit>>;
 }
 
-export function place(circuit: Circuit, id: string, kind: Kind, x: number, y: number, rotation: Rotation = 0, chip?: string): Circuit {
+export function place(
+  circuit: Circuit,
+  id: string,
+  kind: Kind,
+  x: number,
+  y: number,
+  rotation: Rotation = 0,
+  chip?: string,
+  width?: number
+): Circuit {
   if (hasId(circuit, id) || (kind === 'chip' && (chip === undefined || circuit.chips?.[chip] === undefined))) {
     return circuit;
   }
@@ -35,7 +45,8 @@ export function place(circuit: Circuit, id: string, kind: Kind, x: number, y: nu
     x,
     y,
     ...(rotation === 0 ? {} : { rotation }),
-    ...(kind === 'chip' ? { chip } : {})
+    ...(kind === 'chip' ? { chip } : {}),
+    ...(width !== undefined && width > 1 && WIDENABLE.has(kind) ? { width } : {})
   };
   return { ...circuit, components: [...circuit.components, component] };
 }
@@ -83,7 +94,63 @@ export function connect(circuit: Circuit, id: string, from: PinRef, to: PinRef):
   if (circuit.wires.some(w => (same(w.from, from) && same(w.to, to)) || (same(w.from, to) && same(w.to, from)))) {
     return circuit;
   }
+  // A wire is as wide as its pins, so pins of different widths are not
+  // joined: a bus goes to a bus of its width, or through a split.
+  if (pinWidth(circuit, from) !== pinWidth(circuit, to)) {
+    return circuit;
+  }
   return { ...circuit, wires: [...circuit.wires, { id, from: { ...from }, to: { ...to } }] };
+}
+
+/** A pin's width, by its component's kind, width and — for a chip — definition; 1 for a pin not found. */
+export function pinWidth(circuit: Circuit, ref: PinRef): number {
+  const component = circuit.components.find(c => c.id === ref.component);
+  return component === undefined ? 1 : widthOf(pinsOf(component, circuit.chips), ref.pin);
+}
+
+/** The kinds a width means something for. */
+export const WIDENABLE: ReadonlySet<Kind> = new Set(['input', 'constant', 'output', 'probe', 'hex', 'split', 'join']);
+
+/**
+ * Makes components a given number of bits wide: switches, constants,
+ * LEDs, probes and hex displays, and the bus a split takes or a join
+ * gives. A wire the new width leaves joining pins of different widths,
+ * or ending on a pin that is no longer there, goes, as a wire to a
+ * removed component does; a switch's or constant's value keeps only the
+ * bits that still fit. Unchanged for a width out of range or nothing to
+ * change.
+ */
+export function setWidth(circuit: Circuit, ids: readonly string[], width: number): Circuit {
+  if (!Number.isInteger(width) || width < 1 || width > MAX_WIDTH) {
+    return circuit;
+  }
+  const chosen = new Set(ids);
+  let changed = false;
+  const components = circuit.components.map(c => {
+    if (!chosen.has(c.id) || !WIDENABLE.has(c.kind)) return c;
+    const bus = c.kind === 'split' || c.kind === 'join';
+    if (bus && width < 2) return c;
+    const current = c.width ?? (bus ? DEFAULT_BUS_WIDTH : c.kind === 'hex' ? undefined : 1);
+    if (current === width) return c;
+    changed = true;
+    const { width: _, value, ...rest } = c;
+    const next: Component = { ...rest, ...(width === 1 && !bus && c.kind !== 'hex' ? {} : { width }) };
+    return value === undefined ? next : { ...next, value: value & (2 ** width - 1) };
+  });
+  if (!changed) {
+    return circuit;
+  }
+  const resized: Circuit = { ...circuit, components };
+  const fits = (ref: PinRef) => {
+    const component = components.find(c => c.id === ref.component);
+    if (component === undefined) return false;
+    const spec = pinsOf(component, circuit.chips);
+    return spec.inputs.includes(ref.pin) || spec.outputs.includes(ref.pin);
+  };
+  const wires = circuit.wires.filter(
+    w => (!chosen.has(w.from.component) && !chosen.has(w.to.component)) || (fits(w.from) && fits(w.to) && pinWidth(resized, w.from) === pinWidth(resized, w.to))
+  );
+  return { ...resized, wires };
 }
 
 /**

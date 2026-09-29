@@ -63,8 +63,17 @@ export class CircuitBuilder {
     return this.binary('xnor', a, b, label);
   }
 
-  input(label: string, value: 0 | 1 = 0): PinRef {
-    return { component: this.add('input', label, { value }), pin: 'out' };
+  /** A switch; with `width`, a bus of switches set to `value`. */
+  input(label: string, value = 0, width = 1): PinRef {
+    return { component: this.add('input', label, { value, ...(width > 1 ? { width } : {}) }), pin: 'out' };
+  }
+  /** A split taking a `width`-bit bus on `in` and giving its bits on `b0`… */
+  split(label: string, width: number): string {
+    return this.add('split', label, { width });
+  }
+  /** A join taking bits on `b0`… and giving a `width`-bit bus on `out`. */
+  join(label: string, width: number): string {
+    return this.add('join', label, { width });
   }
   constant(value: 0 | 1, label?: string): PinRef {
     return { component: this.add('constant', label, { value }), pin: 'out' };
@@ -80,15 +89,15 @@ export class CircuitBuilder {
     return { component: this.add('button', label), pin: 'out' };
   }
   /** A probe, a hex or a seven-segment display, fed pin by pin. */
-  display(kind: 'probe' | 'hex' | 'seg7', label: string, from: Readonly<Record<string, PinRef>>): string {
-    const id = this.add(kind, label);
+  display(kind: 'probe' | 'hex' | 'seg7', label: string, from: Readonly<Record<string, PinRef>>, width?: number): string {
+    const id = this.add(kind, label, width === undefined ? {} : { width });
     for (const [pin, source] of Object.entries(from)) {
       this.connect(source, { component: id, pin });
     }
     return id;
   }
-  output(label: string, from: PinRef): string {
-    const id = this.add('output', label);
+  output(label: string, from: PinRef, width = 1): string {
+    const id = this.add('output', label, width > 1 ? { width } : {});
     this.connect(from, { component: id, pin: 'in' });
     return id;
   }
