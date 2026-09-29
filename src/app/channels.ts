@@ -18,7 +18,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         geometry: service.geometry,
         signals: service.signals,
         status: service.status,
-        table: service.table
+        table: service.table,
+        saving: service.saving
       },
       commands: {
         place: (kind, x, y, id, rotation) => service.place(kind, x, y, id, rotation),
@@ -37,7 +38,12 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         step: () => service.step(),
         setClockHz: rate => service.setClockHz(rate),
         setViewport: (left, top, right, bottom) => service.setViewport(left, top, right, bottom),
-        tabulate: ids => service.tabulate(ids)
+        tabulate: ids => service.tabulate(ids),
+        open: (text, name, handle) => service.open(text, name, handle),
+        requestSave: asNew => service.requestSave(asNew),
+        finishSave: (saved, message) => service.finishSave(saved, message),
+        rememberCamera: (x, y, scale) => service.rememberCamera(x, y, scale),
+        restore: () => void service.restore()
       }
     })
   ];

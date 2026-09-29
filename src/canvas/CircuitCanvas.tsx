@@ -1,7 +1,9 @@
 import { BehaviorSubject, combineLatest, type Observable } from 'rxjs';
-import { distinctUntilChanged, map } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, map } from 'rxjs/operators';
 
 import {
+  dropTarget,
+  EXTERNAL_FILES,
   percent,
   sizeContainer,
   UiContainerSizeSource,
@@ -21,6 +23,7 @@ import { Circuit, type Signals } from '../app/CircuitContract';
 import { intersects, type Box } from '../app/Layout';
 import { signalOf } from '../app/SignalPacking';
 import { Editor } from './Editor';
+import type { FileActions } from './Files';
 import { paintLive, paintOver, paintUnder } from './Painters';
 import { CELL, changedAreas, SceneIndex } from './SceneIndex';
 
@@ -120,7 +123,7 @@ interface Tile {
   readonly drawLive: (surface: PaintSurface, box: PaintBox) => void;
 }
 
-export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
+export function circuitCanvas(ctx: ComponentContext, files: FileActions | null = null): CanvasHandle {
   const circuit = ctx.channel(Circuit);
   const size = new UiContainerSizeSource();
   const camera = internalState<Camera>({ x: 0, y: 0, scale: 1 }) as unknown as CanvasHandle['camera'];
@@ -524,9 +527,16 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
     const waiting = document.components > 0 && scene.componentCount === 0;
     if (s.width > 0 && document.opened !== framedFor && !waiting) {
       framedFor = document.opened;
-      show('all');
+      // A document brought back by a reload opens where it was left.
+      if (document.camera !== null) {
+        camera.value = { ...document.camera };
+      } else {
+        show('all');
+      }
     }
   });
+  // And where it is left is remembered, once the view comes to rest.
+  ctx.effect(camera.pipe(debounceTime(400)), c => circuit.send.rememberCamera(c.x, c.y, c.scale));
 
   const element = (
     <box
@@ -535,7 +545,14 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
       overflow="hidden"
       backgroundColor="background"
       containerSize={size}
-      modifiers={[sizeContainer({ source: size })]}
+      modifiers={[
+        sizeContainer({ source: size }),
+        dropTarget({
+          accepts: EXTERNAL_FILES,
+          onDrop: payload => files?.openDropped(payload.data as readonly { name: string; bytes?: ArrayBuffer }[]),
+          over: { borderColor: 'primary', borderWidth: 2 }
+        })
+      ]}
       onWheel={(event: UiWheelEvent) => {
         if (event.modifiers.ctrl || event.modifiers.meta) {
           zoomAt(event.x, event.y, Math.exp(-event.deltaY * 0.002));
@@ -548,6 +565,14 @@ export function circuitCanvas(ctx: ComponentContext): CanvasHandle {
       onPointerMove={(event: UiPointerEvent) => editor.pointerMove({ x: event.x, y: event.y })}
       onPointerUp={(event: UiPointerEvent) => editor.pointerUp({ x: event.x, y: event.y })}
       onKeyDown={(event: UiKeyboardEvent) => {
+        const ctrl = event.modifiers.ctrl || event.modifiers.meta;
+        const key = event.key.toLowerCase();
+        if (files !== null && ctrl && (key === 's' || key === 'o')) {
+          if (key === 's') files.save(event.modifiers.shift);
+          else files.open();
+          event.preventDefault();
+          return;
+        }
         if (editor.keyDown(event.key, event.modifiers.ctrl || event.modifiers.meta, event.modifiers.shift)) {
           event.preventDefault();
         }

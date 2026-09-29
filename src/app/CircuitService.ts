@@ -11,11 +11,14 @@ import type {
   Geometry,
   SceneName,
   Signals,
+  Camera,
+  SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { NO_TABLE } from './CircuitContract';
+import { NO_SAVE, NO_TABLE } from './CircuitContract';
+import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { connect, freshId, insert, move, moveBy, place, remove, rotate, sameConnectivity, type Fragment } from './DocumentEdits';
 import { benchScene, counterScene } from './Scenes';
 import { truthTable } from './TruthTable';
@@ -56,6 +59,41 @@ export interface ServiceOptions {
   readonly budgetMs?: number;
   /** The least time between two publishes while running. */
   readonly publishIntervalMs?: number;
+  /** Where the autosave is kept. Without one, nothing is remembered. */
+  readonly store?: AutosaveStore;
+  /** How an autosave is put off until edits stop; returns a cancel. A spec passes one it fires by hand. */
+  readonly delay?: (run: () => void, ms: number) => () => void;
+}
+
+/**
+ * The two methods of Gesso's `StorageAdapter` the autosave uses, so
+ * this file needs no framework: `OpfsStorage` in the worker, a map in
+ * a spec.
+ */
+export interface AutosaveStore {
+  read(key: string): Promise<{ readonly value: string | null }>;
+  write(key: string, value: string): Promise<unknown>;
+}
+
+/** The autosave's key in the store, and how long after the last change it is written. */
+export const AUTOSAVE_KEY = 'autosave';
+const AUTOSAVE_MS = 1000;
+
+/**
+ * What the autosave holds: the circuit as file text, and what else was
+ * on screen — which file it was, whether it had changed since, whether
+ * it was running, and where the view was. Not the simulator's state: a
+ * reload brings the circuit back running from reset, as a real circuit
+ * comes back from a power cut.
+ */
+interface Autosave {
+  readonly format: 'gessologic-autosave';
+  readonly file: string;
+  readonly name: string | null;
+  readonly handle: number | null;
+  readonly dirty: boolean;
+  readonly running: boolean;
+  readonly camera: Camera | null;
 }
 
 /** A viewport, widened by a quarter on each side: the band Phase 0 put on the publishing side. */
@@ -83,12 +121,14 @@ export class CircuitService {
   readonly signals: Observable<Signals>;
   readonly status: Observable<Status>;
   readonly table: Observable<TableView>;
+  readonly saving: Observable<SaveRequest>;
 
   private readonly documentSubject: BehaviorSubject<DocumentSummary>;
   private readonly geometrySubject: BehaviorSubject<Geometry>;
   private readonly signalsSubject: BehaviorSubject<Signals>;
   private readonly statusSubject: BehaviorSubject<Status>;
   private readonly tableSubject = new BehaviorSubject<TableView>(NO_TABLE);
+  private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
 
   private readonly schedule: Schedule;
   private readonly now: () => number;
@@ -107,6 +147,20 @@ export class CircuitService {
   private error: string | null = null;
   private viewport: Rect | null = null;
   private visibleChunks: number[] | null = null;
+
+  private name: string | null = null;
+  private handle: number | null = null;
+  /** The revision last opened or saved; the document is dirty when it has moved on. -1 is never. */
+  private savedRevision = 0;
+  private openCamera: Camera | null = null;
+  private camera: Camera | null = null;
+  private message: string | null = null;
+  private saveSerial = 0;
+  private readonly store: AutosaveStore | null;
+  private readonly delay: (run: () => void, ms: number) => () => void;
+  /** Whether autosaving has begun: only once `restore` has read what was there, or it would be overwritten. */
+  private autosaving = false;
+  private cancelAutosave: (() => void) | null = null;
 
   private running = false;
   private clockHz: ClockRate = 'max';
@@ -133,11 +187,26 @@ export class CircuitService {
     this.signals = this.signalsSubject;
     this.status = this.statusSubject;
     this.table = this.tableSubject;
+    this.saving = this.savingSubject;
+    this.store = options.store ?? null;
+    this.delay =
+      options.delay ??
+      ((run, ms) => {
+        const id = setTimeout(run, ms);
+        return () => clearTimeout(id);
+      });
   }
 
   /** Replaces the document, as opening a file does. The simulator starts fresh and the history is forgotten. */
-  load(circuit: Circuit): void {
+  load(
+    circuit: Circuit,
+    file: { name: string | null; handle: number | null; dirty?: boolean; camera?: Camera | null } = { name: null, handle: null }
+  ): void {
     this.opened++;
+    this.name = file.name;
+    this.handle = file.handle;
+    this.openCamera = file.camera ?? null;
+    this.message = null;
     this.simulator = null;
     this.undoStack.length = 0;
     this.redoStack.length = 0;
@@ -147,7 +216,77 @@ export class CircuitService {
     this.running = false;
     this.samples.length = 0;
     this.tableSubject.next(NO_TABLE);
+    // Clean from the revision `apply` is about to make, unless it was
+    // dirty when it was put away.
+    this.savedRevision = file.dirty === true ? -1 : this.revision + 1;
     this.apply(circuit);
+  }
+
+  open(text: string, name: string, handle: number | null): void {
+    let circuit: Circuit;
+    try {
+      circuit = readCircuit(text);
+    } catch (error) {
+      if (!(error instanceof CircuitFileError)) throw error;
+      this.message = `Couldn't open ${name}: ${error.message}`;
+      this.documentSubject.next(this.summary());
+      return;
+    }
+    this.load(circuit, { name, handle });
+    this.message = `Opened ${name}`;
+    this.documentSubject.next(this.summary());
+  }
+
+  requestSave(asNew: boolean): void {
+    this.savingSubject.next({
+      serial: ++this.saveSerial,
+      name: this.name ?? DEFAULT_FILE_NAME,
+      text: writeCircuit(this.circuit),
+      handle: asNew ? null : this.handle
+    });
+  }
+
+  finishSave(saved: { readonly name: string; readonly handle: number | null } | null, message: string | null): void {
+    this.savingSubject.next(NO_SAVE);
+    if (saved !== null) {
+      this.name = saved.name;
+      this.handle = saved.handle;
+      this.savedRevision = this.revision;
+      this.autosave();
+    }
+    this.message = message;
+    this.documentSubject.next(this.summary());
+  }
+
+  rememberCamera(x: number, y: number, scale: number): void {
+    this.camera = { x, y, scale };
+    this.autosave();
+  }
+
+  /** Reads the autosave back and loads it, running if it was; then autosaves from here on. */
+  async restore(): Promise<void> {
+    if (this.autosaving || this.store === null) {
+      return;
+    }
+    try {
+      const { value } = await this.store.read(AUTOSAVE_KEY);
+      const saved = value === null ? null : (JSON.parse(value) as Autosave);
+      if (saved !== null && saved.format === 'gessologic-autosave') {
+        this.load(readCircuit(saved.file), {
+          name: saved.name,
+          handle: saved.handle,
+          dirty: saved.dirty,
+          camera: saved.camera
+        });
+        this.camera = saved.camera;
+        if (saved.running) this.run();
+      }
+    } catch {
+      // An autosave that cannot be read is one that is not there: the
+      // person starts with an empty canvas, which is what they would
+      // have had without it, and the next change overwrites it.
+    }
+    this.autosaving = true;
   }
 
   loadScene(name: SceneName): void {
@@ -234,6 +373,7 @@ export class CircuitService {
     this.restartPacing();
     this.queueSlice();
     this.publish(true);
+    this.autosave();
   }
 
   pause(): void {
@@ -243,6 +383,7 @@ export class CircuitService {
     this.running = false;
     this.samples.length = 0;
     this.publish(true);
+    this.autosave();
   }
 
   step(): void {
@@ -263,6 +404,7 @@ export class CircuitService {
     // setting, not an edit, and undoing a wire should not change it.
     this.circuit = withRate(this.circuit, rate);
     this.restartPacing();
+    this.autosave();
     this.publish(true);
   }
 
@@ -299,6 +441,7 @@ export class CircuitService {
     }
     this.lastGesture = gesture ?? null;
     this.redoStack.length = 0;
+    this.message = null;
     this.apply(next);
   }
 
@@ -316,6 +459,7 @@ export class CircuitService {
     const previous = this.circuit;
     this.circuit = next;
     this.revision++;
+    this.autosave();
     this.visibleChunks = null;
     if (this.netlist !== null && this.simulator !== null && sameConnectivity(previous, next)) {
       this.documentSubject.next(this.summary());
@@ -484,8 +628,38 @@ export class CircuitService {
       nets: netlist?.netCount ?? 0,
       error: this.error,
       canUndo: this.undoStack.length > 0,
-      canRedo: this.redoStack.length > 0
+      canRedo: this.redoStack.length > 0,
+      name: this.name,
+      handle: this.handle,
+      dirty: this.revision !== this.savedRevision,
+      camera: this.openCamera,
+      message: this.message
     };
+  }
+
+  /**
+   * Writes the autosave once changes stop for a second. Each change
+   * puts it off again, so a drag writes once, when it ends, and a
+   * running circuit, whose changes are not the document's, never does.
+   */
+  private autosave(): void {
+    if (!this.autosaving || this.store === null) {
+      return;
+    }
+    this.cancelAutosave?.();
+    this.cancelAutosave = this.delay(() => {
+      this.cancelAutosave = null;
+      const record: Autosave = {
+        format: 'gessologic-autosave',
+        file: writeCircuit(this.circuit),
+        name: this.name,
+        handle: this.handle,
+        dirty: this.revision !== this.savedRevision,
+        running: this.running,
+        camera: this.camera
+      };
+      void this.store?.write(AUTOSAVE_KEY, JSON.stringify(record));
+    }, AUTOSAVE_MS);
   }
 
   private geometryNow(): Geometry {

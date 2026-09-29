@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { compile } from '../sim/Netlist';
 import { isGate } from '../sim/Primitives';
 import { Simulator } from '../sim/Simulator';
+import { readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { BENCH, benchScene } from './Scenes';
 
 describe('the bench scene', () => {
@@ -64,4 +65,15 @@ describe('the counter scene', () => {
     sim.cycle();
     expect(shown().hex).toBe(0);
   });
+});
+
+describe('both scenes, as files', () => {
+  it('round-trip, and write the same bytes twice', async () => {
+    for (const circuit of [benchScene(), (await import('./Scenes')).counterScene()]) {
+      const text = writeCircuit(circuit);
+      expect(readCircuit(text)).toEqual(circuit);
+      expect(writeCircuit(readCircuit(text))).toBe(text);
+    }
+  });
+
 });

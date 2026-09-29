@@ -46,6 +46,42 @@ export interface DocumentSummary {
   /** Whether there is an edit to undo, or an undone one to redo. */
   readonly canUndo: boolean;
   readonly canRedo: boolean;
+  /** The file the document was opened from or last saved to; null for one never saved. */
+  readonly name: string | null;
+  /** The shell's handle to that file, for Save to write back to; null when there is none. */
+  readonly handle: number | null;
+  /** Changed since it was opened or saved. */
+  readonly dirty: boolean;
+  /**
+   * Where the view was when the document was last seen, for the canvas
+   * to open at instead of fitting the circuit; null to fit. Set when a
+   * reload restores the autosave, and on nothing else.
+   */
+  readonly camera: Camera | null;
+  /** The last thing a file operation had to say — saved, or why an open failed — or null. */
+  readonly message: string | null;
+}
+
+export interface Camera {
+  readonly x: number;
+  readonly y: number;
+  readonly scale: number;
+}
+
+/**
+ * A save the application worker has made ready: the document as file
+ * text, for the render worker to hand to the shell's picker. A command
+ * cannot return a value, so the text comes back as a view key. `serial`
+ * counts requests, so the same text asked for twice is two saves; 0 is
+ * none. Cleared by `finishSave`, so a megabyte of circuit does not sit
+ * in the replica.
+ */
+export interface SaveRequest {
+  readonly serial: number;
+  readonly name: string;
+  readonly text: string;
+  /** Where to write: the open file's handle, or null for a picker (Save As). */
+  readonly handle: number | null;
 }
 
 export interface ComponentGeometry {
@@ -145,6 +181,20 @@ export interface CircuitCommands {
   setViewport(left: number, top: number, right: number, bottom: number): void;
   /** Opens the truth table of these components; an empty list closes it. */
   tabulate(ids: readonly string[]): void;
+  /** Opens a circuit file's text, read from `name`; `handle` is the shell's, when it gave one. */
+  open(text: string, name: string, handle: number | null): void;
+  /** Asks for the document as file text, published as `saving`. `asNew` is Save As. */
+  requestSave(asNew: boolean): void;
+  /** Says how a save went: where it was written, or null when it was cancelled or failed, with why. */
+  finishSave(saved: { readonly name: string; readonly handle: number | null } | null, message: string | null): void;
+  /** Where the view is, for the autosave to bring back. */
+  rememberCamera(x: number, y: number, scale: number): void;
+  /**
+   * Brings back the autosave, and starts autosaving. Sent once, at
+   * start, by an application that wants it — not by the bench, which
+   * loads its own scene and must not overwrite a person's work.
+   */
+  restore(): void;
 }
 
 export interface CircuitView {
@@ -153,6 +203,7 @@ export interface CircuitView {
   readonly signals: Signals;
   readonly status: Status;
   readonly table: TableView;
+  readonly saving: SaveRequest;
 }
 
 export const EMPTY_SUMMARY: DocumentSummary = {
@@ -164,8 +215,14 @@ export const EMPTY_SUMMARY: DocumentSummary = {
   nets: 0,
   error: null,
   canUndo: false,
-  canRedo: false
+  canRedo: false,
+  name: null,
+  handle: null,
+  dirty: false,
+  camera: null,
+  message: null
 };
+export const NO_SAVE: SaveRequest = { serial: 0, name: '', text: '', handle: null };
 export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {} };
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
@@ -176,5 +233,6 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   geometry: EMPTY_GEOMETRY,
   signals: EMPTY_SIGNALS,
   status: INITIAL_STATUS,
-  table: NO_TABLE
+  table: NO_TABLE,
+  saving: NO_SAVE
 });

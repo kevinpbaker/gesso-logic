@@ -42,7 +42,7 @@ export function benchScene(seed = 7): Circuit {
     bits.push(ff.q);
     clock = ff.qBar;
     const names = ['loop', 'clockBar', 'master.sBar', 'master.rBar', 'master.q', 'master.qBar', 'slave.sBar', 'slave.rBar', 'slave.q', 'slave.qBar'];
-    names.forEach((name, n) => b.position(`count${bit}.${name}`, -pitch * 3 + (n % 5) * pitch * 0.75, bit * pitch * 1.5 + Math.floor(n / 5) * 5));
+    names.forEach((name, n) => b.position(`count${bit}.${name}`, -pitch * 3 + Math.round((n % 5) * pitch * 0.75), bit * pitch * 1.5 + Math.floor(n / 5) * 5));
   }
 
   // The grid. A gate's id is its row and column, so a spec or a person

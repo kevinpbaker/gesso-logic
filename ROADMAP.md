@@ -11,13 +11,14 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 5 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 6 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
 the circuit running, circuits can be built on it by hand, and they
-have switches, buttons, probes and displays to work them with. Nothing
-past Phase 5 is built.
+have switches, buttons, probes and displays to work them with. They
+save to files and come back after a reload. Nothing past Phase 6 is
+built.
 
 ---
 
@@ -596,6 +597,43 @@ onto the canvas to open it.
 
 **Exit:** save, reload the tab, and the circuit comes back running from
 reset, with nothing lost that was on screen.
+
+**Done**, with no engine changes: Gesso already had the pickers, the
+recent-files list, OPFS and OS file drops.
+
+- **The format** is `src/sim/CircuitFile.ts`. It's JSON with
+  `"format": "gessologic"` and a `version`, one component or wire a
+  line, so moving a gate is a one-line diff. Saving the same circuit
+  twice writes the same bytes. Reading checks every part, pin and id,
+  and says where a file is wrong (`components[12].kind: "flux" is not a
+  part`). Unknown fields are dropped, and a newer version is refused.
+  Both scenes round-trip in a spec.
+- **Save and open** go through Gesso's `ShellService`. Commands can't
+  return a value, so a save goes round: `requestSave` makes the
+  application worker publish the file text as the `saving` view key,
+  the render worker hands it to the picker, and `finishSave` says where
+  it went and clears the text. With the File System Access API, Save
+  writes back to the same file. Without it, Save is a download, and the
+  readout says so. Ctrl+S, Ctrl+Shift+S and Ctrl+O work on the canvas.
+- **Autosave** is written to OPFS by the application worker, a second
+  after changes stop. It holds the circuit, the file's name and handle,
+  whether it was dirty, whether it was running, and the camera. On
+  load, the render worker sends `restore`, and the circuit comes back
+  running from reset where the view was left. The bench never sends
+  it, so it never overwrites anyone's work. Nothing is written until
+  the autosave has been read.
+- **Recent files** are the shell's list, reopened through their handles.
+- **Dropping a file on the canvas** opens it.
+- **Oddities found on the way:** the bench scene had counter gates at
+  half units (`pitch * 0.75`). They're rounded now, since the file
+  format takes whole units only.
+
+Verified in Chrome: the counter, running and panned, reloaded back at
+the same view, running at 2 Hz. The native save and open dialogs
+weren't driven by the automation.
+
+Not done: selection, the truth table and undo history aren't
+remembered across a reload.
 
 ## Phase 7 — The proof surface
 

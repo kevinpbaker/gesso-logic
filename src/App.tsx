@@ -8,6 +8,7 @@ import { Circuit, type ClockRate, type TableView } from './app/CircuitContract';
 import type { Kind } from './sim/Primitives';
 import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, type Motion } from './canvas/Bench';
 import { circuitCanvas } from './canvas/CircuitCanvas';
+import { fileActions } from './canvas/Files';
 import { paintTiming } from './canvas/Painters';
 
 /**
@@ -56,7 +57,9 @@ interface Readout {
 
 export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
   const circuit = ctx.channel(Circuit);
-  const canvas = circuitCanvas(ctx);
+  const files = isBench() ? null : fileActions(ctx);
+  const canvas = circuitCanvas(ctx, files);
+  const showRecent = internalState(false);
   const readout = internalState<Readout>({ fps: 0, frameMs: 0, worstMs: 0, recorded: 0, tiles: 0, missed: 0 });
 
   // ---------------------------------------------------------------------
@@ -101,6 +104,11 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
   // with an empty canvas.
   if (isBench()) {
     circuit.send.loadScene('bench');
+  } else {
+    // Whatever was open when the tab closed, brought back by the
+    // application worker from its autosave.
+    circuit.send.restore();
+    files?.refreshRecent();
   }
   const bench = isBench()
     ? new BenchDriver(benchFilter(benchMatrix()), {
@@ -234,10 +242,48 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
         <row gap={6} y="center">
           {PALETTE.map(([kind, label, key]) => button(`${label} ${key}`, () => canvas.editor.startPlacing(kind)))}
         </row>
+        {files === null ? null : (
+          <row gap={6} y="center">
+            {button('New', () => circuit.send.loadScene('empty'))}
+            {button('Open… ⌃O', () => files.open())}
+            {button('Save ⌃S', () => files.save(false))}
+            {button('Save as… ⌃⇧S', () => files.save(true))}
+            {button('Recent', () => {
+              showRecent.value = !showRecent.value;
+              if (showRecent.value) files.refreshRecent();
+            })}
+            <text
+              text={document.pipe(map(d => `${d.name ?? 'Untitled'}${d.dirty ? ' •' : ''}`))}
+              fontSize={13}
+              fontWeight={600}
+              color="text"
+            />
+            <text text={document.pipe(map(d => d.message ?? ''))} fontSize={12} color="textMuted" />
+          </row>
+        )}
+        {files === null ? null : (
+          // Empty, and so no height at all, until Recent is pressed.
+          <row gap={6} y="center">
+            {each(
+              combineLatest([files.recent, showRecent]).pipe(
+                map(([list, on]) => (!on ? [] : list.length === 0 ? [{ handle: -1, name: '', used: 0 }] : list.slice(0, 8)))
+              ),
+              'handle',
+              file =>
+                file.handle < 0 ? (
+                  <text text="No recent files" fontSize={12} color="textMuted" />
+                ) : (
+                  button(file.name, () => {
+                    showRecent.value = false;
+                    files.openRecent(file.handle);
+                  })
+                )
+            )}
+          </row>
+        )}
         <row gap={6} y="center">
           {button('Undo', () => circuit.send.undo(), document.pipe(map(d => d.canUndo)))}
           {button('Redo', () => circuit.send.redo(), document.pipe(map(d => d.canRedo)))}
-          {button('New', () => circuit.send.loadScene('empty'))}
           {button('Counter', () => circuit.send.loadScene('counter'))}
           {button('Bench scene', () => circuit.send.loadScene('bench'))}
           {button('Truth table T', () => circuit.send.tabulate([...canvas.editor.selection]))}

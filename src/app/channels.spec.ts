@@ -45,7 +45,12 @@ describe('the circuit channel', () => {
       nets: 3,
       error: null,
       canUndo: true,
-      canRedo: false
+      canRedo: false,
+      name: null,
+      handle: null,
+      dirty: true,
+      camera: null,
+      message: null
     });
     const led = () => {
       const net = circuit.view.geometry.value.components.led?.nets.in;
