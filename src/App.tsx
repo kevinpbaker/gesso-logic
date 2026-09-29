@@ -10,6 +10,7 @@ import { WIDENABLE } from './app/DocumentEdits';
 import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, isProof, type Motion } from './canvas/Bench';
 import { circuitCanvas } from './canvas/CircuitCanvas';
 import { fileActions } from './canvas/Files';
+import { waveformPanel } from './canvas/Waveform';
 import { paintTiming } from './canvas/Painters';
 
 /**
@@ -66,6 +67,7 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
   const files = isBench() || proof ? null : fileActions(ctx);
   const canvas = circuitCanvas(ctx, files);
   const showRecent = internalState(false);
+  const analyser = waveformPanel(ctx, canvas.size.changes.pipe(map(s => s.width)));
   // The name box for the selected chip: filled with its name whenever the
   // selection becomes a chip, renaming it on Enter or the button.
   const selectedChip = canvas.editorChanged.pipe(
@@ -456,9 +458,11 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
           {button('Bench scene', () => circuit.send.loadScene('bench'))}
           {button('Truth table T', () => circuit.send.tabulate([...canvas.editor.selection]))}
           {button('Make chip M', () => canvas.editor.keyDown('m', false, false))}
+          {button(analyser.open.pipe(map(o => (o ? 'Analyser ●' : 'Analyser'))), () => analyser.toggle())}
           <text text={canvas.editorChanged.pipe(map(() => canvas.editor.status))} fontSize={12} color="textMuted" />
         </row>
       </column>
+      {analyser.element as never}
       {truthTablePanel(circuit.view.table, () => circuit.send.tabulate([]))}
     </stack>
   );

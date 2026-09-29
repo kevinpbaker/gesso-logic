@@ -146,6 +146,10 @@ export function counterScene(): Circuit {
   b.display('seg7', 'digit', segments);
   b.display('hex', 'hex', { b0: q[0]!, b1: q[1]!, b2: q[2]!, b3: q[3]! });
   q.forEach((pin, bit) => b.output(`bit${bit}`, pin));
+  // The count as one 4-bit bus, for the logic analyser to draw as a staircase.
+  const countBits = b.join('count bits', 4);
+  q.forEach((pin, bit) => b.connect(pin, { component: countBits, pin: `b${bit}` }));
+  b.display('probe', 'count value', { in: { component: countBits, pin: 'out' } }, 4);
 
   const circuit = b.build();
   return layOut({

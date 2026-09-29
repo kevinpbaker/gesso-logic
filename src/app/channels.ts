@@ -20,7 +20,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         status: service.status,
         table: service.table,
         saving: service.saving,
-        clipboard: service.clipboard
+        clipboard: service.clipboard,
+        analyser: service.analyserView
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -51,6 +52,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         closeChip: depth => service.closeChip(depth),
         renameChip: (from, to) => service.renameChip(from, to),
         importChip: (text, fileName) => service.importChip(text, fileName),
+        setAnalyserView: (start, span, columns) => service.setAnalyserView(start, span, columns),
+        setTrigger: (trace, value) => service.setTrigger(trace, value),
         copy: ids => service.copy(ids),
         duplicate: (ids, rename, dx, dy) => service.duplicate(ids, rename, dx, dy)
       }

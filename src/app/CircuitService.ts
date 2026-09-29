@@ -11,6 +11,7 @@ import type {
   Geometry,
   SceneName,
   Signals,
+  AnalyserView,
   Camera,
   ClipRequest,
   SaveRequest,
@@ -18,7 +19,8 @@ import type {
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { NO_CLIP, NO_SAVE, NO_TABLE } from './CircuitContract';
+import { CLOSED_ANALYSER, NO_CLIP, NO_SAVE, NO_TABLE } from './CircuitContract';
+import { Analyser } from './Analyser';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import {
   connect,
@@ -100,6 +102,9 @@ export interface AutosaveStore {
 export const AUTOSAVE_KEY = 'autosave';
 const AUTOSAVE_MS = 1000;
 
+/** The widest window the analyser shows: each column of it is folded from the ring on every publish. */
+const MAX_ANALYSER_SPAN = 8192;
+
 /**
  * What the autosave holds: the circuit as file text, and what else was
  * on screen — which file it was, whether it had changed since, whether
@@ -144,6 +149,7 @@ export class CircuitService {
   readonly table: Observable<TableView>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
+  readonly analyserView: Observable<AnalyserView>;
 
   private readonly documentSubject: BehaviorSubject<DocumentSummary>;
   private readonly geometrySubject: BehaviorSubject<Geometry>;
@@ -152,6 +158,10 @@ export class CircuitService {
   private readonly tableSubject = new BehaviorSubject<TableView>(NO_TABLE);
   private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
   private readonly clipboardSubject = new BehaviorSubject<ClipRequest>(NO_CLIP);
+  private readonly analyserSubject = new BehaviorSubject<AnalyserView>(CLOSED_ANALYSER);
+  private readonly analyser = new Analyser();
+  /** What the panel asked to see: a null start follows the newest cycle; no columns is closed. */
+  private analyserAsk: { start: number | null; span: number; columns: number } = { start: null, span: 256, columns: 0 };
 
   private readonly schedule: Schedule;
   private readonly now: () => number;
@@ -214,6 +224,7 @@ export class CircuitService {
     this.table = this.tableSubject;
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
+    this.analyserView = this.analyserSubject;
     this.store = options.store ?? null;
     this.delay =
       options.delay ??
@@ -635,6 +646,7 @@ export class CircuitService {
     if (this.netlist !== null && this.simulator !== null && sameConnectivity(previous, next)) {
       this.documentSubject.next(this.summary());
       this.geometrySubject.next(this.geometryNow());
+      this.traceNow();
       this.publish(true);
       return;
     }
@@ -661,6 +673,7 @@ export class CircuitService {
     }
     this.documentSubject.next(this.summary());
     this.geometrySubject.next(this.geometryNow());
+    this.traceNow();
     const table = this.tableSubject.value;
     if (table.ids.length > 0) {
       const level = this.level().circuit;
@@ -741,6 +754,15 @@ export class CircuitService {
   /** One clock cycle. An oscillation pauses the run and is reported; returns whether it settled. */
   private cycle(simulator: Simulator): boolean {
     const result = simulator.cycle();
+    if (this.analyser.record(simulator.cycles, simulator.value)) {
+      // The trigger: pause on the cycle the condition became true, and say so.
+      const trigger = this.analyser.armed!;
+      const name = this.analyser.traced.find(t => t.id === trigger.trace)?.name ?? trigger.trace;
+      this.running = false;
+      this.samples.length = 0;
+      this.message = `Triggered at cycle ${simulator.cycles.toLocaleString('en')}: ${name} = ${trigger.value}`;
+      this.documentSubject.next(this.summary());
+    }
     if (result.settled) {
       return true;
     }
@@ -787,6 +809,61 @@ export class CircuitService {
     this.lastPublishAt = at;
     this.signalsSubject.next(this.signalsNow());
     this.statusSubject.next(this.statusNow());
+    if (this.analyserAsk.columns > 0) {
+      this.analyserSubject.next(this.analyserNow());
+    }
+  }
+
+  setAnalyserView(start: number | null, span: number, columns: number): void {
+    this.analyserAsk = { start, span: Math.max(1, Math.min(MAX_ANALYSER_SPAN, Math.round(span))), columns: Math.max(0, Math.round(columns)) };
+    this.analyserSubject.next(this.analyserAsk.columns > 0 ? this.analyserNow() : CLOSED_ANALYSER);
+  }
+
+  setTrigger(trace: string | null, value: number): void {
+    this.analyser.setTrigger(trace === null ? null : { trace, value });
+    if (this.analyserAsk.columns > 0) this.analyserSubject.next(this.analyserNow());
+  }
+
+  private analyserNow(): AnalyserView {
+    const { start, span, columns } = this.analyserAsk;
+    // A window scrubbed back past the oldest cycle held slides forward
+    // with it, rather than showing cycles long since overwritten.
+    const from = start === null ? this.analyser.last - span + 1 : Math.max(start, Math.min(this.analyser.first, this.analyser.last - span + 1));
+    const window = this.analyser.window(from, span, columns);
+    return {
+      open: true,
+      traces: this.analyser.traced.map(({ id, name, width }) => ({ id, name, width })),
+      first: this.analyser.first,
+      last: this.analyser.last,
+      following: start === null,
+      ...window,
+      trigger: this.analyser.armed
+    };
+  }
+
+  /**
+   * What the analyser traces: every probe and LED on the top level, by
+   * label, top to bottom as drawn; a wide one a bus.
+   */
+  private traceNow(): void {
+    const netlist = this.netlist;
+    if (netlist === null) {
+      this.analyser.configure([]);
+      return;
+    }
+    const traces = this.circuit.components
+      .filter(c => c.kind === 'output' || c.kind === 'probe')
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+      .map(c => {
+        const width = c.width ?? 1;
+        return {
+          id: c.id,
+          name: c.label ?? c.id,
+          width,
+          nets: bitPins('in', width).map(bit => netlist.pinNet.get(`${c.id}.${bit}`) ?? -1)
+        };
+      });
+    this.analyser.configure(traces);
   }
 
   private summary(): DocumentSummary {

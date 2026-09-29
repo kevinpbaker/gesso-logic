@@ -192,6 +192,27 @@ export interface ClipRequest {
   readonly text: string;
 }
 
+/**
+ * The logic analyser's panel: what is traced, what is held, and the
+ * window the panel asked for — a column an entry (see `AnalyserWindow`
+ * in `Analyser.ts`). Published only while the panel is open, at the rate
+ * signals are.
+ */
+export interface AnalyserView {
+  readonly open: boolean;
+  readonly traces: readonly { readonly id: string; readonly name: string; readonly width: number }[];
+  /** The oldest cycle held and the newest; `last` is `first - 1` when none is. */
+  readonly first: number;
+  readonly last: number;
+  /** Whether the window follows the newest cycle, as it does until someone scrubs. */
+  readonly following: boolean;
+  readonly start: number;
+  readonly step: number;
+  readonly count: number;
+  readonly data: Readonly<Record<string, string>>;
+  readonly trigger: { readonly trace: string; readonly value: number } | null;
+}
+
 export interface CircuitCommands {
   /** Adds a component. With no id, one is made from the kind. */
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void;
@@ -248,6 +269,14 @@ export interface CircuitCommands {
   renameChip(from: string, to: string): void;
   /** Adds a circuit file's text to the document as a chip, named after the file, ready to place from the palette. */
   importChip(text: string, fileName: string): void;
+  /**
+   * Opens the analyser on a window of `span` cycles from `start`, drawn
+   * in `columns` pixels; a null start follows the newest cycle. Zero
+   * columns closes it.
+   */
+  setAnalyserView(start: number | null, span: number, columns: number): void;
+  /** Pauses the circuit on the cycle `trace` becomes `value`; a null trace disarms it. */
+  setTrigger(trace: string | null, value: number): void;
   /** Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`. */
   copy(ids: readonly string[]): void;
   /** Copies these parts in place, moved by (dx, dy), under the new ids `rename` gives, by old id, for parts and the wires between them. */
@@ -262,6 +291,7 @@ export interface CircuitView {
   readonly table: TableView;
   readonly saving: SaveRequest;
   readonly clipboard: ClipRequest;
+  readonly analyser: AnalyserView;
 }
 
 export const EMPTY_SUMMARY: DocumentSummary = {
@@ -285,6 +315,18 @@ export const EMPTY_SUMMARY: DocumentSummary = {
 };
 export const NO_SAVE: SaveRequest = { serial: 0, name: '', text: '', handle: null };
 export const NO_CLIP: ClipRequest = { serial: 0, text: '' };
+export const CLOSED_ANALYSER: AnalyserView = {
+  open: false,
+  traces: [],
+  first: 0,
+  last: -1,
+  following: true,
+  start: 0,
+  step: 1,
+  count: 0,
+  data: {},
+  trigger: null
+};
 export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {}, level: '', opened: 0 };
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
@@ -297,5 +339,6 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   status: INITIAL_STATUS,
   table: NO_TABLE,
   saving: NO_SAVE,
-  clipboard: NO_CLIP
+  clipboard: NO_CLIP,
+  analyser: CLOSED_ANALYSER
 });

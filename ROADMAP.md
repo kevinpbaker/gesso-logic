@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 10 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 11 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -927,6 +927,41 @@ cursor, read values. Trigger on a condition to pause.
 
 **Exit:** a counter's four bits shown as a staircase over 1,000 cycles,
 scrubbed at 60 fps while the circuit runs.
+
+**Done.** The **Analyser** button opens a waveform strip along the
+bottom of the canvas. On the counter scene it shows bit0 to bit3 as
+square waves, and the new 4-bit `count value` probe as a staircase.
+
+- **Measured:** scrubbing a 1,024-cycle window with a real mouse drag,
+  on `/proof` with the counter at full speed (about 280,000 cycles a
+  second):
+  - software rendering: 60 fps, median gap 16.7 ms, p95 17.8 ms,
+    median frame 2.2 ms;
+  - GPU: 57 fps, median gap 16.8 ms, median frame 3.6 ms.
+- **Checked in Chrome at 1,000 Hz:** scrubbing, a cursor reading every
+  trace's value, and a trigger pausing the circuit ("Triggered at
+  cycle 32,329: bit3 = 1").
+- **What's traced:** every probe and LED on the top level, by label,
+  top to bottom as drawn; a wide one is a bus.
+- **The recorder** (`src/app/Analyser.ts`) keeps each trace's value at
+  the end of every cycle in a ring of 65,536 cycles. That's over a
+  minute at 1,000 Hz, and only a fraction of a second at full speed on
+  a small circuit, which is as far back as scrubbing can reach there.
+  Traces are matched by id and nets, so moving an LED keeps its
+  history; a changed net, or a gap in the cycles, starts afresh.
+- **The panel asks for its window,** as the canvas asks for its
+  viewport: a first cycle, a span and its width in pixels. It gets one
+  entry a column: a column covering several cycles shows its value if
+  it held still, and a band if it changed. So a trace toggling every
+  cycle draws as a band at any zoom, and a scrub costs a few hundred
+  characters a trace a frame, whatever the history holds. The `analyser`
+  view key is published only while the panel is open.
+- **Controls:** drag or wheel to scrub; ctrl-wheel or − and + to zoom
+  about the pointer; click to place the cursor; Live to follow the
+  newest cycle again. A scrubbed window that falls behind the oldest
+  cycle held slides forward with it. The trigger field takes
+  `name = value` and pauses the circuit on the cycle the trace becomes
+  that value.
 
 ## Phase 12 — Speed
 
