@@ -11,8 +11,9 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** a blank `create-gesso-app` 0.4.0 project. Nothing below is
-built.
+**Status:** Phase 0 done. The findings are in [PHASE0.md](PHASE0.md),
+and the phases below are amended where they changed anything. Nothing
+past Phase 0 is built.
 
 ---
 
@@ -70,10 +71,11 @@ that an array-shaped window costs 80× the bytes of a keyed map. So:
   an edit. Signals change every frame. A frame of simulation must not
   make the differ walk ten thousand gate positions to find nothing.
 - **Signals are published as packed chunks keyed by chunk id** —
-  `signals: Record<string, string>`, each value a hex or base64 string
-  of 256 nets — and only for nets visible in the current view. The
-  differ then sees a few dozen string leaves and ships the ones that
-  changed. Phase 0 measures whether this holds at 60 Hz.
+  `signals: Record<string, string>`, each value a hex string of 256
+  nets — and only for nets visible in the current view plus a band.
+  Net ids are laid out in 16 × 16-gate blocks so a chunk is a patch of
+  the canvas. Phase 0 measured it at 60 Hz with every gate on screen: 51
+  patches and 6.7 KiB per publish, 0.1 ms to build and 0.1 ms to diff.
 - **Commands are small and semantic**: `placeGate`, `connect`, `move`,
   `setInput`, `run`, `pause`, `step`, `setClockHz`, `setViewport`.
 
@@ -136,12 +138,23 @@ typed arrays does 50–200 M on a laptop. That is the headroom the proof
 spends: turn the clock up to "as fast as it goes" and the editor still
 has to hold its frame.
 
+**Corrected by Phase 0.** A synthetic CPU-shaped circuit costs about
+**3,650** evaluations per cycle, not 500. Every flip-flop sees both
+clock edges, and the control decoder re-evaluates on every input
+change. The RAM is 22% of the work, not most of it. The kernel does
+59–68 M evaluations a second, so 16–20 kHz, and 30 kHz needs about
+110 M. Phase 12 owns the gap; PHASE0.md §4 has the per-block profile.
+
 ---
 
 ## Suspected gaps in Gesso
 
-Unverified — found by reading, not by building. Phase 0 confirms or
-removes each. Where the fix belongs in the engine, it is made there
+Found by reading, before Phase 0. **Phase 0's verdicts are in
+PHASE0.md §3**: the `Paint` and binary-channel gaps are removed (the
+fix is app-side, and strings are enough). Channel throughput holds for
+packed chunks but found a replica bug (Phase 0b). Zoom input works with
+real events, and pointer capture is still untested. The list is kept as
+it was written. Where the fix belongs in the engine, it is made there
 (see [Decisions](#decisions-taken-up-front)); each is general enough
 that any editor, dashboard or canvas tool built on Gesso would want it.
 
@@ -187,8 +200,9 @@ that any editor, dashboard or canvas tool built on Gesso would want it.
   in Gesso — and would help any application, not just this one — it is
   made in `../gesso`, with Gesso's own tests and gates, not worked
   around here. `gesso-*` 0.4.0 from the registry until the first such
-  change; then copy gessosheet's `scripts/vendor-gesso.sh` and the
-  `gesso.lock` deploy step, rather than inventing a second loop. Each
+  change (Phase 0b), then gessosheet's `scripts/vendor-gesso.sh`, which
+  is now copied here. The `gesso.lock` deploy step, `vercel-install.sh`,
+  comes with Phase 22. Each
   engine change is logged in [Engine changes](#engine-changes) below,
   with the phase that needed it.
 - **The simulator imports nothing from the framework**, and runs
@@ -222,6 +236,28 @@ binary channel key, and that work is scheduled as Phase 0b in
 simulator's design, and may lean harder on hierarchy so no view ever
 holds 10,000 gates at full detail.
 
+## Phase 0b — The replica applies a batch in one pass
+
+Found by Phase 0 (PHASE0.md §2). `applyPatches` in
+`gesso/packages/framework/src/channel/StorePatch.ts` clones every
+container on a patch's path once per patch. A batch of N patches into
+a K-key object therefore costs N × K. A `Record<netId, 0 | 1>` of
+10,000 nets put the render worker's patch phase 7 minutes behind. The
+chunked contract doesn't hit it, but any wide keyed map does, a
+spreadsheet viewport included. Clone each container at most once per
+batch, with a spec that applies 1,000 patches to a 10,000-key object
+within a budget, and log it under Engine changes.
+
+**Exit:** the Phase 0 `record` run at fit-all holds its frame.
+
+Also found by Phase 0, by hand (PHASE0.md §5), and **done**:
+`overscrollBehavior="contain"` on an app's root did nothing in a
+mounted app. The wheel controller read the runtime's wrapper, not the
+app's root, and honoured `contain` mid-chain only on scroll containers.
+So a ctrl-wheel or a trackpad pinch over the canvas zoomed the page too.
+Fixed in `../gesso` with specs, vendored, and checked in a desktop
+browser. It's waiting to be committed there.
+
 ## Phase 1 — The simulator, headless
 
 Pure TypeScript under `src/sim`, no framework import. The circuit
@@ -233,7 +269,9 @@ gates, a clock, a constant, an input, an output. Oscillation detection.
 **Exit:** specs that build an SR latch, a D flip-flop, a full adder and
 a 4-bit ripple counter from gates, clock them, and assert every output
 on every tick. A spec that builds a ring oscillator and asserts it is
-reported, not hung on.
+reported, not hung on, naming a net that rings. Phase 0's first
+circuit oscillated from a hold-time violation in a latch, and "it
+oscillates" without the net would have taken much longer to find.
 
 ## Phase 2 — The contract and the application worker
 
@@ -253,6 +291,17 @@ standard shapes, wires as orthogonal polylines, a lit wire in the
 accent colour and an unlit one muted — both theme tokens, so dark mode
 is free. Level of detail: below a zoom threshold, gates become filled
 blocks and labels drop out.
+
+From Phase 0 (PHASE0.md §1), four decisions this phase starts from:
+256 px **tiles** on a world grid per zoom octave, placed in screen
+space (culling stops at a transform), each a **static layer** (gates,
+and anything that changes only on an edit) under a **live layer**. The
+LOD threshold (0.3) is also where **wires stop carrying live colour
+and the gate blocks take it**. **Zoom** scales the drawn tiles during
+the gesture and redraws them 1:1 when it settles, spread over frames
+rather than all in the settling one. Mid zoom (≈ 0.5, full detail)
+cost 16–18 ms in software rendering, and this phase has to bring it
+under budget.
 
 **Exit:** Phase 0's 10,000-gate scene, now drawn by the real canvas
 from the real contract, holds 60 fps panning and zooming with the
@@ -362,7 +411,11 @@ rewiring a running CPU does not re-flatten ten thousand gates. Consider
 WebAssembly only if JavaScript misses the target.
 
 **Exit:** ≥ 100 kHz simulated clock on a 10,000-gate benchmark circuit,
-with an edit applied mid-run in under one frame.
+with an edit applied mid-run in under one frame. Phase 0's baseline is
+16–20 kHz at about 3,650 evaluations per cycle, so this is roughly a
+6× improvement. Evaluations per cycle (clock fan-out into flip-flops
+whose D has not moved, the control plane) are probably worth more than
+evaluations per second.
 
 ---
 
@@ -485,7 +538,7 @@ shipped in.
 
 | Phase | Change | Shipped in |
 | ----- | ------ | ---------- |
-| —     | none yet | — |
+| 0b    | `overscrollBehavior="contain"` works on an app's root and on any node, not only scroll containers, so a canvas can keep the wheel (`UiWheelController`, `GessoRuntime`) | uncommitted in `../gesso`; vendored here |
 
 ---
 

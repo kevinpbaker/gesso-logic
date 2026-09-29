@@ -2,3 +2,5 @@ node_modules
 dist
 *.local
 .DS_Store
+phase0-results.jsonl
+vendor

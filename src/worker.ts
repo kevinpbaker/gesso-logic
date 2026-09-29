@@ -8,5 +8,6 @@
  */
 import { renderRoot } from 'gesso-framework';
 import { App } from './App';
+import { Circuit } from './spike/CircuitContract';
 
-renderRoot(App);
+renderRoot(App).useChannel(Circuit);
