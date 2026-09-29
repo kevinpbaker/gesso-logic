@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 6 done, with 0b; Phase 7 built, waiting on its first CI run. Phase 0's findings are in
+**Status:** Phases 0 to 7 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -658,7 +658,7 @@ changing, or the render worker's cost while the application worker is
 saturated against while it idles. Decide which before building the
 gate.
 
-**Built; green locally, waiting on CI.** `/proof` is the simulator on
+**Done: `pnpm proof` is green in CI.** On the runner, full speed costs 0.0–0.6 ms a frame against 4, with medians around 5 ms and the simulator at 2.7× the 100 Hz run's cycles. `/proof` is the simulator on
 the bench scene, with the sheet's strip along the top
 (`src/shell/ProofPanel.ts`): the main thread's pulse, the 5 s block,
 the render worker's fps, worst gap and median frame work, and the main
