@@ -1,6 +1,7 @@
 import type { Circuit, Component, PinRef } from '../sim/Circuit';
 import { CircuitBuilder } from '../sim/CircuitBuilder';
-import { dFlipFlop, fullAdder } from '../sim/Parts';
+import { library } from '../sim/Library';
+import { dFlipFlop } from '../sim/Parts';
 import { pinsOf } from '../sim/Chips';
 import { PINS, type GateKind } from '../sim/Primitives';
 import { shapeOf, sizeOf } from './Layout';
@@ -231,12 +232,9 @@ export function layOut(circuit: Circuit): Circuit {
  */
 export const ADDER = { a: 0x2b, b: 0x3c };
 
+/** The library's full adder, laid out. */
 export function fullAdderChip(): Circuit {
-  const b = new CircuitBuilder();
-  const { sum, carry } = fullAdder(b, b.input('a'), b.input('b'), b.input('cin'), 'fa');
-  b.output('s', sum);
-  b.output('cout', carry);
-  return layOut(b.build());
+  return layOut(library()['full adder']);
 }
 
 export function adder8Chip(chips: Record<string, Circuit>): Circuit {

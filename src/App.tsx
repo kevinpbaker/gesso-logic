@@ -326,6 +326,15 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
         <row gap={6} y="center">
           {PALETTE.map(([kind, label, key]) => button(`${label} ${key}`, () => canvas.editor.startPlacing(kind)))}
         </row>
+        {/* The standard library: placing a part brings it into the document. */}
+        <row gap={6} y="center">
+          <text text="Library" fontSize={11} color="textMuted" />
+          {each(
+            document.pipe(map(d => d.library.map(part => part.name))),
+            name => name,
+            name => button(name, () => canvas.editor.startPlacing('chip', false, name))
+          )}
+        </row>
         {/* The document's chips, to place like any part; empty until one is made. */}
         <row gap={6} y="center">
           {each(

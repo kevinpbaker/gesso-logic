@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 9 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 10 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -874,6 +874,49 @@ the palette under "Library", openable like anything else.
 
 **Exit:** every library part passes its spec, and the palette places
 them.
+
+**Done.** Twelve parts in `src/sim/Library.ts`, each built from gates
+with `CircuitBuilder`, and each passing its spec in
+`src/sim/Library.spec.ts`. The spec goes through the part as it's used:
+one instance between switches and LEDs of the right widths, a clock on
+`clk`, compiled like any document. Combinational parts are exhausted
+where the table is small and sampled where it isn't. Sequential ones
+get sequences.
+
+| Part | Pins | Gates | Spec |
+| ---- | ---- | ----: | ---- |
+| half adder | a b → s c | 2 | every row |
+| full adder | a b cin → s cout | 5 | every row |
+| add/sub 8 | A[8] B[8] sub → S[8] cout | 48 | edges, 2,000 rows each way |
+| mux 2 | a b s → y | 4 | every row |
+| mux 4 | a b c d S[2] → y | 12 | every row |
+| mux 2 ×8 | A B[8] s → Y[8] | 32 | 200 rows, every select |
+| mux 4 ×8 | A B C D[8] S[2] → Y[8] | 96 | 200 rows, every select |
+| decoder 3→8 | A[3] en → Y[8] | 27 | every row |
+| D latch | d en → q qn | 4 | follow and hold |
+| D flip-flop | d clk → q qn | 9 | edge only |
+| register 8 | D[8] load clk → Q[8] | 104 | load and hold |
+| counter 8 | D[8] clr load inc clk → Q[8] | 129 | clear, count, wrap, load, hold, priority |
+
+- **Parts use parts**, as a person would draw them: the adder/subtractor
+  is eight full adders, the register eight flip-flops behind eight
+  2-way muxes, the counter half adders, muxes and flip-flops. Opening one
+  shows what it's made of, and gate counts are honest by construction.
+  The spec pins each count, since the CPU's budget is built from them.
+  The register's 13 gates a bit matches the budget's estimate of 12 (9
+  for the flip-flop, 3 for the load mux; the mux is 4 here).
+- **Conventions:**
+  - subtraction's carry out is high when there was no borrow, as a
+    6502's is;
+  - the counter's priority is clear, then load, then count;
+  - every flip-flop takes its input on the rising edge of `clk`.
+- **The palette's Library row** places any part. A part the document
+  doesn't have yet comes in first, laid out, with the parts it's made
+  of (`src/app/LibraryParts.ts`). Placing and bringing are one edit, so
+  one undo. From then on it's a chip like any other: open, rename, copy.
+  The adder scenes now use the library's full adder.
+- **Also:** chip bodies are a little wider for their names, and the name
+  is sized for bold, which had been overflowing.
 
 ## Phase 11 — The logic analyser
 

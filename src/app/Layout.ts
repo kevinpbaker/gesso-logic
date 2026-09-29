@@ -92,7 +92,7 @@ function layoutOf(shape: Shape): KindLayout {
  */
 export function chipShape(name: string, inputs: readonly string[], outputs: readonly string[]): KindLayout {
   const rows = Math.max(inputs.length, outputs.length, 1);
-  const width = Math.max(6, Math.ceil(name.length * 0.6) + 2);
+  const width = Math.max(6, Math.ceil(name.length * 0.7) + 2);
   const pins: Record<string, Point> = {};
   inputs.forEach((pin, i) => (pins[pin] = { x: 0, y: 1 + 2 * i }));
   outputs.forEach((pin, i) => (pins[pin] = { x: width, y: 1 + 2 * i }));

@@ -69,6 +69,8 @@ export interface DocumentSummary {
   readonly path: readonly { readonly id: string; readonly chip: string }[];
   /** The document's chip definitions, by name, with the body each gives an instance: for the palette. */
   readonly chips: readonly { readonly name: string; readonly shape: KindLayout }[];
+  /** The standard library, for the palette: each part's name, body and a line on what it does. Placing one brings it in. */
+  readonly library: readonly { readonly name: string; readonly shape: KindLayout; readonly note: string }[];
 }
 
 export interface Camera {
@@ -278,7 +280,8 @@ export const EMPTY_SUMMARY: DocumentSummary = {
   camera: null,
   message: null,
   path: [],
-  chips: []
+  chips: [],
+  library: []
 };
 export const NO_SAVE: SaveRequest = { serial: 0, name: '', text: '', handle: null };
 export const NO_CLIP: ClipRequest = { serial: 0, text: '' };

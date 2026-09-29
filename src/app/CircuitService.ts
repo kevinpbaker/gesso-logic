@@ -40,6 +40,7 @@ import {
   type Fragment
 } from './DocumentEdits';
 import { adderScene, benchScene, busAdderScene, counterScene } from './Scenes';
+import { isLibraryName, LIBRARY_PALETTE, libraryPart } from './LibraryParts';
 import { truthTable } from './TruthTable';
 import { boundsOf, boxOf, intersects, pinAt, route, shapeOf, slotOf, type KindLayout } from './Layout';
 import { pinsOf } from '../sim/Chips';
@@ -337,7 +338,18 @@ export class CircuitService {
 
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void {
     this.editLevel(level => {
-      const placed = place(level, id ?? freshId(level, kind), kind, x, y, rotation, chip, width);
+      // A library part the document does not have yet comes in first,
+      // with the parts it is made of; placing and bringing it are one edit.
+      let target = level;
+      let name = chip;
+      if (kind === 'chip' && chip !== undefined && level.chips?.[chip] === undefined && isLibraryName(chip)) {
+        const parts = libraryPart(chip);
+        const { [chip]: definition, ...dependencies } = parts;
+        const brought = importChip(level, { ...definition!, chips: dependencies }, chip);
+        target = brought.circuit;
+        name = brought.name ?? chip;
+      }
+      const placed = place(target, id ?? freshId(target, kind), kind, x, y, rotation, name, width);
       return kind === 'clock' ? withRate(placed, this.clockHz) : placed;
     });
   }
@@ -796,6 +808,7 @@ export class CircuitService {
       camera: this.openCamera,
       message: this.message,
       path: this.pathNow(),
+      library: LIBRARY_PALETTE,
       chips: Object.keys(this.circuit.chips ?? {})
         .sort()
         .map(name => ({ name, shape: shapeOf({ id: '', kind: 'chip', chip: name, x: 0, y: 0 }, this.circuit.chips) as KindLayout }))

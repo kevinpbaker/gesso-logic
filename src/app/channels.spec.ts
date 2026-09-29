@@ -52,7 +52,8 @@ describe('the circuit channel', () => {
       camera: null,
       message: null,
       path: [],
-      chips: []
+      chips: [],
+      library: expect.any(Array)
     });
     const led = () => {
       const net = circuit.view.geometry.value.components.led?.nets.in;

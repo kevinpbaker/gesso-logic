@@ -498,7 +498,8 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
       surface.fillColor('text');
       for (const c of chips) {
         const name = scene.chipNames[c] ?? '?';
-        const fontSize = Math.min(1.1, Math.max(0.6, (scene.width(c) - 1) / Math.max(1, name.length) / 0.55));
+        // Bold runs about seven tenths of its size a character.
+        const fontSize = Math.min(1.1, Math.max(0.5, (scene.width(c) - 1.2) / Math.max(1, name.length) / 0.7));
         surface.text(name, scene.x[c]! + scene.width(c) / 2, scene.y[c]! + scene.height(c) / 2 + fontSize * 0.35, {
           fontSize,
           align: 'center',

@@ -482,7 +482,10 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     panBy,
     value: net => (net < 0 ? -1 : signalOf(chunks, net)),
     changed: () => editorChanged.next(editorChanged.value + 1),
-    chipShape: name => circuit.view.document.value.chips.find(chip => chip.name === name)?.shape
+    chipShape: name => {
+      const document = circuit.view.document.value;
+      return (document.chips.find(chip => chip.name === name) ?? document.library.find(part => part.name === name))?.shape;
+    }
   });
   // What the application worker made of a copy, onto the clipboard.
   let clipped = 0;
