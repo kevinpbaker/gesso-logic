@@ -373,20 +373,41 @@ under budget.
 from the real contract, holds 60 fps panning and zooming with the
 simulator running.
 
-**Done, with the GPU. Not in software rendering at mid zoom.**
-`src/canvas` holds the canvas, a render-side scene index and the
-painters. `src/app/Layout.ts` holds the geometry both workers share.
-`src/app/Scenes.ts` holds the bench scene: Phase 0's grid made real, a
-10-bit counter driving 99 × 100 gates, 10,000 in all. `pnpm bench`
+**Done.** `src/canvas` holds the canvas, a render-side scene index and
+the painters. `src/app/Layout.ts` holds the geometry both workers
+share. `src/app/Scenes.ts` holds the bench scene: Phase 0's grid made
+real, a 10-bit counter driving 99 × 100 gates, 10,000 in all. `pnpm bench`
 measures it (`scripts/bench.ts`, grown from Phase 0's runner, with the
 driver in `src/canvas/Bench.ts`). Frame cost in ms, with the circuit
-running flat out:
+running flat out, after the engine change below:
 
-| zoom | GPU still / pan / zoom (mean) | GPU zoom p95 | software still / pan / zoom | software zoom p95 |
+| zoom | GPU still / pan / zoom (mean) | GPU zoom p95 | software still / pan / zoom | software zoom gap |
 | ---- | ----------------------------- | -----------: | --------------------------- | ----------------: |
-| fit-all, 1.3 px a unit | 3.1 / 3.2 / 4.1 | 8.1 | 7.5 / 6.9 / 9.3 | 20.6 |
-| mid, 4 px a unit | 8.7 / 8.2 / 5.4 | 12.8 | **16.0 / 16.2** / 13.7 | 46.6 |
-| close, 12 px a unit | 2.0 / 2.5 / 3.3 | 6.4 | 6.0 / 7.2 / 10.3 | 36.1 |
+| fit-all, 1.3 px a unit | 2.3 / 2.6 / 3.2 | 7.0 | 3.2 / 3.3 / 4.5 | 19.1 ms |
+| mid, 4 px a unit | 1.6 / 2.0 / 2.9 | 9.2 | 2.3 / 2.6 / 4.5 | 19.2 ms |
+| close, 12 px a unit | 1.4 / 1.7 / 2.3 | 4.9 | 2.2 / 2.5 / 4.1 | 19.3 ms |
+
+With the GPU every run holds 60 fps. In software rendering still and pan
+hold 60 fps at every zoom, and a continuous zoom runs at about 52 fps.
+The CPU resamples every scaled tile bitmap each frame of a zoom, and
+that's the one number still over budget.
+
+**The engine change that closed most of it** (gesso, `PaintPictureCache.draw`):
+Gesso rasterised every painted node's new recording into a bitmap of
+its own, then drew the bitmap. A tile's live layer changes every frame,
+so each bitmap was drawn once and thrown away. In software rendering
+`transferToImageBitmap` alone was a quarter of the render worker's
+time. On Canvas2D a picture whose inputs changed this frame is now
+replayed straight onto the frame, clipped to its box, and gets a bitmap
+only on the first frame it holds still. Mid zoom in software went from
+16 ms a frame to 7.8, at the same drawing. WebGPU, which cannot replay,
+keeps the bitmap path, and Gesso's parity gate still compares the
+settled bitmaps both backends draw.
+
+**And the app change that finished it:** at the gates level of detail
+the live layer fills a rectangle inside each gate, a lit core, not the
+curved body. The bodies are filled once in the static layer beneath.
+That took mid zoom in software from 7.8 ms to 2.3.
 
 Paused, a frame costs 0.7–1.1 ms. The render worker gets 53–58
 snapshots a second with the GPU. It was checked by hand in a desktop
@@ -417,12 +438,12 @@ Chrome as well: 60 fps at every zoom with the circuit running at about
 - **Loading the scene is a one-time hitch** of 1.3–2.4 s: 10,000
   components crossing the channel, and the index built. Phase 6's.
 
-Still open: **mid zoom in software rendering** (16 ms mean, p95
-20–28) and **zoom p95 in software** (20–47 ms). The remaining cost is
-rasterising and compositing 28 tiles' layers every frame on the CPU.
-The next levers are an engine one — compositing unchanged layers
-without redrawing them — or fewer, smaller live layers. **The bench
-scene is a glitch storm**, about 52,700 evaluations a cycle from random
+Still open: **continuous zoom in software rendering** runs at about 52
+fps, with a gap p95 of 31–35 ms, because the CPU resamples scaled tile
+bitmaps every frame. And the frame gap there exceeds the measured cost,
+because replaying onto the frame moves raster work to the frame's
+commit, outside the worker's timer. The gap is the honest number for
+software rendering now. **The bench scene is a glitch storm**, about 52,700 evaluations a cycle from random
 XOR-heavy logic, so it runs at about 550 Hz. That's a harsh load for the
 application worker and says nothing about the CPU's speed.
 
@@ -668,6 +689,7 @@ shipped in.
 | ----- | ------ | ---------- |
 | 0b    | `overscrollBehavior="contain"` works on an app's root and on any node, not only scroll containers, so a canvas can keep the wheel (`UiWheelController`, `GessoRuntime`) | gesso `94bb672` |
 | 0b    | `applyPatches` copies each container once per batch, not once per patch (`StorePatch`) | gesso `9327bcb` |
+| 3     | On Canvas2D a painted node's new recording is replayed onto the frame, and rasterised into a bitmap only once it holds still (`PaintPictureCache.draw`) | gesso `d3b0040` |
 
 ---
 

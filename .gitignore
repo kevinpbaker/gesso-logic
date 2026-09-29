@@ -4,3 +4,4 @@ dist
 .DS_Store
 bench-results.jsonl
 vendor
+bench-*.cpuprofile

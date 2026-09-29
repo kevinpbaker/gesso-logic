@@ -8,11 +8,12 @@ import type { SceneIndex } from './SceneIndex';
  * Drawing a rectangle of the circuit onto a `PaintSurface`, in grid
  * units, as the three layers of a tile.
  *
- *   - **under** — the dot grid, and at the blocks level of detail the
- *     wires, unlit. Changes on an edit.
+ *   - **under** — the dot grid; below full detail the wires, unlit; at
+ *     the gates level the gates' bodies. Changes on an edit.
  *   - **live** — whatever shows a value: wires in their colours, the
- *     insides of switches and LEDs, and at the blocks level the gates
- *     themselves. Changes whenever a chunk it reads changes.
+ *     insides of switches and LEDs, the gates' lit cores, and at the
+ *     blocks level the gates themselves. Changes whenever a chunk it
+ *     reads changes.
  *   - **over** — gate symbols and the outlines of everything else.
  *     Changes on an edit.
  *
@@ -32,8 +33,8 @@ import type { SceneIndex } from './SceneIndex';
  *     their output; wires are drawn once, unlit. Phase 0's level, which
  *     took fit-all from 46 ms to 8.3 ms.
  *   - **gates**, from 2.5 to 6: symbols are readable and wires are still
- *     thin. The live value moves onto the gate — its body is filled by
- *     its output — and wires stay unlit in the static layer. Phase 3's
+ *     thin. The live value moves onto the gate — a lit core inside its
+ *     body — and wires stay unlit in the static layer. Phase 3's
  *     bench found full detail here cost 18–20 ms in software rendering,
  *     almost all of it re-stroking four thousand wires every frame;
  *     filling two thousand gate bodies is the same information for the
@@ -71,12 +72,27 @@ export function paintUnder(surface: PaintSurface, scene: SceneIndex, area: Box, 
     surface.fillColor('border');
     surface.fill();
   }
-  if (detailAt(scale) !== 'full') {
+  const detail = detailAt(scale);
+  if (detail !== 'full') {
     surface.lineWidth(Math.min(1.5, scale / 2) / scale);
     surface.beginPath();
     scene.forEach(area, null, w => traceWire(surface, scene, w));
     surface.strokeColor('border');
     surface.stroke();
+  }
+  if (detail === 'gates') {
+    // The gates' bodies, filled once here rather than every frame in the
+    // live layer, which draws only the lit cores over them.
+    surface.beginPath();
+    scene.forEach(
+      area,
+      c => {
+        if (scene.isGate(c)) traceGateBody(surface, scene.kind[c]!, scene.x[c]!, scene.y[c]!);
+      },
+      null
+    );
+    surface.fillColor('surface');
+    surface.fill();
   }
   paintTiming.recordMs += performance.now() - started;
 }
@@ -99,10 +115,14 @@ export function paintLive(
 
   const detail = detailAt(scale);
   if (detail === 'gates') {
-    // Gate bodies filled by their output, switches and LEDs by theirs.
+    // Each gate shows its output as a lit core: a rectangle inset inside
+    // its symbol, which the over layer outlines. A rectangle rather than
+    // the curved body, because this layer is rasterised every frame and
+    // a CPU fills a rectangle far faster than a curve — Phase 3's bench
+    // had mid zoom at 25 ms a frame in software rendering filling two
+    // thousand curved bodies. Low is left unfilled; unknown is marked.
     scene.forEach(area, c => sort(scene.valueNet[c]!, c), null);
     for (const [items, color] of [
-      [low, 'surface'],
       [unknown, 'placeholder'],
       [high, 'primary']
     ] as const) {
@@ -110,7 +130,13 @@ export function paintLive(
       surface.beginPath();
       for (const c of items) {
         if (scene.isGate(c)) {
-          traceGateBody(surface, scene.kind[c]!, scene.x[c]!, scene.y[c]!);
+          // Inside every symbol: clear of an XOR's second curve, a NOR's
+          // pointed front and a NOT's narrowing triangle.
+          if (scene.kind[c] === 0) {
+            surface.rect(scene.x[c]! + 0.9, scene.y[c]! + 1.6, 1.0, 0.8);
+          } else {
+            surface.rect(scene.x[c]! + 1.4, scene.y[c]! + 1.3, 1.0, 1.4);
+          }
         } else {
           surface.roundRect(scene.x[c]! + 0.2, scene.y[c]! + 0.2, scene.width(c) - 0.4, scene.height(c) - 0.4, 0.3);
         }

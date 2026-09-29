@@ -37,6 +37,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const PORT = 4183;
 const DEVTOOLS_PORT = 9343;
 const SHOT = process.argv.find(arg => arg.startsWith('--shot='))?.slice('--shot='.length);
+/** `--profile`: CPU-profile every worker for the whole run, and print where the time went. */
+const PROFILE = process.argv.includes('--profile');
 const GPU = process.argv.includes('--gpu');
 /** With `--shot`: drag and ctrl-wheel the canvas through real input events before the shot. */
 const INPUT = process.argv.includes('--input');
@@ -71,6 +73,8 @@ class Client {
   private nextId = 1;
   private readonly pending = new Map<number, (value: unknown) => void>();
   readonly lines: string[] = [];
+  /** Attached targets by session, as `type file`. */
+  readonly targets = new Map<string, string>();
   private doneResolve: (() => void) | null = null;
 
   private readonly socket: WebSocket;
@@ -93,7 +97,18 @@ class Client {
         return;
       }
       if (message.method === 'Target.attachedToTarget') {
-        const session = (message.params as { sessionId: string }).sessionId;
+        const { sessionId: session, targetInfo } = message.params as {
+          sessionId: string;
+          targetInfo: { type: string; url: string };
+        };
+        this.targets.set(session, `${targetInfo.type} ${targetInfo.url.split('/').pop()}`);
+        if (PROFILE && targetInfo.type === 'worker') {
+          void this.send('Profiler.enable', {}, session).then(() =>
+            this.send('Profiler.setSamplingInterval', { interval: 200 }, session).then(() =>
+              this.send('Profiler.start', {}, session)
+            )
+          );
+        }
         void this.send('Runtime.enable', {}, session);
         void this.send('Target.setAutoAttach', AUTO_ATTACH, session);
         return;
@@ -247,6 +262,9 @@ async function main(): Promise<void> {
     writeFileSync(RESULTS, '');
     try {
       await client.finished(1_800_000);
+      if (PROFILE) {
+        await summariseProfiles(client);
+      }
     } finally {
       process.stderr.write('\n');
       report(client.lines.map(line => JSON.parse(line) as Record<string, unknown>));
@@ -285,6 +303,40 @@ function report(runs: Record<string, unknown>[]): void {
   console.log(widths.map(width => '─'.repeat(width)).join('  '));
   for (const row of rows) {
     console.log(line(row));
+  }
+}
+
+interface ProfileNode {
+  id: number;
+  callFrame: { functionName: string; url: string; lineNumber: number };
+  hitCount?: number;
+}
+
+/**
+ * Stops each worker's profiler and prints its top functions by self
+ * time, which is the question a slow frame asks: not which call was on
+ * the stack, but which one was doing the work.
+ */
+async function summariseProfiles(client: Client): Promise<void> {
+  for (const [session, name] of client.targets) {
+    if (!name.startsWith('worker')) continue;
+    const result = (await client.send('Profiler.stop', {}, session)) as { profile?: { nodes: ProfileNode[]; samples: number[] } } | Error;
+    if (result instanceof Error || result.profile === undefined) continue;
+    const { nodes, samples } = result.profile;
+    const byNode = new Map(nodes.map(node => [node.id, node]));
+    const self = new Map<string, number>();
+    for (const id of samples) {
+      const frame = byNode.get(id)!.callFrame;
+      const file = frame.url.split('/').pop()?.replace(/\?.*$/, '') ?? '';
+      const key = `${frame.functionName || '(anonymous)'}  ${file}:${frame.lineNumber + 1}`;
+      self.set(key, (self.get(key) ?? 0) + 1);
+    }
+    const total = samples.length;
+    writeFileSync(`bench-${name.replace(/[^\w.-]+/g, '_')}.cpuprofile`, JSON.stringify(result.profile));
+    console.log(`\n${name}: ${total} samples, top self time`);
+    for (const [key, count] of [...self].sort((a, b) => b[1] - a[1]).slice(0, 25)) {
+      console.log(`  ${((100 * count) / total).toFixed(1).padStart(5)}%  ${key}`);
+    }
   }
 }
 
