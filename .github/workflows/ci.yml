@@ -1,0 +1,29 @@
+# Typecheck, specs, and Phase 7's frame budget.
+#
+# The proof runs headed, in a virtual display: headless Chrome stops a
+# worker's animation frames whenever the page's main thread is blocked,
+# so the one check that blocks it — the render worker must go on drawing
+# — can only be made with a display. See scripts/proof.ts.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install, with Gesso built at the commit in gesso.lock
+        run: bash scripts/ci-install.sh
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Frame budget
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" env PROOF_HEADED=1 pnpm proof

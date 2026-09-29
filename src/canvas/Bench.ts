@@ -217,6 +217,11 @@ export function isBench(): boolean {
   return workerName().startsWith('bench');
 }
 
+/** `/proof`: Phase 7's page, measured by `pnpm proof` (see `scripts/proof.ts`). */
+export function isProof(): boolean {
+  return workerName() === 'proof';
+}
+
 /** `?bench&only=regex` keeps only the runs whose label matches. */
 export function benchFilter(runs: readonly BenchRun[]): BenchRun[] {
   const colon = workerName().indexOf(':');

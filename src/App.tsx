@@ -6,7 +6,7 @@ import { each, FrameService, internalState, type ComponentContext, type Inputs }
 
 import { Circuit, type ClockRate, type TableView } from './app/CircuitContract';
 import type { Kind } from './sim/Primitives';
-import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, type Motion } from './canvas/Bench';
+import { BENCH_DONE, BENCH_PREFIX, BenchDriver, benchFilter, benchMatrix, isBench, isProof, type Motion } from './canvas/Bench';
 import { circuitCanvas } from './canvas/CircuitCanvas';
 import { fileActions } from './canvas/Files';
 import { paintTiming } from './canvas/Painters';
@@ -57,7 +57,10 @@ interface Readout {
 
 export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
   const circuit = ctx.channel(Circuit);
-  const files = isBench() ? null : fileActions(ctx);
+  // Neither measured page touches files: each loads its own scene, and
+  // an autosave written from one would replace a person's work.
+  const proof = isProof();
+  const files = isBench() || proof ? null : fileActions(ctx);
   const canvas = circuitCanvas(ctx, files);
   const showRecent = internalState(false);
   const readout = internalState<Readout>({ fps: 0, frameMs: 0, worstMs: 0, recorded: 0, tiles: 0, missed: 0 });
@@ -102,7 +105,7 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
 
   // The bench measures Phase 0's ten thousand gates; everyone else starts
   // with an empty canvas.
-  if (isBench()) {
+  if (isBench() || proof) {
     circuit.send.loadScene('bench');
   } else {
     // Whatever was open when the tab closed, brought back by the
@@ -219,8 +222,8 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
         <row gap={14} y="center">
           {stat('Gates', document.pipe(map(d => d.gates.toLocaleString('en'))))}
           {stat('Zoom', canvas.camera.pipe(map(c => `${c.scale.toFixed(2)} px/u`)))}
-          {stat('Clock', status.pipe(map(s => (s.running ? `${s.achievedHz.toLocaleString('en')} Hz` : 'paused'))))}
-          {stat('Cycles', status.pipe(map(s => s.cycles.toLocaleString('en'))))}
+          {stat('Clock', status.pipe(map(s => (s.running ? `${s.achievedHz.toLocaleString('en')} Hz` : 'paused'))), proof)}
+          {stat('Cycles', status.pipe(map(s => s.cycles.toLocaleString('en'))), proof)}
           {stat('Problem', problem)}
         </row>
         <row gap={6} y="center">
@@ -228,6 +231,18 @@ export function App(_inputs: Inputs<{}>, ctx: ComponentContext) {
             status.value.running ? circuit.send.pause() : circuit.send.run()
           )}
           {button('Step', () => circuit.send.step())}
+          {proof
+            ? button('Full speed', () => {
+                circuit.send.setClockHz('max');
+                circuit.send.run();
+              })
+            : null}
+          {proof
+            ? button('100 Hz', () => {
+                circuit.send.setClockHz(100);
+                circuit.send.run();
+              })
+            : null}
           {button(status.pipe(map(s => `Clock: ${s.clockHz === 'max' ? 'max' : `${s.clockHz} Hz`}`)), () => {
             const at = RATES.indexOf(status.value.clockHz);
             circuit.send.setClockHz(RATES[(at + 1) % RATES.length]!);
@@ -353,11 +368,24 @@ function truthTablePanel(table: Observable<TableView>, close: () => void) {
   );
 }
 
-function stat(label: string, value: Observable<string>) {
+/**
+ * A readout. `live` puts it in the accessibility tree as a live region,
+ * which is how `pnpm proof` reads the clock off the page — only on
+ * `/proof`, because a screen reader told the cycle count sixty times a
+ * second is no use to anybody.
+ */
+function stat(label: string, value: Observable<string>, live = false) {
   return (
     <row gap={5} y="center">
-      <text text={label} fontSize={11} color="textMuted" />
-      <text text={value} fontSize={13} fontWeight={600} color="text" />
+      {/* A live readout carries its own label, so the tree reads "Clock 552 Hz". */}
+      {live ? null : <text text={label} fontSize={11} color="textMuted" />}
+      <text
+        text={live ? value.pipe(map(v => `${label} ${v}`)) : value}
+        fontSize={13}
+        fontWeight={600}
+        color="text"
+        {...(live ? { live: 'polite' as const } : {})}
+      />
     </row>
   );
 }

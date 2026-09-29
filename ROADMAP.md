@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 6 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 6 done, with 0b; Phase 7 built, waiting on its first CI run. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -657,6 +657,54 @@ the claim is full speed against a slow clock with the same picture
 changing, or the render worker's cost while the application worker is
 saturated against while it idles. Decide which before building the
 gate.
+
+**Built; green locally, waiting on CI.** `/proof` is the simulator on
+the bench scene, with the sheet's strip along the top
+(`src/shell/ProofPanel.ts`): the main thread's pulse, the 5 s block,
+the render worker's fps, worst gap and median frame work, and the main
+thread's fps. `pnpm proof` (`scripts/proof.ts`) drives the built app in
+Chrome with real wheel events and real clicks. CI
+(`.github/workflows/ci.yml`) builds Gesso at `gesso.lock` and runs
+typecheck, the specs and the proof.
+
+- **The comparison chosen: full speed against a 100 Hz clock.** At
+  100 Hz the picture still changes on every frame, because the
+  application worker publishes at most once a frame either way, so the
+  render worker draws the same thing in both runs. What differs is that
+  at full speed the application worker is saturated, running about
+  five times the cycles. Measured, still and panning at mid zoom in
+  software rendering: full speed costs −0.1 to +0.2 ms a frame, against
+  the 4 ms budget. Median frames are about 2 ms, against 12.
+- **"Run at full speed" is in the canvas's readout, not the strip.**
+  Commands reach the application worker through the render worker's
+  channel, and the main thread has none. That's the architecture, so
+  the strip keeps the block and the readout, and the proof page adds
+  "Full speed" and "100 Hz" buttons to the canvas. Its clock and cycle
+  readouts are live regions there, so the script reads them from the
+  accessibility tree.
+- **Blocking the main thread needs a real display to prove anything.**
+  In headed Chrome the render worker draws straight through a 5 s block
+  (921 frames, worst gap 12 ms, measured by hand). Headless Chrome
+  stops a worker's animation frames along with its page's, so there it
+  draws nothing. The sheet's proof passes this check headless only
+  because it counts every frame in the recording, including those drawn
+  just before and after the block. Here the strip records the block's
+  window on the render worker's clock, and only frames inside it count.
+  Headless, the script says the check can't be made. CI runs it headed
+  under `xvfb-run`, where it's enforced. Either way, the simulator
+  running through the freeze is checked: about 3,000 cycles in 5 s.
+- **Gesso needed no change.** A watchdog on the worker's own
+  `requestAnimationFrame` path looked like the fix until the headed
+  measurement. Gesso's spec forbidding one is right.
+- **Copying the sheet's pieces:** the strip came over nearly unchanged
+  (its layout heatmap and re-measure count taken out, frame work put
+  in), and the DevTools client unchanged. The budget script couldn't
+  be copied, because the sheet's is about menus and cells. So the case
+  for `gesso-devtools` is the strip and the client, not the script. It
+  will be worth proposing once a third app wants them.
+- **Also fixed:** Ctrl+S and Ctrl+O are now intercepted by the shell
+  (`interceptKey`), as the sheet does. Without it, Chrome's own "Save
+  page as" could open before the render worker heard the key.
 
 ---
 

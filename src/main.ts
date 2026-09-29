@@ -22,6 +22,9 @@
  */
 import { createApp } from 'gesso-framework';
 
+import { isProofPath } from './route';
+import { proofPanel } from './shell/ProofPanel';
+
 const host = document.querySelector<HTMLElement>('#app');
 if (host === null) {
   throw new Error('index.html has no #app element to mount into.');
@@ -30,10 +33,21 @@ if (host === null) {
 // A worker has no page url, so a flag only the url carries is handed to
 // it as its name. `?bench` makes the render worker run the Phase 0
 // measurement unattended, and `&only=` narrows it to the runs whose
-// label matches; the idiom is Gesso's own `?still`.
+// label matches; the idiom is Gesso's own `?still`. `/proof` is Phase
+// 7's page, and the strip it adds is built here, before the app, so
+// its frame callback can be given to `createApp`.
 const params = new URLSearchParams(location.search);
+const proof = isProofPath(location.pathname);
+const panel = proof ? proofPanel(host) : null;
 const app = createApp({
-  workerName: params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : undefined
+  ...(panel?.options ?? {}),
+  workerName: params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : proof ? 'proof' : undefined,
+  // Save and Open are the circuit's, not the page's. The shell has to
+  // say so before the render worker has heard of the key, or Chrome's
+  // "Save page as" opens over the canvas.
+  interceptKey: event =>
+    (event.ctrlKey || event.metaKey) && !event.altKey && (event.key.toLowerCase() === 's' || event.key.toLowerCase() === 'o')
 });
+panel?.attach(app);
 
 app.mount(host);
