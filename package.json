@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "phase0": "node scripts/phase0.ts",
     "phase0:sim": "node scripts/phase0-sim.ts"
   },
@@ -18,9 +20,11 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
+    "@types/node": "^26.6.3",
     "gesso-devtools": "file:vendor/gesso-devtools-0.4.0-0a324ff5.tgz",
     "gesso-vite-plugin": "file:vendor/gesso-vite-plugin-0.4.0-0a5c363f.tgz",
     "typescript": "~7.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "vitest": "^4.1.11"
   }
 }

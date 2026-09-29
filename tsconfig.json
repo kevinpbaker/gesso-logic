@@ -3,7 +3,7 @@
     "target": "es2023",
     "module": "esnext",
     "lib": ["ES2023", "DOM"],
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"],
 
     /* The packages ship `exports` maps, so this is the line that has to be right. */
     "moduleResolution": "bundler",

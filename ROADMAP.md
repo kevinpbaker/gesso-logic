@@ -11,9 +11,10 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phase 0 done. The findings are in [PHASE0.md](PHASE0.md),
-and the phases below are amended where they changed anything. Nothing
-past Phase 0 is built.
+**Status:** Phases 0, 0b and 1 done. Phase 0's findings are in
+[PHASE0.md](PHASE0.md), and the phases below are amended where they
+changed anything. The simulator runs headless under `src/sim`; nothing
+past Phase 1 is built.
 
 ---
 
@@ -117,7 +118,7 @@ ball moving through the bits.
 | RAM storage, 1,024 bits       |   ~4,100 | a gated D latch is 4 gates                                   |
 | RAM address decode (7 → 128)  |     ~800 | shared partial decoders                                      |
 | RAM read path, 128 → 1 × 8    |   ~2,000 | AND-OR tree per bit                                          |
-| Registers, ~51 bits           |     ~460 | edge-triggered D flip-flop (6) + load mux (3)                |
+| Registers, ~51 bits           |     ~610 | master–slave D flip-flop (9) + load mux (3); see Phase 1      |
 | ALU and flags                 |     ~250 | ripple-carry adder/subtractor, logic ops, shifter, result mux |
 | PC, incrementer, branch       |      ~60 |                                                              |
 | Buses and operand muxes       |     ~200 |                                                              |
@@ -281,6 +282,33 @@ on every tick. A spec that builds a ring oscillator and asserts it is
 reported, not hung on, naming a net that rings. Phase 0's first
 circuit oscillated from a hold-time violation in a latch, and "it
 oscillates" without the net would have taken much longer to find.
+
+**Done.** `src/sim` holds the document (`Circuit.ts`), the compiler
+(`Netlist.ts`), the kernel (`Simulator.ts`), a builder for writing
+circuits in code, and the parts the specs are made of. 28 specs run in
+node in about 20 ms. `boundaries.spec.ts` fails the build if anything
+under `src/sim` imports from outside it. What was decided on the way:
+
+- **Gates have two inputs.** So the six-NAND edge-triggered flip-flop,
+  which needs a three-input NAND, isn't available. The flip-flop is
+  master–slave, two gated latches and an inverter: 9 gates, not 6. That
+  moves the register row of the gate budget from ~460 to ~610.
+- **Power-on settles one gate at a time**, in document order, until a
+  pass changes nothing. Lockstep would leave an SR latch with Q = Q̅
+  ringing forever. So which way a latch wakes up is an accident of
+  order, and the CPU still needs its reset line. A circuit with no
+  settled state, a ring oscillator, goes straight to the unit-delay
+  kernel and is reported on the first `settle`.
+- **`settle` counts propagation delay exactly.** A net no gate reads
+  isn't queued for another tick, so a full adder reports 3 ticks, its
+  longest path.
+- **An oscillation report names the nets that changed twice** in the 64
+  ticks after the limit, sorted by name: the loop, not everything
+  downstream of it. The hold-time violation from Phase 0 is a spec, and
+  it names `ram7.q.out` and `ram7.qBar.out`.
+- **A short is refused, not resolved.** Two drivers on one net is a
+  compile error naming both pins. An undriven input reads 0 and is
+  listed as floating.
 
 ## Phase 2 — The contract and the application worker
 

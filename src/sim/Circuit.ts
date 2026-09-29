@@ -1,0 +1,57 @@
+/**
+ * The circuit document: what a person draws and a file holds.
+ *
+ * Components with positions, and wires between their pins. Nothing here
+ * is computed — no nets, no values — so the document is plain data that
+ * can be saved, sent across the worker barrier and diffed as it is.
+ * `compile` in `Netlist.ts` turns it into something that can run.
+ *
+ * A wire joins two pins. Pins joined by any chain of wires are one net,
+ * so a wire from one output to three inputs is three wires, and a wire
+ * that happens to cross another joins nothing. Junctions in the middle
+ * of a wire are the editor's business (Phase 4); the document only ever
+ * says which pins are joined.
+ */
+
+import type { Kind } from './Primitives';
+
+export const CIRCUIT_VERSION = 1;
+
+export interface Circuit {
+  readonly version: typeof CIRCUIT_VERSION;
+  readonly components: readonly Component[];
+  readonly wires: readonly Wire[];
+}
+
+export interface Component {
+  /** Unique within the circuit. Referred to by wires, and by everything that names a pin. */
+  readonly id: string;
+  readonly kind: Kind;
+  /** Grid position of the component's origin. */
+  readonly x: number;
+  readonly y: number;
+  /** What the component is called on screen and in reports; its id when absent. */
+  readonly label?: string;
+  /**
+   * The value a `constant` drives, or an `input` starts at. Ignored by
+   * every other kind.
+   */
+  readonly value?: 0 | 1;
+}
+
+export interface PinRef {
+  readonly component: string;
+  readonly pin: string;
+}
+
+export interface Wire {
+  readonly id: string;
+  readonly from: PinRef;
+  readonly to: PinRef;
+}
+
+/** A pin as people read it: `label.pin`. */
+export function pinName(circuit: Circuit, ref: PinRef): string {
+  const component = circuit.components.find(c => c.id === ref.component);
+  return `${component?.label ?? ref.component}.${ref.pin}`;
+}
