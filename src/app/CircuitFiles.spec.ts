@@ -153,3 +153,24 @@ describe('a first visit', () => {
     expect(again.summary().name).toBe(saved.summary().name);
   });
 });
+
+describe('the originals Reset puts back', () => {
+  it('outlive a reload: a chip edited before it can still be reset after', async () => {
+    const saved = harness();
+    await saved.service.restore();
+    saved.service.loadScene('adder');
+    const gates = saved.summary().gates;
+    saved.service.openChip('add');
+    saved.service.openChip('fa2');
+    saved.service.place('not', 30, 30, 'spare');
+    saved.flush();
+
+    const again = harness(saved.stored);
+    await again.service.restore();
+    expect(again.summary().gates).toBe(gates + 8);
+    expect([...again.summary().changedChips].sort()).toEqual(['adder 8', 'full adder']);
+    again.service.resetChip('full adder');
+    expect(again.summary().gates).toBe(gates);
+    expect(again.summary().changedChips).toEqual([]);
+  });
+});

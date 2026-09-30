@@ -1622,6 +1622,18 @@ and back again.
   every memory and ports" — and the menus match the keys. An input's
   value field stays hidden inside a chip: there it is a pin, driven
   from outside.
+- **Reset a chip to how it was opened.** An edit inside Pong's CPU
+  breaks the game, and undo is the only way back while it is still on
+  the stack. The service keeps each chip as the document was opened
+  (a library part brought in later goes back to the library's), and a
+  chip that differs, itself or in a chip inside it, gets a Reset: on
+  the breadcrumb when inside it, in the readout when it is selected,
+  and in the Edit menu. It puts back the chip and every chip it is made
+  of, as one edit, so undo takes the reset back. The originals ride in
+  the autosave, only where they differ, so a reload keeps them; a
+  rename carries them to the new name. Checked in Chrome: an AND gate
+  deleted inside memory and ports (8,558 gates), Reset, 8,559 and the
+  game still playing.
 - **`pnpm proof` passes**, unchanged: `/proof` still measures the
   10,000-gate bench, and its instrument has a Pong button beside it.
 

@@ -52,6 +52,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         openChip: id => service.openChip(id),
         closeChip: depth => service.closeChip(depth),
         renameChip: (from, to) => service.renameChip(from, to),
+        resetChip: name => service.resetChip(name),
         importChip: (text, fileName) => service.importChip(text, fileName),
         setAnalyserView: (start, span, columns) => service.setAnalyserView(start, span, columns),
         setTrigger: (trace, value) => service.setTrigger(trace, value),

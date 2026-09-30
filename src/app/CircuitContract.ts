@@ -70,6 +70,8 @@ export interface DocumentSummary {
   readonly path: readonly { readonly id: string; readonly chip: string }[];
   /** True for the document a first visit opened (see `restore`), until another is opened: the page greets it. */
   readonly welcome: boolean;
+  /** The chips that differ from how the document was opened, themselves or in a chip inside them: the ones Reset can put back. */
+  readonly changedChips: readonly string[];
   /** The document's chip definitions, by name, with the body each gives an instance: for the palette. */
   readonly chips: readonly { readonly name: string; readonly shape: KindLayout }[];
   /** The standard library, for the palette: each part's name, body and a line on what it does. Placing one brings it in. */
@@ -284,6 +286,8 @@ export interface CircuitCommands {
   closeChip(depth: number): void;
   /** Renames a chip definition, and every instance of it. */
   renameChip(from: string, to: string): void;
+  /** Puts a chip back as the document was opened, with the chips inside it; one edit, so undo takes it back. */
+  resetChip(name: string): void;
   /** Adds a circuit file's text to the document as a chip, named after the file, ready to place from the palette. */
   importChip(text: string, fileName: string): void;
   /**
@@ -328,6 +332,7 @@ export const EMPTY_SUMMARY: DocumentSummary = {
   message: null,
   path: [],
   welcome: false,
+  changedChips: [],
   chips: [],
   library: []
 };

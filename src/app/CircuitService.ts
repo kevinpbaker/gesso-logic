@@ -121,6 +121,12 @@ interface Autosave {
   readonly dirty: boolean;
   readonly running: boolean;
   readonly camera: Camera | null;
+  /**
+   * The chips as the document was opened, where they differ from the
+   * document's now, as a circuit file of chips alone: what Reset puts
+   * back. Absent from autosaves written before there was a Reset.
+   */
+  readonly originals?: string;
 }
 
 /** A viewport, widened by a quarter on each side: the band Phase 0 put on the publishing side. */
@@ -209,6 +215,10 @@ export class CircuitService {
   private readonly delay: (run: () => void, ms: number) => () => void;
   /** The `opened` count of the document a first visit opened, or -1: see `DocumentSummary.welcome`. */
   private welcomeOpened = -1;
+  /** The chips as the document was opened, by name: what Reset puts back. */
+  private originals: Readonly<Record<string, Circuit>> = {};
+  /** Whether a chip definition differs from its original, by the definition. */
+  private changedCache = new WeakMap<Circuit, boolean>();
   /** Whether autosaving has begun: only once `restore` has read what was there, or it would be overwritten. */
   private autosaving = false;
   private cancelAutosave: (() => void) | null = null;
@@ -253,9 +263,17 @@ export class CircuitService {
   /** Replaces the document, as opening a file does. The simulator starts fresh and the history is forgotten. */
   load(
     circuit: Circuit,
-    file: { name: string | null; handle: number | null; dirty?: boolean; camera?: Camera | null } = { name: null, handle: null }
+    file: {
+      name: string | null;
+      handle: number | null;
+      dirty?: boolean;
+      camera?: Camera | null;
+      originals?: Readonly<Record<string, Circuit>>;
+    } = { name: null, handle: null }
   ): void {
     this.opened++;
+    this.originals = { ...circuit.chips, ...file.originals };
+    this.changedCache = new WeakMap();
     this.path.length = 0;
     this.name = file.name;
     this.handle = file.handle;
@@ -336,7 +354,8 @@ export class CircuitService {
           name: saved.name,
           handle: saved.handle,
           dirty: saved.dirty,
-          camera: saved.camera
+          camera: saved.camera,
+          originals: saved.originals === undefined ? undefined : readCircuit(saved.originals).chips
         });
         this.camera = saved.camera;
         if (saved.running) this.run();
@@ -473,7 +492,90 @@ export class CircuitService {
   renameChip(from: string, to: string): void {
     // A document-wide edit wherever it is asked from: the name is the
     // definition's, and the breadcrumb follows it.
-    this.edit(renameChip(this.circuit, from, to));
+    const next = renameChip(this.circuit, from, to);
+    const original = this.originalOf(from);
+    if (next !== this.circuit && original !== undefined) {
+      // The original goes by the new name too, and keeps the old one
+      // for an undo of the rename.
+      const chips = { ...this.originals, [from]: original };
+      const renamed = renameChip({ version: CIRCUIT_VERSION, components: [], wires: [], chips }, from, to).chips;
+      this.originals = { ...this.originals, ...renamed };
+    }
+    this.edit(next);
+  }
+
+  /**
+   * Puts a chip back as the document was opened — or, for a library
+   * part brought in since, as the library has it — with every chip it
+   * is made of. One edit, so undo takes it back.
+   */
+  resetChip(name: string): void {
+    if (!this.changedChips().includes(name)) return;
+    const chips = { ...this.circuit.chips };
+    const todo = [name];
+    const seen = new Set<string>();
+    while (todo.length > 0) {
+      const next = todo.pop()!;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      const original = this.originalOf(next);
+      if (original === undefined) continue;
+      chips[next] = original;
+      for (const c of original.components) if (c.kind === 'chip' && c.chip !== undefined) todo.push(c.chip);
+    }
+    this.edit({ ...this.circuit, chips });
+    this.message = `Reset ${name} to how it was opened`;
+    this.documentSubject.next(this.summary());
+  }
+
+  /** A chip as the document was opened, or as the library has it. */
+  private originalOf(name: string): Circuit | undefined {
+    const opened = this.originals[name];
+    if (opened !== undefined) return opened;
+    return isLibraryName(name) ? libraryPart(name)[name] : undefined;
+  }
+
+  /** Whether a chip's own definition differs from its original. Cached on the definition, which an edit replaces. */
+  private differs(name: string, definition: Circuit): boolean {
+    const known = this.changedCache.get(definition);
+    if (known !== undefined) return known;
+    const original = this.originalOf(name);
+    const differs = original !== definition && (original === undefined || JSON.stringify(original) !== JSON.stringify(definition));
+    this.changedCache.set(definition, differs);
+    return differs;
+  }
+
+  /**
+   * The chips that differ from their originals, themselves or in a chip
+   * they are made of: the ones Reset has something to put back. A chip
+   * with no original — one made here — has nothing to go back to.
+   */
+  private changedChips(): string[] {
+    const chips = this.circuit.chips ?? {};
+    const memo = new Map<string, boolean>();
+    const changed = (name: string, trail: Set<string>): boolean => {
+      const known = memo.get(name);
+      if (known !== undefined) return known;
+      const definition = chips[name];
+      if (this.originalOf(name) === undefined) return false;
+      if (definition === undefined || trail.has(name)) return definition === undefined;
+      trail.add(name);
+      const result =
+        this.differs(name, definition) ||
+        definition.components.some(c => c.kind === 'chip' && c.chip !== undefined && changed(c.chip, trail));
+      trail.delete(name);
+      memo.set(name, result);
+      return result;
+    };
+    return Object.keys(chips).filter(name => changed(name, new Set()));
+  }
+
+  /** The originals that differ from the chips now, as a file for the autosave; undefined when none do. */
+  private changedOriginals(): string | undefined {
+    const chips = this.circuit.chips ?? {};
+    const differing = Object.fromEntries(Object.entries(this.originals).filter(([name, original]) => chips[name] !== original));
+    if (Object.keys(differing).length === 0) return undefined;
+    return writeCircuit({ version: CIRCUIT_VERSION, components: [], wires: [], chips: differing });
   }
 
   openChip(id: string): void {
@@ -948,6 +1050,7 @@ export class CircuitService {
       message: this.message,
       path: this.pathNow(),
       welcome: this.welcomeOpened === this.opened,
+      changedChips: this.changedChips(),
       library: LIBRARY_PALETTE,
       chips: Object.keys(this.circuit.chips ?? {})
         .sort()
@@ -987,7 +1090,8 @@ export class CircuitService {
         handle: this.handle,
         dirty: this.revision !== this.savedRevision,
         running: this.running,
-        camera: this.camera
+        camera: this.camera,
+        originals: this.changedOriginals()
       };
       void this.store?.write(AUTOSAVE_KEY, JSON.stringify(record));
     }, AUTOSAVE_MS);

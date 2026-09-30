@@ -48,6 +48,7 @@ export type CommandId =
   | 'deselect'
   | 'rotate'
   | 'makeChip'
+  | 'resetChip'
   | 'openChip'
   | 'fit'
   | 'zoomIn'
@@ -97,6 +98,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   deselect: { label: 'Select nothing', keys: 'Esc', group: 'Edit' },
   rotate: { label: 'Rotate', keys: 'R', group: 'Edit' },
   makeChip: { label: 'Make a chip of the selection', keys: 'M', group: 'Edit' },
+  resetChip: { label: 'Reset the chip to how it was opened', group: 'Edit' },
   openChip: { label: 'Look inside the chip', keys: 'Double-click', group: 'View' },
   fit: { label: 'Fit the circuit', keys: '0', group: 'View' },
   zoomIn: { label: 'Zoom in', keys: '=', group: 'View' },
@@ -160,7 +162,8 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       'deselect',
       MENU_SEPARATOR,
       'rotate',
-      'makeChip'
+      'makeChip',
+      'resetChip'
     ]
   },
   {

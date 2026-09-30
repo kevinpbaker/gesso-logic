@@ -246,3 +246,72 @@ describe('inserting a chip from a file', () => {
     expect(summary.message).toBe("Couldn't insert bad.json: not a gessologic circuit file");
   });
 });
+
+describe('resetting a chip', () => {
+  it('puts back a chip edited inside, with the chips that hold it marked too, and undoes as one step', async () => {
+    const { CircuitService } = await import('./CircuitService');
+    const service = new CircuitService({ schedule: () => {}, now: () => 0 });
+    let summary!: import('./CircuitContract').DocumentSummary;
+    service.document.subscribe(d => (summary = d));
+    service.load(adderScene());
+    const gates = summary.gates;
+    expect(summary.changedChips).toEqual([]);
+
+    service.openChip('add');
+    service.openChip('fa2');
+    service.place('not', 30, 30, 'spare');
+    // The full adder changed, and so did the adder made of them.
+    expect([...summary.changedChips].sort()).toEqual(['adder 8', 'full adder']);
+
+    // Reset from the outside chip reaches the one inside it.
+    service.resetChip('adder 8');
+    expect(summary.gates).toBe(gates);
+    expect(summary.changedChips).toEqual([]);
+    expect(summary.message).toBe('Reset adder 8 to how it was opened');
+
+    service.undo();
+    expect(summary.gates).toBe(gates + 8);
+    expect(summary.changedChips).toContain('full adder');
+  });
+
+  it('has nothing to put back for a chip unchanged, or one made here', async () => {
+    const { CircuitService } = await import('./CircuitService');
+    const service = new CircuitService({ schedule: () => {}, now: () => 0 });
+    let summary!: import('./CircuitContract').DocumentSummary;
+    let geometry!: import('./CircuitContract').Geometry;
+    service.document.subscribe(d => (summary = d));
+    service.geometry.subscribe(g => (geometry = g));
+    service.load(adderScene());
+    service.resetChip('full adder');
+    expect(summary.canUndo).toBe(false);
+
+    service.place('not', 0, 60, 'n1');
+    service.place('not', 0, 70, 'n2');
+    service.makeChip(['n1', 'n2'], 'pair');
+    service.openChip(entriesOf(geometry.components).find(([, c]) => c.chip === 'pair')![0]);
+    service.place('not', 30, 30, 'n3');
+    expect(summary.changedChips).not.toContain('pair');
+  });
+
+  it('puts a library part back as the library has it, and follows a rename', async () => {
+    const { CircuitService } = await import('./CircuitService');
+    const service = new CircuitService({ schedule: () => {}, now: () => 0 });
+    let summary!: import('./CircuitContract').DocumentSummary;
+    service.document.subscribe(d => (summary = d));
+    service.loadScene('empty');
+    service.place('chip', 0, 0, 'fa', undefined, 'full adder');
+    const gates = summary.gates;
+    expect(summary.changedChips).toEqual([]);
+
+    service.openChip('fa');
+    service.place('not', 30, 30, 'spare');
+    expect(summary.changedChips).toContain('full adder');
+    service.closeChip(0);
+    service.renameChip('full adder', 'adder bit');
+    expect(summary.changedChips).toContain('adder bit');
+
+    service.resetChip('adder bit');
+    expect(summary.gates).toBe(gates);
+    expect(summary.changedChips).toEqual([]);
+  });
+});

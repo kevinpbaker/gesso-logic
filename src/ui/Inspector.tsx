@@ -104,8 +104,12 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
     </row>
   );
 
-  const body = combineLatest([selection, inside]).pipe(
-    map(([s, chip]): UiChild[] => {
+  const changed = circuit.view.document.pipe(
+    map(d => d.changedChips),
+    distinctUntilChanged((a, b) => a.join('\n') === b.join('\n'))
+  );
+  const body = combineLatest([selection, inside, changed]).pipe(
+    map(([s, chip, changedChips]): UiChild[] => {
       if (s.parts === 0 && s.wires === 0) return [];
       const one = s.one;
       const title =
@@ -139,6 +143,10 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
       }
       const actions: UiChild[] = [];
       if (one?.kind === 'chip') actions.push(small('Look inside', act(() => circuit.send.openChip(one.id)), 'open'));
+      if (one?.kind === 'chip' && one.chip !== null && changedChips.includes(one.chip)) {
+        const name = one.chip;
+        actions.push(small('Reset to original', act(() => circuit.send.resetChip(name)), 'reset'));
+      }
       if (s.parts > 0) {
         actions.push(small('Rotate  R', act(() => editor.rotateSelection()), 'rotate'));
         actions.push(small('Duplicate', act(() => editor.duplicate()), 'dup'));

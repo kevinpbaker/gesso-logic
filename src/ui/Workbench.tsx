@@ -244,6 +244,11 @@ export function workbench(ctx: ComponentContext) {
         return editor.rotateSelection();
       case 'makeChip':
         return editor.makeChip();
+      case 'resetChip': {
+        const chip = resetTarget();
+        if (chip !== null) circuit.send.resetChip(chip);
+        return;
+      }
       case 'openChip': {
         const one = canvas.selection().one;
         if (one?.kind === 'chip') circuit.send.openChip(one.id);
@@ -290,6 +295,17 @@ export function workbench(ctx: ComponentContext) {
     }
   }
 
+  /**
+   * The chip Reset would put back: the one selected, or else the one
+   * whose inside is shown — when it has changed since it was opened.
+   */
+  function resetTarget(): string | null {
+    const d = document.value;
+    const one = canvas.selection().one;
+    const chip = one?.kind === 'chip' && one.chip !== null ? one.chip : (d.path.at(-1)?.chip ?? null);
+    return chip !== null && d.changedChips.includes(chip) ? chip : null;
+  }
+
   function enabled(id: CommandId): boolean {
     const d = document.value;
     const s = canvas.selection();
@@ -307,6 +323,8 @@ export function workbench(ctx: ComponentContext) {
       case 'rotate':
       case 'makeChip':
         return s.parts > 0;
+      case 'resetChip':
+        return resetTarget() !== null;
       case 'deselect':
         return s.parts + s.wires > 0;
       case 'openChip':
@@ -510,6 +528,7 @@ export function workbench(ctx: ComponentContext) {
                     )
                   ])}
                   <text text={`Live · edits change every ${d.path.at(-1)!.chip}`} fontSize={11} color="textMuted" marginLeft={6} textWrap="none" selectable={false} />
+                  {d.changedChips.includes(d.path.at(-1)!.chip) ? small('Reset', () => (circuit.send.resetChip(d.path.at(-1)!.chip), canvas.focus()), 'reset') : null}
                 </row>
               ]
         )
