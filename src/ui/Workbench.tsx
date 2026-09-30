@@ -1,8 +1,8 @@
 import { combineLatest, distinctUntilChanged, filter, map, of, startWith, take } from 'rxjs';
 
-import { percent, type UiNode } from 'gesso-core';
+import { darkTheme, lightTheme, percent, type UiNode } from 'gesso-core';
 import { MenuBar, Select } from 'gesso-components';
-import { createComponent, FocusService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
+import { createComponent, FocusService, internalState, OpfsStorage, persisted, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type ClockRate, type SceneName } from '../app/CircuitContract';
 import { isMainThread } from '../canvas/Bench';
@@ -48,6 +48,23 @@ export function workbench(ctx: ComponentContext) {
   const shell = ctx.inject(ShellService);
   const mainThread = isMainThread();
   const tourOpen = internalState(false);
+
+  // Light or dark: the system's until the toggle is used, and then the
+  // choice, remembered in a folder of its own beside the autosave's.
+  // Every colour in the app and on the canvas is a theme token, so the
+  // theme at the root is the whole of it.
+  const appearance = persisted<'system' | 'light' | 'dark'>(new OpfsStorage({ directory: 'gessologic-settings' }), 'appearance', {
+    initial: 'system',
+    revive: raw => (raw === 'system' || raw === 'light' || raw === 'dark' ? raw : null),
+    label: 'appearance'
+  });
+  const scheme = combineLatest([appearance.value, shell.colorScheme]).pipe(
+    map(([chosen, system]) => (chosen === 'system' ? system : chosen)),
+    distinctUntilChanged()
+  );
+  const theme = scheme.pipe(map(value => (value === 'dark' ? darkTheme : lightTheme)));
+  let dark = false;
+  ctx.effect(scheme, value => (dark = value === 'dark'));
 
   // ---------------------------------------------------------------------
   // Dialogs, and the guard in front of everything that replaces the document
@@ -104,10 +121,16 @@ export function workbench(ctx: ComponentContext) {
   // ---------------------------------------------------------------------
 
   let menuBarNode: UiNode | null = null;
-  const keys: CanvasKeys = (key, ctrl) => {
+  const keys: CanvasKeys = (key, ctrl, shift) => {
     if (ctrl) {
       if (key !== 'Enter') return false;
       run('runPause');
+      return true;
+    }
+    // Shift+D, however the key arrives: some keyboards and remote
+    // drivers send `d` with Shift held rather than `D`.
+    if (shift && key.toLowerCase() === 'd') {
+      run('theme');
       return true;
     }
     const bound: Readonly<Record<string, CommandId>> = {
@@ -281,6 +304,9 @@ export function workbench(ctx: ComponentContext) {
       case 'tour':
         tourOpen.value = true;
         return;
+      case 'theme':
+        appearance.set(dark ? 'light' : 'dark');
+        return;
       case 'thread':
         // The same page with `?main` added, or taken away: `main.ts`
         // navigates to it in place, and the autosave brings the circuit
@@ -346,6 +372,7 @@ export function workbench(ctx: ComponentContext) {
     if (rate !== null) return `${status.value.clockHz === rate ? '✓' : '  '}  ${rateLabel(rate)}`;
     if (id === 'runPause') return status.value.running ? 'Pause' : 'Run';
     if (id === 'analyser') return analyserOpen ? 'Hide the logic analyser' : 'Show the logic analyser';
+    if (id === 'theme') return dark ? 'Light mode' : 'Dark mode';
     if (id === 'thread') return mainThread ? 'Run the simulator in its worker again' : 'Run the simulator on the main thread';
     return commandLabel(id);
   }
@@ -486,6 +513,12 @@ export function workbench(ctx: ComponentContext) {
             ? 'The simulator is sharing the page’s thread. Set the clock to “As fast as it goes” and drag the canvas to feel it. Click to put it back in its worker.'
             : 'The simulator runs in a worker of its own, so the page never waits for it. Click to run it on the main thread instead, and feel the difference.',
         onRun: () => run('thread')
+      })}
+      {tool({
+        label: scheme.pipe(map(value => (value === 'dark' ? 'Light mode' : 'Dark mode'))),
+        icon: scheme.pipe(map(value => (value === 'dark' ? ICONS.light : ICONS.dark))),
+        tip: () => `${dark ? 'Light mode' : 'Dark mode'}  ·  Shift+D`,
+        onRun: () => run('theme')
       })}
       {tool({ label: 'Keyboard shortcuts', icon: ICONS.help, tip: tip('shortcuts'), onRun: () => run('shortcuts') })}
     </row>
@@ -756,7 +789,13 @@ export function workbench(ctx: ComponentContext) {
     direction === 'x' ? <box width={percent(100)} height={1} backgroundColor="border" /> : <box width={1} height={percent(100)} backgroundColor="border" />;
 
   return (
-    <column width={percent(100)} height={percent(100)} backgroundColor="background" overscrollBehavior="contain">
+    <column
+      theme={theme}
+      textStyle={theme.pipe(map(value => value.typography.body))}
+      width={percent(100)}
+      height={percent(100)}
+      backgroundColor="background"
+      overscrollBehavior="contain">
       {menuBar}
       {line('x')}
       {toolbar}

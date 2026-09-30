@@ -1634,6 +1634,15 @@ and back again.
   rename carries them to the new name. Checked in Chrome: an AND gate
   deleted inside memory and ports (8,558 gates), Reset, 8,559 and the
   game still playing.
+- **Light and dark.** A sun/moon toggle at the right of the toolbar,
+  View → Dark mode, and Shift+D. It follows the system until it is
+  used, then keeps the choice (a `persisted` value in its own OPFS
+  folder, beside the autosave's). Every colour in the app and on the
+  canvas was already a theme token, so it is Gesso's `lightTheme` or
+  `darkTheme` at the root and nothing else; the canvas's cached tiles
+  repaint on the switch, mid-game. Checked in Chrome: the toolbar,
+  palette, analyser, shortcuts dialog and Pong in both, and a light
+  choice surviving a reload over a dark system.
 - **`pnpm proof` passes**, unchanged: `/proof` still measures the
   10,000-gate bench, and its instrument has a Pong button beside it.
 
