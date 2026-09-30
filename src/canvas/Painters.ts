@@ -363,8 +363,17 @@ function drawDisplays(
         const width = scene.turns[c]! % 2 === 1 ? scene.height(c) : scene.width(c);
         surface.text(text, x + 0.4 + (width - 0.4) / 2, y + 4.3, digitStyle);
       } else {
-        const width = scene.turns[c]! % 2 === 1 ? scene.height(c) : scene.width(c);
-        surface.text(text, x + width / 2, y + 1.4, valueStyle);
+        const turnedWidth = scene.turns[c]! % 2 === 1 ? scene.height(c) : scene.width(c);
+        const turnedHeight = scene.turns[c]! % 2 === 1 ? scene.width(c) : scene.height(c);
+        // A wide value fits its box: past four digits it takes two rows,
+        // and the type shrinks until a row fits. A 32-bit bus is eight
+        // digits, and at the size of two they ran out of the box.
+        const rows = valueRows(text);
+        const fontSize = Math.min(valueStyle.fontSize, (turnedWidth - 0.4) / (Math.max(...rows.map(r => r.length)) * MONO_ADVANCE), (turnedHeight - 0.3) / (rows.length * 1.1));
+        rows.forEach((row, i) => {
+          const middle = turnedHeight / 2 + (i - (rows.length - 1) / 2) * fontSize * 1.1;
+          surface.text(row, x + turnedWidth / 2, y + middle + 0.36 * fontSize, { ...valueStyle, fontSize });
+        });
       }
     });
   }
@@ -409,6 +418,16 @@ export function busValue(bits: Int32Array, chunks: Readonly<Record<string, strin
 export function busHex(value: number | null, width: number): string {
   const digits = Math.max(1, Math.ceil(width / 4));
   return value === null ? '?'.repeat(digits) : value.toString(16).toUpperCase().padStart(digits, '0');
+}
+
+/** A monospace digit's width, in ems. */
+const MONO_ADVANCE = 0.62;
+
+/** A value's digits as the rows a part's face shows them in: one row up to four, else two, the high half on top. */
+export function valueRows(text: string): string[] {
+  if (text.length <= 4) return [text];
+  const split = text.length - Math.ceil(text.length / 2);
+  return [text.slice(0, split), text.slice(split)];
 }
 
 /**
