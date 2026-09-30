@@ -124,6 +124,20 @@ describe('the program editor', () => {
     expect(service['simulator']!.cycles).toBe(10);
   });
 
+  it('says which line each address came from, and where the ROM is reading', () => {
+    const { service, program } = bench([0x1001, 0x7000], '; one\nstart: LDA #1\n\n        JMP start\n');
+    service.openProgram('rom');
+    expect(program().lines.slice(0, 3)).toEqual([2, 4, 0]);
+    expect(program().pc).toBe(0);
+    // The ROM's address is a switch here; on the computer it's the program counter.
+    service.setInput('A', 1);
+    expect(program().pc).toBe(1);
+    service.setProgram('rom', 'NOP\nNOP\nHLT\n');
+    expect(program().lines.slice(0, 3)).toEqual([1, 2, 3]);
+    // Loading is a power cycle: the switch comes back at 0, and the ROM reads there.
+    expect(program().pc).toBe(0);
+  });
+
   it('closes when its ROM goes', () => {
     const { service, program } = bench([0x1001], 'LDA #1\n');
     service.openProgram('rom');

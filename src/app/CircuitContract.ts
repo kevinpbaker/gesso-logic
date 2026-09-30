@@ -244,6 +244,14 @@ export interface ProgramView {
   /** Why the last `setProgram` didn't assemble, each with its line; empty when it did, or none was tried. */
   readonly problems: readonly { readonly line: number; readonly message: string }[];
   readonly serial: number;
+  /** The line of `source` each ROM address was assembled from, 1-based, by address; 0 where none was. */
+  readonly lines: readonly number[];
+  /**
+   * The address on the ROM's instruction port — for a CPU, its program
+   * counter: the next instruction it fetches. -1 when nothing runs.
+   * Kept up to date at the rate signals are, while the editor is open.
+   */
+  readonly pc: number;
 }
 
 export interface CircuitCommands {
@@ -369,7 +377,7 @@ export const EMPTY_SUMMARY: DocumentSummary = {
 };
 export const NO_SAVE: SaveRequest = { serial: 0, name: '', text: '', handle: null };
 export const NO_CLIP: ClipRequest = { serial: 0, text: '' };
-export const NO_PROGRAM: ProgramView = { id: '', label: '', source: '', note: null, words: 0, problems: [], serial: 0 };
+export const NO_PROGRAM: ProgramView = { id: '', label: '', source: '', note: null, words: 0, problems: [], serial: 0, lines: [], pc: -1 };
 export const CLOSED_ANALYSER: AnalyserView = {
   open: false,
   traces: [],

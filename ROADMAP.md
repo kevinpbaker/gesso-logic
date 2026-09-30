@@ -1775,9 +1775,25 @@ program in the repository exactly, since an editable draws its runs
 only when they do. Checked in Chrome on Pong, in light and dark, with
 typing recoloured as it goes.
 
-Still later: the line being executed highlighted as it runs (the
-assembler's `lineOf` has the map); a gutter of line numbers and
-addresses; loading one of the example programs into the dialog.
+**Since: the line at the program counter.** The address on a ROM's
+`A` pins is the next instruction the CPU fetches. For any ROM, the
+service reads it at the rate signals are published while the dialog
+is open, and publishes it as the program view's `pc`, with `lines`, the
+source line of each address from the assembler's `lineOf`. The dialog
+gives that line a background, and the line under the field says
+"The program counter is at 0x2A, line 87." The mark shows only while
+the field holds the program the ROM runs; while there are edits, the
+lines wouldn't match. Checked in Chrome: at power-on the counter reads
+0xFF, past Pong's last word, and nothing is marked. Four steps later
+`STA SR` at 0x02 is. Running at 15 kHz, the mark moves around the
+frame loop and the game holds its rate.
+
+The dialog doesn't scroll to the marked line: an editable scrolls to
+its caret and not to a line it's told to. That would take an engine
+change, or moving the caret, which would be worse.
+
+Still later: a gutter of line numbers and addresses; loading one of
+the example programs into the dialog.
 
 ---
 

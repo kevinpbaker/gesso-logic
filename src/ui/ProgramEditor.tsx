@@ -1,11 +1,11 @@
-import { combineLatest, distinctUntilChanged, map } from 'rxjs';
+import { combineLatest, distinctUntilChanged, map, type Observable } from 'rxjs';
 
 import type { UiChild, UiKeyboardEvent, UiTextChangeEvent, UiTextSpan, UiThemeColorName } from 'gesso-core';
 import { Dialog } from 'gesso-components';
 import { internalState, type ComponentContext } from 'gesso-framework';
 
-import { Circuit, type ProgramView } from '../app/CircuitContract';
-import { highlight, type TokenKind } from '../cpu/Highlight';
+import { Circuit, NO_PROGRAM, type ProgramView } from '../app/CircuitContract';
+import { highlight, type Token, type TokenKind } from '../cpu/Highlight';
 import { action } from './controls';
 import { MOD } from './Commands';
 
@@ -35,8 +35,47 @@ const TOKEN_COLORS: Readonly<Record<TokenKind, UiThemeColorName>> = {
   register: 'controlAccent'
 };
 
-function spansOf(source: string): UiTextSpan[] {
-  return highlight(source).map(t => ({ text: t.text, color: TOKEN_COLORS[t.kind] }));
+/** The last source highlighted, and its runs: the program counter moves far more often than the text does. */
+let cached: { source: string; tokens: Token[] } = { source: '', tokens: [] };
+function tokensOf(source: string): Token[] {
+  if (cached.source !== source) cached = { source, tokens: highlight(source) };
+  return cached.tokens;
+}
+
+/** Behind the line the program counter is at. */
+const PC_BACKGROUND: UiThemeColorName = 'selectionBackground';
+
+/**
+ * The source in coloured runs, with line `marked` (1-based; 0 for none)
+ * given a background. Runs that cross into or out of that line are cut
+ * at its edges, so only its own text is marked, not the newline.
+ */
+export function spansOf(source: string, marked: number): UiTextSpan[] {
+  const tokens = tokensOf(source);
+  let start = marked > 0 ? 0 : -1;
+  for (let line = 1; line < marked && start >= 0; line++) {
+    const newline = source.indexOf('\n', start);
+    start = newline < 0 ? -1 : newline + 1;
+  }
+  if (start < 0) return tokens.map(t => ({ text: t.text, color: TOKEN_COLORS[t.kind] }));
+  const newline = source.indexOf('\n', start);
+  const end = newline < 0 ? source.length : newline;
+  const spans: UiTextSpan[] = [];
+  let at = 0;
+  for (const t of tokens) {
+    const color = TOKEN_COLORS[t.kind];
+    const from = at;
+    const to = at + t.text.length;
+    at = to;
+    // The pieces of this run before, inside and after the marked line.
+    const cuts = [from, Math.min(Math.max(start, from), to), Math.min(Math.max(end, from), to), to];
+    for (let i = 0; i < 3; i++) {
+      if (cuts[i + 1]! <= cuts[i]!) continue;
+      const text = t.text.slice(cuts[i]! - from, cuts[i + 1]! - from);
+      spans.push(i === 1 ? { text, color, backgroundColor: PC_BACKGROUND } : { text, color });
+    }
+  }
+  return spans;
 }
 
 export function programEditor(ctx: ComponentContext, onClosed: () => void): UiChild {
@@ -48,7 +87,7 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
   /** Asking whether to throw edits away, after a close with edits not loaded. */
   const confirming = internalState(false);
 
-  let view: ProgramView = { id: '', label: '', source: '', note: null, words: 0, problems: [], serial: 0 };
+  let view: ProgramView = NO_PROGRAM;
   ctx.effect(program, p => {
     const opened = p.id !== '' && p.id !== view.id;
     view = p;
@@ -84,9 +123,20 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
         return { tone: 'danger', lines: [`${count} problem${count === 1 ? '' : 's'}, so nothing was loaded:`, ...shown] };
       }
       if (t !== l) return { tone: 'text', lines: [`Edited, not loaded yet. ${MOD}+Enter assembles and loads it, and restarts the computer.`] };
-      return { tone: 'textMuted', lines: [`${p.words} of ${ROM_WORDS} words, loaded.${p.note === null ? '' : ` ${p.note}`}`] };
+      const line = p.pc >= 0 ? (p.lines[p.pc] ?? 0) : 0;
+      const at = p.pc < 0 ? '' : ` The program counter is at 0x${p.pc.toString(16).toUpperCase().padStart(2, '0')}${line > 0 ? `, line ${line}` : ''}.`;
+      return { tone: 'textMuted', lines: [`${p.words} of ${ROM_WORDS} words, loaded.${at}${p.note === null ? '' : ` ${p.note}`}`] };
     }),
     distinctUntilChanged((a, b) => a.tone === b.tone && a.lines.join('\n') === b.lines.join('\n'))
+  );
+
+  /** The line the program counter is at, while the field holds the program the ROM runs; 0 otherwise. */
+  const marked: Observable<number> = combineLatest([text, loaded, program]).pipe(
+    map(([t, l, p]) => (t === l && p.pc >= 0 ? (p.lines[p.pc] ?? 0) : 0))
+  );
+  const spans = combineLatest([text, marked.pipe(distinctUntilChanged())]).pipe(
+    distinctUntilChanged(([a, m], [b, n]) => a === b && m === n),
+    map(([t, m]) => spansOf(t, m))
   );
 
   const content = (
@@ -96,7 +146,7 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
           whenever it takes focus, so a click far down jumped back up. */}
       <editabletext
         value={text as never}
-        spans={text.pipe(map(spansOf))}
+        spans={spans}
         multiline={true}
         width={INNER}
         height={420}

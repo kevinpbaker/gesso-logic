@@ -682,7 +682,17 @@ export class CircuitService {
         note = "This ROM's program doesn't assemble to its words, so this is a listing of the words.";
       }
     }
-    this.programSubject.next({ id, label: rom.label ?? id, source, note, words: sizeOf(words), problems: [], serial: ++this.programSerial });
+    this.programSubject.next({
+      id,
+      label: rom.label ?? id,
+      source,
+      note,
+      words: sizeOf(words),
+      problems: [],
+      serial: ++this.programSerial,
+      lines: linesOf(source),
+      pc: this.programCounter(id)
+    });
   }
 
   setProgram(id: string, source: string): void {
@@ -702,8 +712,41 @@ export class CircuitService {
     const label = rom.label ?? id;
     this.message =
       this.revision === revision ? `${label} already holds that program` : `Loaded ${words.length} word${words.length === 1 ? '' : 's'} into ${label}, and restarted`;
-    this.programSubject.next({ id, label, source, note: null, words: words.length, problems: [], serial: ++this.programSerial });
+    this.programSubject.next({
+      id,
+      label,
+      source,
+      note: null,
+      words: words.length,
+      problems: [],
+      serial: ++this.programSerial,
+      lines: linesOf(source),
+      pc: this.programCounter(id)
+    });
     this.documentSubject.next(this.summary());
+  }
+
+  /** The address on a ROM's `A` pins, or -1 while nothing runs. */
+  private programCounter(id: string): number {
+    const simulator = this.simulator;
+    const netlist = this.netlist;
+    if (simulator === null || netlist === null) return -1;
+    const full = this.level().prefix + id;
+    let address = 0;
+    for (let bit = 0; bit < 8; bit++) {
+      const net = netlist.netOfPin(full, `A[${bit}]`);
+      if (net === undefined) return -1;
+      address |= simulator.value[net]! << bit;
+    }
+    return address;
+  }
+
+  /** Moves the open editor's program counter on, when it has moved. */
+  private followProgram(): void {
+    const view = this.programSubject.value;
+    if (view.id === '') return;
+    const pc = this.programCounter(view.id);
+    if (pc !== view.pc) this.programSubject.next({ ...view, pc });
   }
 
   /** A ROM on the level on the canvas, by id. */
@@ -1042,6 +1085,7 @@ export class CircuitService {
     this.lastPublishAt = at;
     this.signalsSubject.next(this.signalsNow());
     this.statusSubject.next(this.statusNow());
+    this.followProgram();
     if (this.analyserAsk.columns > 0) {
       this.analyserSubject.next(this.analyserNow());
     }
@@ -1560,6 +1604,17 @@ function assemblesTo(source: string, words: readonly number[]): boolean {
     return rom.every((w, i) => w === (words[i] ?? 0));
   } catch (error) {
     if (error instanceof AssemblyError) return false;
+    throw error;
+  }
+}
+
+/** The line each ROM address came from, 1-based, 0 for none; empty for a program that doesn't assemble. */
+function linesOf(source: string): number[] {
+  try {
+    const { lineOf } = assemble(source);
+    return Array.from({ length: 256 }, (_, address) => lineOf.get(address) ?? 0);
+  } catch (error) {
+    if (error instanceof AssemblyError) return [];
     throw error;
   }
 }
