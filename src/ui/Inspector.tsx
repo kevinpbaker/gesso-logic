@@ -4,6 +4,7 @@ import { percent, type UiChild } from 'gesso-core';
 import { each, internalState, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type TableView } from '../app/CircuitContract';
+import { headings } from '../app/TruthTable';
 import { WIDENABLE } from '../app/DocumentEdits';
 import type { CanvasHandle, SelectionSummary } from '../canvas/CircuitCanvas';
 import type { Kind } from '../sim/Primitives';
@@ -46,6 +47,9 @@ const KIND_NAMES: Readonly<Record<Kind, string>> = {
 export function kindName(kind: Kind): string {
   return KIND_NAMES[kind] ?? kind;
 }
+
+/** The selection card's width, and the narrowest the truth table under it is. */
+const CARD_WIDTH = 292;
 
 const same = (a: SelectionSummary, b: SelectionSummary) =>
   a.parts === b.parts &&
@@ -168,13 +172,13 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
   );
 
   return (
-    <column position="absolute" right={12} top={12} width={292} gap={10} hitTestable={false} maxHeight={percent(90)}>
+    <column position="absolute" right={12} top={12} gap={10} x="end" hitTestable={false} maxHeight={percent(90)}>
       {body.pipe(
         map(rows =>
           rows.length === 0
             ? []
             : [
-                <column key="card" gap={8} padding={12} borderRadius={8} backgroundColor="surface" borderColor="border" borderWidth={1} opacity={0.98}>
+                <column key="card" width={CARD_WIDTH} gap={8} padding={12} borderRadius={8} backgroundColor="surface" borderColor="border" borderWidth={1} opacity={0.98}>
                   {rows}
                 </column>
               ]
@@ -187,39 +191,59 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
 
 /**
  * The truth table of the selection: a header naming inputs and outputs,
- * then a row per combination, in monospace so the columns line up.
+ * then a row per combination, in monospace so the columns line up, and
+ * under them the key to any name too long to head its column.
+ *
+ * The panel is as wide as the table, from the card's width up to
+ * TABLE_MAX_WIDTH, and scrolls sideways past that. The width is worked
+ * out from the longest line, a monospace character being CHAR_WIDTH
+ * pixels at 12px, since a flex column stretches to its limit rather
+ * than hugging text that does not wrap.
  */
+const TABLE_MAX_WIDTH = 560;
+const CHAR_WIDTH = 7.25;
+/** Padding and border, both sides. */
+const TABLE_CHROME = 26;
+
 function truthTable(table: Observable<TableView>, close: () => void): Observable<UiChild[]> {
-  const width = (names: readonly string[]) => names.map(n => n.length);
   const lines = table.pipe(
     map(t => {
       if (t.ids.length === 0) return [];
       if (t.error !== null) return [{ key: 'error', text: t.error, head: false }];
-      const inWidths = width(t.inputs);
-      const outWidths = width(t.outputs);
+      const named = headings(t.inputs, t.outputs);
+      const inWidths = named.inputs.map(n => n.length);
+      const outWidths = named.outputs.map(n => n.length);
       const cell = (value: string, w: number) => value.padStart(Math.ceil(w / 2)).padEnd(w);
-      const header = `${t.inputs.join(' ')} │ ${t.outputs.join(' ')}`;
+      const header = `${named.inputs.join(' ')} │ ${named.outputs.join(' ')}`;
       const rows = t.rows.map((outputs, n) => {
         const bits = t.inputs.map((_, i) => String((n >> (t.inputs.length - 1 - i)) & 1));
         const text = `${bits.map((b, i) => cell(b, inWidths[i]!)).join(' ')} │ ${[...outputs].map((o, i) => cell(o, outWidths[i]!)).join(' ')}`;
         return { key: `r${n}`, text, head: false };
       });
-      return [{ key: 'head', text: header, head: true }, ...rows];
+      const key = named.key.map(([letter, name]) => ({ key: `k${letter}`, text: `${letter} = ${name}`, head: false }));
+      return [{ key: 'head', text: header, head: true }, ...rows, ...(key.length === 0 ? [] : [{ key: 'gap', text: ' ', head: false }]), ...key];
     })
   );
   const open = table.pipe(
     map(t => t.ids.length > 0),
     distinctUntilChanged()
   );
+  // The table's own width, which the column in the scroll view keeps, so
+  // that past TABLE_MAX_WIDTH it overflows the view and scrolls.
+  const tableWidth = lines.pipe(
+    map(ls => Math.ceil(Math.max(0, ...ls.map(l => l.text.length)) * CHAR_WIDTH)),
+    distinctUntilChanged()
+  );
+  const panelWidth = tableWidth.pipe(map(w => Math.min(TABLE_MAX_WIDTH, Math.max(CARD_WIDTH, w + TABLE_CHROME))));
   const panel = () => (
-    <column key="table" gap={2} padding={12} borderRadius={8} backgroundColor="surface" borderColor="border" borderWidth={1} opacity={0.98} minHeight={0} flexShrink={1}>
+    <column key="table" width={panelWidth} gap={2} padding={12} borderRadius={8} backgroundColor="surface" borderColor="border" borderWidth={1} opacity={0.98} minHeight={0} flexShrink={1}>
       <row gap={10} y="center" marginBottom={4}>
         {heading(table.pipe(map(t => `TRUTH TABLE · ${t.ids.length} PART${t.ids.length === 1 ? '' : 'S'}`)))}
         <box flex={1} />
         {small('Close', close)}
       </row>
       <scrollview minHeight={0} flexShrink={1} overscrollBehavior="contain">
-        <column gap={2}>
+        <column gap={2} minWidth={tableWidth}>
           {each(lines, 'key', line => (
             <text text={line.text} fontSize={12} fontFamily="monospace" fontWeight={line.head ? 600 : 400} color={line.head ? 'text' : 'textMuted'} textWrap="none" />
           ))}

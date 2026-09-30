@@ -90,7 +90,7 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
       const nets = netsOf(g, pin);
       const driven = nets.map(net => driver.get(net));
       if (driven.every(d => d === undefined)) {
-        const group = groupOf(nets, nets.map(net => netlist.netNames[net] ?? `net ${net}`));
+        const group = groupOf(nets, nets.map(net => shortName(netlist.netNames[net] ?? `net ${net}`)));
         sources.set(`${g.id}.${pin}`, { component: group.id, pin: 'out' });
         continue;
       }
@@ -195,9 +195,43 @@ export function truthTable(circuit: Circuit, ids: readonly string[]): TruthTable
       inputs: inputNames,
       outputs: outputNets.map(net => {
         const d = driver.get(net);
-        return shownAs.get(net) ?? (d !== undefined ? `${d.component}.${bitOf(d)}` : (netlist.netNames[net] ?? `net ${net}`));
+        return shownAs.get(net) ?? shortName(d !== undefined ? `${d.component}.${bitOf(d)}` : (netlist.netNames[net] ?? `net ${net}`));
       }),
       rows
     }
+  };
+}
+
+/** A pin's name without `.out`, which nearly every output pin is called: `nand2.out` is `nand2`, `x.out[3]` is `x[3]`. */
+function shortName(name: string): string {
+  return name.replace(/\.out(?=\[|$)/, '');
+}
+
+/** The longest name a column is headed by; a longer one is a letter, spelled out in the key. */
+export const MAX_HEADING = 8;
+
+export interface Headings {
+  readonly inputs: readonly string[];
+  readonly outputs: readonly string[];
+  /** The letters standing for long names, and the names, in column order. */
+  readonly key: readonly (readonly [letter: string, name: string])[];
+}
+
+/**
+ * Headings short enough to keep a table narrow. When every name is at
+ * most MAX_HEADING characters the columns are headed by them; when any
+ * is longer, like `q0.master.sBar`, every column is a letter, A, B,
+ * C… in order, inputs then outputs, and the key under the table says
+ * what each stands for. All or none: a table headed `cin A │ B` reads
+ * as though A and B were the inputs.
+ */
+export function headings(inputs: readonly string[], outputs: readonly string[]): Headings {
+  const names = [...inputs, ...outputs];
+  if (names.every(n => n.length <= MAX_HEADING)) return { inputs, outputs, key: [] };
+  const letter = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : `#${i + 1}`);
+  return {
+    inputs: inputs.map((_, i) => letter(i)),
+    outputs: outputs.map((_, i) => letter(inputs.length + i)),
+    key: names.map((name, i) => [letter(i), name] as const)
   };
 }

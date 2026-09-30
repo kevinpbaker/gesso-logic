@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CircuitBuilder } from '../sim/CircuitBuilder';
 import { fullAdder, srLatch } from '../sim/Parts';
-import { truthTable } from './TruthTable';
+import { headings, truthTable } from './TruthTable';
 
 describe('the truth table', () => {
   it('sweeps a full adder, first input most significant', () => {
@@ -35,7 +35,7 @@ describe('the truth table', () => {
 
     const result = truthTable(circuit, [gate]);
     if (!('table' in result)) throw new Error(result.error);
-    expect(result.table.inputs).toEqual(['x.out', 'y.out']);
+    expect(result.table.inputs).toEqual(['x', 'y']);
     expect(result.table.rows).toEqual(['0', '1', '1', '0']);
   });
 
@@ -75,7 +75,7 @@ describe('the truth table of a chip', () => {
 
     const result = truthTable(circuit, ['fa']);
     if (!('table' in result)) throw new Error(result.error);
-    expect(result.table.inputs.map(name => name.replace('.out', ''))).toEqual(['a', 'b', 'cin']);
+    expect(result.table.inputs).toEqual(['a', 'b', 'cin']);
     expect(result.table.outputs).toEqual(['s', 'c']);
     expect(result.table.rows).toEqual(['00', '10', '10', '01', '10', '01', '01', '11']);
   });
@@ -111,5 +111,23 @@ describe('the truth table of a bus', () => {
     expect(result.table.rows[0b1111]).toBe('11');
     expect(result.table.rows[0b1010]).toBe('10');
     expect(result.table.rows[0b0101]).toBe('01');
+  });
+});
+
+describe('the headings of a truth table', () => {
+  it('keeps names that are all short', () => {
+    expect(headings(['a', 'b', 'cin'], ['s', 'c'])).toEqual({ inputs: ['a', 'b', 'cin'], outputs: ['s', 'c'], key: [] });
+  });
+
+  it('letters every column, in order, when any name is long', () => {
+    expect(headings(['CIN.next', 'q0.clockBar'], ['q0.master.sBar'])).toEqual({
+      inputs: ['A', 'B'],
+      outputs: ['C'],
+      key: [
+        ['A', 'CIN.next'],
+        ['B', 'q0.clockBar'],
+        ['C', 'q0.master.sBar']
+      ]
+    });
   });
 });
