@@ -35,11 +35,12 @@ export interface Game extends Program {
 }
 
 /**
- * The clock each game is played at, by file name. Pong at 15 kHz: at
+ * The clock each game is played at, by file name. Pong at 20 kHz: at
  * 30 kHz, what it was first written for, the ball crossed the screen in
- * about a second, which was too quick to enjoy.
+ * about a second, which was too quick to enjoy, and 15 kHz, where it
+ * went next, was a touch too slow.
  */
-const GAME_RATES: Readonly<Record<string, number>> = { 'pong.asm': 15_000 };
+const GAME_RATES: Readonly<Record<string, number>> = { 'pong.asm': 20_000 };
 
 export const GAMES: readonly Game[] = Object.entries(GAME_SOURCES)
   .map(([path, source]) => {

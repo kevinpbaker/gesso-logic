@@ -44,7 +44,7 @@ for (const file of readdirSync(programs).filter(f => f.endsWith('.asm'))) {
   }
   console.log(
     `pong.asm: a game to ${scores.join('–')}, ${lockstep.instructions.toLocaleString('en')} instructions ` +
-      `(${(lockstep.emulator.cycles / 15_000).toFixed(0)} s of play at 15 kHz) in ${((performance.now() - began) / 1000).toFixed(0)} s, no divergence`
+      `(${(lockstep.emulator.cycles / 20_000).toFixed(0)} s of play at 20 kHz) in ${((performance.now() - began) / 1000).toFixed(0)} s, no divergence`
   );
 }
 
