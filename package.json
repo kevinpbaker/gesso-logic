@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "gesso-components": "file:vendor/gesso-components-0.4.1-0d5a0e30.tgz",
-    "gesso-core": "file:vendor/gesso-core-0.4.1-761e3e75.tgz",
+    "gesso-core": "file:vendor/gesso-core-0.4.1-7de7a805.tgz",
     "gesso-framework": "file:vendor/gesso-framework-0.4.1-5c12eb5a.tgz",
     "rxjs": "^7.8.2"
   },
