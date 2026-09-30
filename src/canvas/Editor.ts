@@ -44,6 +44,7 @@ export interface EditorDeps {
     | 'tabulate'
     | 'makeChip'
     | 'openChip'
+    | 'openProgram'
     | 'copy'
     | 'duplicate'
   >;
@@ -836,7 +837,7 @@ export class Editor {
     return true;
   }
 
-  /** A click on a component: a switch toggles, a chip clicked twice opens, anything else is selected. */
+  /** A click on a component: a switch toggles, a chip clicked twice opens, a ROM clicked twice opens its program, anything else is selected. */
   private clickComponent(id: string, additive: boolean): void {
     const scene = this.deps.scene();
     const c = scene.indexOf.get(id);
@@ -847,6 +848,11 @@ export class Editor {
       this.lastClick = null;
       this.selection.clear();
       this.deps.send.openChip(id);
+      return;
+    }
+    if (twice && c !== undefined && scene.kindOf(c) === 'rom' && !additive) {
+      this.lastClick = null;
+      this.deps.send.openProgram(id);
       return;
     }
     if (c !== undefined && scene.kindOf(c) === 'input' && !additive && this.selection.has(id)) {

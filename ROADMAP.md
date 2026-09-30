@@ -1654,6 +1654,114 @@ not yet. Link it from Gesso's README beside the spreadsheet.
 
 **Exit:** the url is public and `pnpm proof` gates the deploy.
 
+# Part five — programs you can change
+
+## Phase 23 — Program the ROM
+
+Select a ROM and press **Edit program**. A dialog opens on the program's
+source. Edit it and press **Assemble & load**. It either says what's
+wrong, line by line, or puts the new words in the ROM and restarts the
+computer on them, as if the power had been cycled. The ROM stops being
+a black box the showpiece asks you to trust: change a line of Pong,
+press the button, and play the difference on the gates.
+
+**Exit:** on the showpiece, someone opens the ROM, changes `WIN = 0x11`
+to `WIN = 0x03` in Pong, assembles, and plays a game that ends at 3.
+Undo puts the old program back. A reload keeps the new one. A typo
+names its line and leaves the running game alone.
+
+What the code says today, which shapes the steps:
+
+- **The source is thrown away.** A ROM component holds only `rom`, its
+  words (`Circuit.ts`). `computerScene` assembles and keeps nothing
+  else, so the comments and labels are gone once the document exists.
+- **Words don't round-trip.** `disassemble` writes `.word` for a word
+  that is no instruction, and the assembler has no `.word`. An HLT with
+  an operand, or a table byte that happens to decode, comes back as a
+  different word.
+- **A ROM edit would not recompile.** `sameConnectivity` compares
+  component ids, kinds, values and chips, not `rom`. A new program
+  would be taken for a move, and the old words would keep running.
+- **Commands return nothing.** Errors come back the way the truth table
+  and saves do, as a view key.
+
+### Steps
+
+1. **`.word` and a listing.** Add `.word value` to the assembler: a
+   whole 16-bit word, for data or a hand-made instruction. Add
+   `listing(words)`: source for any ROM image, one line an address,
+   disassembled where that assembles back to the same word and
+   `.word 0x…` where it doesn't. It is what the dialog shows for a ROM
+   with no source (a file from before this phase, or a ROM placed from
+   the palette). Spec: every one of the 65,536 words round-trips.
+2. **The ROM keeps its source.** `Component.source?: string`, next to
+   `rom`. It is read, written and checked in `CircuitFile.ts`, and only
+   a ROM has one. `CircuitBuilder.rom` takes it, and `computerScene`
+   passes it when it was given source, so Pong opens with its comments.
+3. **A ROM edit recompiles.** `sameConnectivity` compares `rom`. Spec:
+   a service whose ROM is edited mid-run reads the new words.
+4. **`setProgram(id, source)`**, an edit on the level on the canvas
+   (`DocumentEdits.setProgram`, through `editLevel`, so it works inside
+   a chip). It assembles and, when that works, replaces `rom` and
+   `source` as one undoable edit, then restarts the simulator from
+   power-on rather than adopting its state: an old program counter in a
+   new program is nonsense. When it doesn't assemble, nothing changes.
+5. **The `program` view key.** `openProgram(id)` publishes
+   `{ id, label, source, problems, words, serial }` for the dialog, and
+   `''` closes it. `setProgram` publishes its result there: the
+   problems, each with a line, or none and the word count. `serial`
+   moves on each attempt, so the same error twice is two answers.
+6. **The dialog** (`src/ui/ProgramEditor.tsx`), in the style of
+   `Dialogs.tsx`: a monospaced multiline field, **Assemble & load**
+   (Ctrl+Enter), **Close** (Esc). A line under the field says
+   "142 of 256 words" or lists the problems. Opened from an
+   **Edit program** button in the Inspector when a ROM is selected, and
+   by double-clicking a ROM on the canvas. An unsaved edit in the dialog
+   asks before it is closed.
+7. **Checked in Chrome** against the exit above, with the game running
+   at 15 kHz: the editor types without a dropped frame, a game ends at
+   3, undo brings back 11, a reload keeps whichever is loaded.
+
+**Progress, 2026-09-29.** Steps 1 to 6 are built and specced
+(`Assembler.spec`, `Rom.spec`, `Program.spec`). Step 7 is checked in
+Chrome, except that nobody has played a game through to 3 yet:
+
+- Double-clicking Pong's ROM, or pressing **Edit program**, opened its
+  source with its comments, the game running behind it at 14,9xx Hz.
+- `WIN = 0x03`, then Ctrl+Enter: "Loaded 223 words into rom, and
+  restarted", the cycle count back to 0.
+- A reload kept `0x03`. Loading `0x11` and then pressing Ctrl+Z brought
+  back `0x03`, and restarted the computer again.
+- A `FROB 1` line said "Line 270: 'FROB' is not an instruction." The
+  game ran on, not restarted.
+- Closing with edits not loaded asked first. Discarding closed the
+  dialog.
+
+Found on the way:
+
+- **A restart mid-run raced.** At a set clock rate the pacing counted
+  from the old program's cycle count, so after a load the computer ran
+  flat out (51–59 kHz, asked for 15) until it caught up. `apply` now
+  restarts the pacing when it restarts the simulator.
+- **The field isn't in a scroll view.** One there was scrolled back to
+  its top whenever it took focus, so a click far down in the program
+  jumped to line 1. An `editabletext` with a fixed height scrolls its
+  own text to the caret, which works. At first it had no scrollbar and
+  the mouse wheel didn't scroll it. Gesso `d27e076` added both, and in
+  Chrome the wheel now scrolls Pong's source, with a scrollbar that
+  fades when idle. Gesso couldn't reproduce the jump in a scroll view.
+  It is a spec there now, and we don't need the scroll view anyway.
+- **The title says only which ROM it is.** An "(edited)" suffix on it
+  seemed to stick or vanish at the wrong times. Gesso couldn't
+  reproduce that either, and it has a spec for it now. The line under
+  the field already says whether there are edits to load, so the
+  suffix stays out.
+
+Later, not in this phase: syntax colouring through the field's
+`spans`; the line being executed highlighted as it runs (the
+assembler's `lineOf` has the map); a gutter of line numbers and
+addresses; loading one of the example programs into the dialog.
+
 ---
 
 ## Engine changes
@@ -1672,6 +1780,7 @@ shipped in.
 | 7     | A picture settles for four frames before it's rasterised, so a layer that changes on most frames is never rasterised (`PaintPictureCache.draw`, `SETTLE_FRAMES`). Found by the proof's freeze: the wasted canvases stalled the render worker in software compositing | gesso `00e2efd` |
 | 7     | A scroll layer is built only after a container has scrolled quietly for three frames running, so a virtualised list that mounts rows as it scrolls never builds one (`ScrollLayerCache.wants`). Fixes 62ef127, which tripled gessosheet's scroll cost in software rendering | gesso `4bce853` |
 | 7     | `proofPanel` in `gesso-devtools`: the main-thread proof strip, merged from gessosheet's and this project's copies | gesso `1344d95` |
+| 23    | The wheel scrolls a multiline or wide `editabletext` that overflows, and a multiline one draws the overlay scrollbar a scroll view has (`scrollRange`, `scrollsText`) | gesso `d27e076` |
 
 ---
 

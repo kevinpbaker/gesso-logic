@@ -66,7 +66,8 @@ export function writeCircuit(circuit: Circuit): string {
       ...(c.width !== undefined ? { width: c.width } : {}),
       ...(c.rate !== undefined ? { rate: c.rate } : {}),
       ...(c.chip !== undefined ? { chip: c.chip } : {}),
-      ...(c.rom !== undefined ? { rom: c.rom } : {})
+      ...(c.rom !== undefined ? { rom: c.rom } : {}),
+      ...(c.source !== undefined ? { source: c.source } : {})
     });
   const wire = (w: Wire) =>
     JSON.stringify({
@@ -193,6 +194,11 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
         throw new CircuitFileError(`${here}.rom: not a list of at most ${ROM_WORDS} words from 0 to 0xFFFF`);
       }
     }
+    const source = raw['source'];
+    if (source !== undefined) {
+      if (kind !== 'rom') throw new CircuitFileError(`${here}.source: a ${kind} has no program`);
+      if (typeof source !== 'string') throw new CircuitFileError(`${here}.source: not text`);
+    }
     kinds.set(id, kind as Kind);
     components.push({
       id,
@@ -205,7 +211,8 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
       ...(width !== undefined ? { width } : {}),
       ...(rate !== undefined ? { rate } : {}),
       ...(kind === 'chip' ? { chip: chip as string } : {}),
-      ...(rom !== undefined ? { rom: rom as number[] } : {})
+      ...(rom !== undefined ? { rom: rom as number[] } : {}),
+      ...(source !== undefined ? { source } : {})
     });
   }
 

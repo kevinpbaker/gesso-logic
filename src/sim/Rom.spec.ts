@@ -42,4 +42,14 @@ describe('the ROM', () => {
     const bad = writeCircuit(circuit).replace('"rom":[1,2,3]', '"rom":[1,2,70000]');
     expect(() => readCircuit(bad)).toThrow('components[0].rom: not a list of at most 256 words from 0 to 0xFFFF');
   });
+
+  it('keeps its program through a file, and only a ROM has one', () => {
+    const b = new CircuitBuilder();
+    b.rom('rom', [0x1001], '; one\nLDA #1\n');
+    const text = writeCircuit(b.build());
+    expect(readCircuit(text).components[0]?.source).toBe('; one\nLDA #1\n');
+    expect(readCircuit(writeCircuit(romBench([1]))).components.find(c => c.kind === 'rom')?.source).toBeUndefined();
+    expect(() => readCircuit(text.replace('"source":"; one\\nLDA #1\\n"', '"source":7'))).toThrow('components[0].source: not text');
+    expect(() => readCircuit(text.replace('"kind":"rom"', '"kind":"clock"').replace(/"rom":\[[^\]]*\],/, ''))).toThrow('components[0].source: a clock has no program');
+  });
 });

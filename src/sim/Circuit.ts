@@ -72,6 +72,12 @@ export interface Component {
   readonly chip?: string;
   /** A `rom`'s words, from address 0; a word not given is 0. */
   readonly rom?: readonly number[];
+  /**
+   * A `rom`'s program, the assembly its words were made from, kept for
+   * the program editor. The words are what runs; this is what a person
+   * reads. Absent when there was none, as for words given as words.
+   */
+  readonly source?: string;
 }
 
 export interface PinRef {

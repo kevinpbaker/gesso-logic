@@ -86,9 +86,9 @@ export class CircuitBuilder {
   chip(label: string, name: string): string {
     return this.add('chip', label, { chip: name });
   }
-  /** A ROM holding `words`; its pins are `A` → `D` and `T` → `Q`. */
-  rom(label: string, words: readonly number[]): string {
-    return this.add('rom', label, { rom: [...words] });
+  /** A ROM holding `words`, assembled from `source` when there is one; its pins are `A` → `D` and `T` → `Q`. */
+  rom(label: string, words: readonly number[], source?: string): string {
+    return this.add('rom', label, { rom: [...words], ...(source !== undefined ? { source } : {}) });
   }
   button(label: string): PinRef {
     return { component: this.add('button', label), pin: 'out' };

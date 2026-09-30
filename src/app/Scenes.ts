@@ -480,7 +480,7 @@ export function computerScene(program: string | readonly number[] = THREE_INSTRU
   const processor = b.chip('cpu', 'CPU');
   const io = b.chip('memory', 'memory and ports');
   const words = typeof program === 'string' ? (({ rom, size }) => [...rom.slice(0, size)])(assemble(program)) : [...program];
-  const rom = b.rom('rom', words);
+  const rom = b.rom('rom', words, typeof program === 'string' ? program : undefined);
   const clock = b.clock('clk');
   // Power-on reset: a flip-flop fed 0 wakes set — every flip-flop here
   // does, by the order power-on settles latches in — and holds reset

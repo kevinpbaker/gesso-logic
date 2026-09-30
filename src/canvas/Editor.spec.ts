@@ -63,6 +63,7 @@ function setup(button = 'push', wire?: (b: CircuitBuilder) => void) {
       tabulate: record('tabulate'),
       makeChip: record('makeChip'),
       openChip: record('openChip'),
+      openProgram: record('openProgram'),
       copy: record('copy'),
       duplicate: record('duplicate')
     },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { assemble, AssemblyError, disassemble, readRomImage, romImage } from './Assembler';
+import { assemble, AssemblyError, disassemble, listing, readRomImage, romImage } from './Assembler';
 import { INSTRUCTIONS } from './Isa';
 
 /** The problems an assembly reports, as `line: message`. */
@@ -63,6 +63,23 @@ describe('the assembler', () => {
     expect(size).toBe(0x12);
   });
 
+  it('puts a .word in whole, and refuses one wider than 16 bits', () => {
+    const { rom, size } = assemble('.word 0x1C40, 0xFFFF, -1, 7');
+    expect([...rom.slice(0, size)]).toEqual([0x1c40, 0xffff, 0xffff, 7]);
+    expect(problems('.word 0x10000')).toEqual(["1: The word 65536 doesn't fit in 16 bits."]);
+    expect(problems('.word')).toEqual(['1: .word needs at least one value.']);
+  });
+
+  it('lists any ROM image as source that assembles back to it, word for word', () => {
+    const words = new Uint16Array(256);
+    for (let word = 0; word <= 0xffff; word += 256) {
+      // Each opcode's high byte, with every operand byte across the words.
+      for (let k = 0; k < 256; k++) words[k] = word | k;
+      expect([...assemble(listing(words)).rom], `opcode 0x${(word >> 8).toString(16)}`).toEqual([...words]);
+    }
+    expect(listing([0x1012, 0x0005, 0, 0]).split('\n').slice(1, 4)).toEqual(['        LDA #0x12       ; 0x00', '        .word 0x0005    ; 0x01', '']);
+  });
+
   it('knows each mnemonic’s forms: case-blind, with B and X', () => {
     const { rom } = assemble(`
       lda 0x10,x
@@ -84,7 +101,7 @@ describe('the assembler', () => {
         again: NOP
         OUT 7
         B = 3
-        .word 5
+        .long 5
         HLT 1
         LDA #1 +`)
     ).toEqual([
@@ -95,7 +112,7 @@ describe('the assembler', () => {
       "7: 'again' is already defined, on line 6.",
       '8: There is no port 7; ports are 0 to 3.',
       "9: 'B' can't be a name: it is a register.",
-      "10: '.word' is not a directive. There are .byte and .org.",
+      "10: '.long' is not a directive. There are .byte, .word and .org.",
       '11: HLT has no address form; it takes no operand.',
       "12: '1 +' is not a value."
     ]);

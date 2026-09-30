@@ -224,6 +224,28 @@ export interface AnalyserView {
   readonly trigger: { readonly trace: string; readonly value: number } | null;
 }
 
+/**
+ * The program editor's ROM: its source, and how the last try at loading
+ * it went. Published while the editor is open, on `openProgram` and on
+ * each `setProgram`. `serial` counts answers, so the same problems twice
+ * are two answers, and a dialog can tell its own load's reply from the
+ * view it opened on.
+ */
+export interface ProgramView {
+  /** The ROM on the canvas's level, or '' when the editor is closed. */
+  readonly id: string;
+  readonly label: string;
+  /** The program as the ROM keeps it; for a ROM with no source, or one that doesn't match its words, a listing of the words. */
+  readonly source: string;
+  /** Why `source` is a listing rather than the program, or null when it is the program. */
+  readonly note: string | null;
+  /** Words the ROM's program takes, of 256. */
+  readonly words: number;
+  /** Why the last `setProgram` didn't assemble, each with its line; empty when it did, or none was tried. */
+  readonly problems: readonly { readonly line: number; readonly message: string }[];
+  readonly serial: number;
+}
+
 export interface CircuitCommands {
   /** Adds a component. With no id, one is made from the kind. */
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void;
@@ -254,6 +276,14 @@ export interface CircuitCommands {
   setInput(id: string, value: number): void;
   /** Makes these components `width` bits wide; see `setWidth` in `DocumentEdits`. */
   setWidth(ids: readonly string[], width: number): void;
+  /** Opens the program editor on a ROM of the level on the canvas, published as `program`; '' closes it. */
+  openProgram(id: string): void;
+  /**
+   * Assembles `source` into a ROM: when it assembles, its words and
+   * source replace the ROM's as one edit and the circuit restarts from
+   * power-on; when it doesn't, nothing changes and `program` says why.
+   */
+  setProgram(id: string, source: string): void;
   run(): void;
   pause(): void;
   /** One clock cycle, while paused. */
@@ -313,6 +343,7 @@ export interface CircuitView {
   readonly saving: SaveRequest;
   readonly clipboard: ClipRequest;
   readonly analyser: AnalyserView;
+  readonly program: ProgramView;
 }
 
 export const EMPTY_SUMMARY: DocumentSummary = {
@@ -338,6 +369,7 @@ export const EMPTY_SUMMARY: DocumentSummary = {
 };
 export const NO_SAVE: SaveRequest = { serial: 0, name: '', text: '', handle: null };
 export const NO_CLIP: ClipRequest = { serial: 0, text: '' };
+export const NO_PROGRAM: ProgramView = { id: '', label: '', source: '', note: null, words: 0, problems: [], serial: 0 };
 export const CLOSED_ANALYSER: AnalyserView = {
   open: false,
   traces: [],
@@ -363,7 +395,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   table: NO_TABLE,
   saving: NO_SAVE,
   clipboard: NO_CLIP,
-  analyser: CLOSED_ANALYSER
+  analyser: CLOSED_ANALYSER,
+  program: NO_PROGRAM
 });
 
 /**

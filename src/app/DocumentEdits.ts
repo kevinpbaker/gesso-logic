@@ -330,12 +330,45 @@ export function sameConnectivity(a: Circuit, b: Circuit): boolean {
   for (let i = 0; i < a.components.length; i++) {
     const x = a.components[i]!;
     const y = b.components[i]!;
-    if (x.id !== y.id || x.kind !== y.kind || x.value !== y.value || x.chip !== y.chip) return false;
+    // A ROM's words are the netlist's too: a new program is not a move.
+    if (x.id !== y.id || x.kind !== y.kind || x.value !== y.value || x.chip !== y.chip || x.rom !== y.rom) return false;
   }
   for (let i = 0; i < a.wires.length; i++) {
     if (a.wires[i] !== b.wires[i]) return false;
   }
   return true;
+}
+
+/**
+ * Gives a ROM new words and the source they were assembled from. The
+ * circuit as it was when the id is no ROM, or nothing would change.
+ */
+export function setProgram(circuit: Circuit, id: string, words: readonly number[], source: string): Circuit {
+  const index = circuit.components.findIndex(c => c.id === id && c.kind === 'rom');
+  const rom = circuit.components[index];
+  if (rom === undefined) return circuit;
+  const same = rom.source === source && rom.rom !== undefined && rom.rom.length === words.length && rom.rom.every((w, i) => w === words[i]);
+  if (same) return circuit;
+  const components = [...circuit.components];
+  components[index] = { ...rom, rom: [...words], source };
+  return { ...circuit, components };
+}
+
+/**
+ * Whether a ROM in both documents holds different words in the second:
+ * a program loaded, or one undone. The circuit then starts again from
+ * power-on, since the state of the old program — its program counter
+ * above all — means nothing to the new one.
+ */
+export function programChanged(a: Circuit, b: Circuit): boolean {
+  const differs = (x: Circuit, y: Circuit) =>
+    x !== y && y.components.some(r => r.kind === 'rom' && x.components.some(c => c.id === r.id && c.kind === 'rom' && c.rom !== r.rom));
+  if (differs(a, b)) return true;
+  if (a.chips === b.chips) return false;
+  return Object.entries(b.chips ?? {}).some(([name, definition]) => {
+    const before = a.chips?.[name];
+    return before !== undefined && differs(before, definition);
+  });
 }
 
 /**

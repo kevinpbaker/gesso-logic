@@ -143,6 +143,8 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
       }
       const actions: UiChild[] = [];
       if (one?.kind === 'chip') actions.push(small('Look inside', act(() => circuit.send.openChip(one.id)), 'open'));
+      // Not `act`: the dialog takes the keyboard, and the canvas has it back when it closes.
+      if (one?.kind === 'rom') actions.push(small('Edit program', () => circuit.send.openProgram(one.id), 'program'));
       if (one?.kind === 'chip' && one.chip !== null && changedChips.includes(one.chip)) {
         const name = one.chip;
         actions.push(small('Reset to original', act(() => circuit.send.resetChip(name)), 'reset'));

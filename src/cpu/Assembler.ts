@@ -12,6 +12,7 @@ import { BY_MNEMONIC, BY_OPCODE, PORTS, ROM_SIZE, type Instruction, type Mode } 
  *             LDT masks,X   ; a byte from a table in the ROM
  *             JMP start
  *     masks:  .byte 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80
+ *             .word 0x1C40  ; a whole word, as it is
  *             .org 0xF0     ; carry on at another ROM address
  *
  * Mnemonics and `B`/`X` are case-blind; labels and constants are not.
@@ -50,7 +51,8 @@ export class AssemblyError extends Error {
 /** A line, after the first pass: where it goes, and what is left to encode. */
 type Item =
   | { kind: 'instruction'; line: number; address: number; mnemonic: string; operand: string }
-  | { kind: 'byte'; line: number; address: number; expression: string };
+  | { kind: 'byte'; line: number; address: number; expression: string }
+  | { kind: 'word'; line: number; address: number; expression: string };
 
 const NAME = /^[A-Za-z_.][A-Za-z0-9_.]*$/;
 const RESERVED = new Set(['A', 'B', 'X']);
@@ -130,6 +132,15 @@ export function assemble(source: string): Assembled {
     }
     return v & 0xff;
   };
+  const fullWord = (expression: string, line: number): number | null => {
+    const v = value(expression, line);
+    if (v === null) return null;
+    if (v < -32768 || v > 0xffff) {
+      fail(line, `The word ${v} doesn't fit in 16 bits.`);
+      return null;
+    }
+    return v & 0xffff;
+  };
 
   // First pass: labels get addresses, constants their expressions, and
   // every line its place in the ROM. `.org` is worked out here, so its
@@ -162,14 +173,15 @@ export function assemble(source: string): Assembled {
       else address = target;
       return;
     }
-    if (directive === '.byte') {
+    if (directive === '.byte' || directive === '.word') {
+      const kind = directive === '.byte' ? 'byte' : 'word';
       const values = operand === '' ? [] : splitList(operand);
-      if (values.length === 0) fail(line, '.byte needs at least one value.');
-      for (const value of values) items.push({ kind: 'byte', line, address: address++, expression: value });
+      if (values.length === 0) fail(line, `${directive} needs at least one value.`);
+      for (const value of values) items.push({ kind, line, address: address++, expression: value });
       return;
     }
     if (word!.startsWith('.')) {
-      fail(line, `'${word}' is not a directive. There are .byte and .org.`);
+      fail(line, `'${word}' is not a directive. There are .byte, .word and .org.`);
       return;
     }
     const mnemonic = word!.toUpperCase();
@@ -194,8 +206,8 @@ export function assemble(source: string): Assembled {
     }
     lineOf.set(item.address, item.line);
     size = Math.max(size, item.address + 1);
-    if (item.kind === 'byte') {
-      const v = byte(item.expression, item.line, 'The value');
+    if (item.kind === 'byte' || item.kind === 'word') {
+      const v = item.kind === 'byte' ? byte(item.expression, item.line, 'The value') : fullWord(item.expression, item.line);
       if (v !== null) rom[item.address] = v;
       continue;
     }
@@ -290,7 +302,7 @@ function describeForms(mnemonic: string): string {
   return texts.length === 1 ? texts[0]! : `${texts.slice(0, -1).join(', ')} or ${texts[texts.length - 1]}`;
 }
 
-/** One ROM word as source text: `LDA 0x40,X`. A word that is no instruction is shown as `.byte`. */
+/** One ROM word as source text: `LDA 0x40,X`. A word that is no instruction is shown as `.word`. */
 export function disassemble(word: number): string {
   const instruction = BY_OPCODE.get(word >> 8);
   const k = word & 0xff;
@@ -311,6 +323,37 @@ export function disassemble(word: number): string {
 
 function hex(n: number): string {
   return n.toString(16).toUpperCase().padStart(2, '0');
+}
+
+/**
+ * Source for a ROM image whose source is gone: a line an address, up to
+ * the last word that isn't 0, each with its address in a comment. A
+ * word is disassembled where that assembles back to it, and written as
+ * `.word` where it doesn't — an `HLT` with an operand, an `OUT` to no
+ * port — so the listing assembles to exactly the words it came from.
+ */
+export function listing(words: ArrayLike<number>): string {
+  let end = Math.min(words.length, ROM_SIZE);
+  while (end > 0 && words[end - 1] === 0) end--;
+  const lines = ['; Disassembled from the ROM: its source was not kept.'];
+  for (let at = 0; at < end; at++) {
+    const word = words[at]!;
+    const text = disassemble(word);
+    const exact = !text.startsWith('.word') && assemblesTo(text) === word;
+    const line = exact ? text : `.word 0x${word.toString(16).toUpperCase().padStart(4, '0')}`;
+    lines.push(`        ${line.padEnd(16)}; 0x${hex(at)}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/** The one word a line assembles to, or null when it doesn't. */
+function assemblesTo(line: string): number | null {
+  try {
+    return assemble(line).rom[0]!;
+  } catch (error) {
+    if (error instanceof AssemblyError) return null;
+    throw error;
+  }
 }
 
 /**

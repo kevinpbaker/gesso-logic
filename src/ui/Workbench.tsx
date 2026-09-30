@@ -14,6 +14,7 @@ import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, t
 import { confirmDiscard, gettingStarted, pasteHint, recentFiles, shortcuts, type Discard } from './Dialogs';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
+import { programEditor } from './ProgramEditor';
 import { palette } from './Palette';
 import { GAMES, PROGRAMS } from './Programs';
 import { ringingParts } from './Problems';
@@ -828,6 +829,7 @@ export function workbench(ctx: ComponentContext) {
         closeDialog(showRecent)
       )}
       {pasteHint(showPaste, closeDialog(showPaste))}
+      {programEditor(ctx, () => canvas.focus())}
     </column>
   );
 }

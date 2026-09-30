@@ -178,6 +178,7 @@ start:  LDA #1          ; a label, and an instruction
         OUT 0           ; a port
         JMP start       ; a target
 masks:  .byte 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80
+        .word 0x1C40    ; a whole word
         .org 0xF0       ; carry on at a later ROM address
 ```
 
@@ -189,5 +190,8 @@ masks:  .byte 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80
 - A constant may use names defined anywhere in the file; `.org` only
   names defined above it.
 - `.byte` puts one value in each ROM word's low byte, for `LDT` to read.
+- `.word` puts one 16-bit value in each ROM word, whole. It is how a
+  listing of a ROM whose source is gone writes a word that is no
+  instruction.
 - Every error is reported with its line number, all of them, before
   anything is thrown.

@@ -14,15 +14,16 @@ import type {
   AnalyserView,
   Camera,
   ClipRequest,
+  ProgramView,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_SAVE, NO_TABLE, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_SAVE, NO_TABLE, type Buckets as GeometryBuckets } from './CircuitContract';
 import { Analyser } from './Analyser';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
-import { AssemblyError } from '../cpu/Assembler';
+import { assemble, AssemblyError, listing } from '../cpu/Assembler';
 import {
   connect,
   extract,
@@ -34,10 +35,12 @@ import {
   move,
   moveBy,
   place,
+  programChanged,
   relabel,
   remove,
   renameChip,
   rotate,
+  setProgram,
   setWidth,
   sameConnectivity,
   type Fragment
@@ -157,6 +160,7 @@ export class CircuitService {
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
   readonly analyserView: Observable<AnalyserView>;
+  readonly program: Observable<ProgramView>;
 
   private readonly documentSubject: BehaviorSubject<DocumentSummary>;
   private readonly geometrySubject: BehaviorSubject<Geometry>;
@@ -166,6 +170,8 @@ export class CircuitService {
   private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
   private readonly clipboardSubject = new BehaviorSubject<ClipRequest>(NO_CLIP);
   private readonly analyserSubject = new BehaviorSubject<AnalyserView>(CLOSED_ANALYSER);
+  private readonly programSubject = new BehaviorSubject<ProgramView>(NO_PROGRAM);
+  private programSerial = 0;
   private readonly analyser = new Analyser();
   /** What the panel asked to see: a null start follows the newest cycle; no columns is closed. */
   private analyserAsk: { start: number | null; span: number; columns: number } = { start: null, span: 256, columns: 0 };
@@ -251,6 +257,7 @@ export class CircuitService {
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
     this.analyserView = this.analyserSubject;
+    this.program = this.programSubject;
     this.store = options.store ?? null;
     this.delay =
       options.delay ??
@@ -658,6 +665,58 @@ export class CircuitService {
     this.editLevel(level => setWidth(level, ids, width));
   }
 
+  openProgram(id: string): void {
+    const rom = id === '' ? undefined : this.romOnLevel(id);
+    if (rom === undefined) {
+      if (this.programSubject.value.id !== '') this.programSubject.next(NO_PROGRAM);
+      return;
+    }
+    const words = rom.rom ?? [];
+    let source = listing(words);
+    let note: string | null = 'This ROM kept no program, only its words, so this is a listing of them.';
+    if (rom.source !== undefined) {
+      if (assemblesTo(rom.source, words)) {
+        source = rom.source;
+        note = null;
+      } else {
+        note = "This ROM's program doesn't assemble to its words, so this is a listing of the words.";
+      }
+    }
+    this.programSubject.next({ id, label: rom.label ?? id, source, note, words: sizeOf(words), problems: [], serial: ++this.programSerial });
+  }
+
+  setProgram(id: string, source: string): void {
+    const rom = this.romOnLevel(id);
+    if (rom === undefined) return;
+    let words: number[];
+    try {
+      const { rom: image, size } = assemble(source);
+      words = [...image.slice(0, size)];
+    } catch (error) {
+      if (!(error instanceof AssemblyError)) throw error;
+      this.programSubject.next({ ...this.programView(id, rom), source, problems: error.problems, serial: ++this.programSerial });
+      return;
+    }
+    const revision = this.revision;
+    this.editLevel(level => setProgram(level, id, words, source));
+    const label = rom.label ?? id;
+    this.message =
+      this.revision === revision ? `${label} already holds that program` : `Loaded ${words.length} word${words.length === 1 ? '' : 's'} into ${label}, and restarted`;
+    this.programSubject.next({ id, label, source, note: null, words: words.length, problems: [], serial: ++this.programSerial });
+    this.documentSubject.next(this.summary());
+  }
+
+  /** A ROM on the level on the canvas, by id. */
+  private romOnLevel(id: string): Component | undefined {
+    return this.level().circuit.components.find(c => c.id === id && c.kind === 'rom');
+  }
+
+  /** What the open editor shows of a ROM, keeping its source and note. */
+  private programView(id: string, rom: Component): ProgramView {
+    const open = this.programSubject.value;
+    return open.id === id ? open : { ...NO_PROGRAM, id, label: rom.label ?? id, words: sizeOf(rom.rom ?? []) };
+  }
+
   setInput(id: string, value: number): void {
     const simulator = this.simulator;
     if (simulator === null || !this.netlist?.inputs.has(id)) {
@@ -803,7 +862,9 @@ export class CircuitService {
       // Against the netlist before, so nets keep their numbers.
       const netlist = compile(next, this.netlist ?? undefined);
       const simulator = new Simulator(netlist);
-      if (this.simulator !== null) {
+      // A new program starts from power-on: see `programChanged`.
+      const restarted = this.simulator !== null && programChanged(previous, next);
+      if (this.simulator !== null && !restarted) {
         simulator.adopt(this.simulator);
       }
       // Nets keep their numbers, so what was in view still is, give or
@@ -819,6 +880,9 @@ export class CircuitService {
       this.netlist = netlist;
       this.simulator = simulator;
       this.error = null;
+      // Paced from cycle 0 again, or a run at a set rate would race to
+      // catch up with the cycles the old program had run.
+      if (restarted) this.restartPacing();
       if (!this.running) {
         this.settle(simulator);
       }
@@ -834,6 +898,11 @@ export class CircuitService {
     this.documentSubject.next(this.summary());
     this.geometrySubject.next(this.geometryNow());
     this.traceNow();
+    // The editor closes on a ROM that has gone: deleted, or undone away.
+    const program = this.programSubject.value;
+    if (program.id !== '' && this.romOnLevel(program.id) === undefined) {
+      this.programSubject.next(NO_PROGRAM);
+    }
     const table = this.tableSubject.value;
     if (table.ids.length > 0) {
       const level = this.level().circuit;
@@ -1474,5 +1543,23 @@ class Buckets<T> {
     let copy = this.copies.get(bucket);
     if (copy === undefined) this.copies.set(bucket, (copy = { ...this.base[bucket] }));
     return copy;
+  }
+}
+
+/** Words a ROM's program takes: up to its last word that isn't 0. */
+function sizeOf(words: readonly number[]): number {
+  let end = words.length;
+  while (end > 0 && words[end - 1] === 0) end--;
+  return end;
+}
+
+/** Whether a program assembles to exactly these words, give or take the 0s after them. */
+function assemblesTo(source: string, words: readonly number[]): boolean {
+  try {
+    const { rom } = assemble(source);
+    return rom.every((w, i) => w === (words[i] ?? 0));
+  } catch (error) {
+    if (error instanceof AssemblyError) return false;
+    throw error;
   }
 }

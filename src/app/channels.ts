@@ -21,7 +21,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         table: service.table,
         saving: service.saving,
         clipboard: service.clipboard,
-        analyser: service.analyserView
+        analyser: service.analyserView,
+        program: service.program
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -37,6 +38,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         loadProgram: (name, source, rate) => service.loadProgram(name, source, rate),
         setInput: (id, value) => service.setInput(id, value),
         setWidth: (ids, width) => service.setWidth(ids, width),
+        openProgram: id => service.openProgram(id),
+        setProgram: (id, source) => service.setProgram(id, source),
         run: () => service.run(),
         pause: () => service.pause(),
         step: () => service.step(),
