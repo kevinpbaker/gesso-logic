@@ -59,6 +59,7 @@ export type CommandId =
   | 'truthTable'
   | 'runPause'
   | 'step'
+  | 'customRate'
   | `rate:${string}`
   | `example:${SceneName}`
   | `program:${string}`
@@ -111,6 +112,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   truthTable: { label: 'Truth table of the selection', keys: 'T', group: 'View' },
   runPause: { label: 'Run', keys: `${MOD}+Enter`, group: 'Simulate' },
   step: { label: 'Step one clock cycle', keys: '.', group: 'Simulate' },
+  customRate: { label: 'Clock: another rate…', group: 'Simulate' },
   thread: { label: 'Run the simulator on the main thread', group: 'Simulate' },
   theme: { label: 'Dark mode', keys: 'Shift+D', group: 'View' },
   shortcuts: { label: 'Keyboard shortcuts', keys: '?', group: 'Help' },
@@ -121,7 +123,26 @@ const FIXED: Readonly<Record<string, Command>> = {
 };
 
 export function rateLabel(rate: ClockRate): string {
-  return rate === 'max' ? 'As fast as it goes' : rate >= 1000 ? `${rate / 1000} kHz` : `${rate} Hz`;
+  if (rate === 'max') return 'As fast as it goes';
+  const [scaled, unit] = rate >= 1e6 ? [rate / 1e6, 'MHz'] : rate >= 1000 ? [rate / 1000, 'kHz'] : [rate, 'Hz'];
+  return `${Number(scaled.toPrecision(6))} ${unit}`;
+}
+
+/** The fastest rate a person may type: well past what the simulator reaches, short of a number that means nothing. */
+export const MAX_TYPED_HZ = 1e9;
+
+/**
+ * A clock rate as a person types it — `440`, `2.5 Hz`, `15k`, `15 kHz`,
+ * `1.2 MHz`, or `max` — or null when it is not one. A rate is above
+ * zero: a clock at 0 Hz is a paused clock, and Pause says that.
+ */
+export function parseRate(text: string): ClockRate | null {
+  const trimmed = text.trim().toLowerCase();
+  if (trimmed === 'max') return 'max';
+  const match = /^(\d+(?:\.\d*)?|\.\d+)\s*(k|m)?(?:hz)?$/.exec(trimmed.replace(/,/g, ''));
+  if (match === null) return null;
+  const hz = Number(match[1]) * (match[2] === 'k' ? 1e3 : match[2] === 'm' ? 1e6 : 1);
+  return hz > 0 && hz <= MAX_TYPED_HZ ? hz : null;
 }
 
 export function rateOf(id: CommandId): ClockRate | null {
@@ -178,7 +199,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'Simulate',
     mnemonic: 's',
-    entries: ['runPause', 'step', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), MENU_SEPARATOR, 'thread']
+    entries: ['runPause', 'step', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), 'customRate', MENU_SEPARATOR, 'thread']
   },
   {
     label: 'Examples',

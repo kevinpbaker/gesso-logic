@@ -2,11 +2,11 @@ import { map, type Observable } from 'rxjs';
 
 import type { UiChild } from 'gesso-core';
 import { Dialog } from 'gesso-components';
-import { each, type ShellRecentFile } from 'gesso-framework';
+import { each, type InternalState, type ShellRecentFile } from 'gesso-framework';
 
 import { INSTRUCTION_GROUPS, written } from '../cpu/Isa';
-import { action, heading, small } from './controls';
-import { MOD, shortcutSections } from './Commands';
+import { action, field, heading, small } from './controls';
+import { MOD, parseRate, shortcutSections } from './Commands';
 
 /**
  * The dialogs. Every one carries a button, and not for decoration: a
@@ -283,6 +283,45 @@ export function pasteHint(open: Observable<boolean>, close: () => void): UiChild
             textWrap="word"
           />
           <row x="end" width={inner(380)}>{action('Close', close, 'accent')}</row>
+        </column>
+      }
+    />
+  );
+}
+
+/**
+ * A clock rate typed rather than picked, for the rate between two
+ * presets — a program written for 440 Hz, or a game that plays best at
+ * 12 kHz. What it reads is `parseRate`'s; a rate it cannot read keeps
+ * the dialog open and says what it takes.
+ */
+export function clockRate(open: Observable<boolean>, text: InternalState<string>, apply: (rate: number | 'max') => void, close: () => void): UiChild {
+  const problem = map((t: string) => (t.trim() === '' || parseRate(t) !== null ? '' : 'Type a rate above zero, such as 440, 2.5 Hz, 15 kHz or 1.2 MHz.'));
+  const set = () => {
+    const rate = parseRate(text.value);
+    if (rate !== null) apply(rate);
+  };
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Clock rate"
+      width={380}
+      content={
+        <column gap={10} width={inner(380)}>
+          <text
+            width={inner(380)}
+            text="How many clock cycles a second: a number in Hz, or with kHz or MHz after it. The simulator runs as close to it as it can."
+            fontSize={12}
+            color="text"
+            textWrap="word"
+          />
+          {field('rate', 'Clock rate', text, inner(380), set)}
+          <text width={inner(380)} text={text.pipe(problem)} fontSize={11} color="danger" textWrap="word" />
+          <row gap={8} x="end" width={inner(380)}>
+            {action('Cancel', close)}
+            {action('Set the clock', set, 'accent')}
+          </row>
         </column>
       }
     />

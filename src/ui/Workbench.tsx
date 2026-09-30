@@ -11,7 +11,7 @@ import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { confirmDiscard, gettingStarted, instructionSet, pasteHint, recentFiles, shortcuts, type Discard } from './Dialogs';
+import { clockRate, confirmDiscard, gettingStarted, instructionSet, pasteHint, recentFiles, shortcuts, type Discard } from './Dialogs';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
 import { programEditor } from './ProgramEditor';
@@ -77,6 +77,8 @@ export function workbench(ctx: ComponentContext) {
   const showIsa = internalState(false);
   const showRecent = internalState(false);
   const showPaste = internalState(false);
+  const showRate = internalState(false);
+  const rateText = internalState('');
 
   const guard = (what: string, then: () => void) => {
     const d = document.value;
@@ -305,6 +307,11 @@ export function workbench(ctx: ComponentContext) {
         return openDialog(showStart);
       case 'instructionSet':
         return openDialog(showIsa);
+      case 'customRate': {
+        const current = status.value.clockHz;
+        rateText.value = current === 'max' ? '' : rateLabel(current);
+        return openDialog(showRate);
+      }
       case 'tour':
         tourOpen.value = true;
         return;
@@ -374,6 +381,10 @@ export function workbench(ctx: ComponentContext) {
   function labelOf(id: CommandId): string {
     const rate = rateOf(id);
     if (rate !== null) return `${status.value.clockHz === rate ? '✓' : '  '}  ${rateLabel(rate)}`;
+    if (id === 'customRate') {
+      const current = status.value.clockHz;
+      return RATES.includes(current) ? '    Another rate…' : `✓  ${rateLabel(current)}…`;
+    }
     if (id === 'runPause') return status.value.running ? 'Pause' : 'Run';
     if (id === 'analyser') return analyserOpen ? 'Hide the logic analyser' : 'Show the logic analyser';
     if (id === 'theme') return dark ? 'Light mode' : 'Dark mode';
@@ -480,10 +491,15 @@ export function workbench(ctx: ComponentContext) {
             map(current =>
               (RATES.includes(current) ? RATES : [...RATES.filter(r => r !== 'max'), current, 'max' as const].sort((a, b) =>
                 a === 'max' ? 1 : b === 'max' ? -1 : a - b
-              )).map(rate => ({ value: String(rate), label: rateLabel(rate) }))
+              ))
+                .map(rate => ({ value: String(rate), label: rateLabel(rate) }))
+                .concat({ value: 'custom', label: 'Another rate…' })
             )
           ),
           onChange: (value: string) => {
+            // The select is the status's, so choosing this leaves it on
+            // the rate running now until the dialog sets another.
+            if (value === 'custom') return run('customRate');
             const rate: ClockRate = value === 'max' ? 'max' : Number(value);
             circuit.send.setClockHz(rate);
             canvas.focus();
@@ -833,6 +849,15 @@ export function workbench(ctx: ComponentContext) {
         closeDialog(showRecent)
       )}
       {pasteHint(showPaste, closeDialog(showPaste))}
+      {clockRate(
+        showRate,
+        rateText,
+        rate => {
+          circuit.send.setClockHz(rate);
+          closeDialog(showRate)();
+        },
+        closeDialog(showRate)
+      )}
       {programEditor(ctx, () => canvas.focus())}
     </column>
   );

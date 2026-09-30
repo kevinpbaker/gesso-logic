@@ -1,7 +1,7 @@
 import { MENU_SEPARATOR } from 'gesso-components';
 import { describe, expect, it } from 'vitest';
 
-import { commandKeys, commandLabel, EXAMPLES, MENUS, PART_SECTIONS, rateOf, shortcutSections, type CommandId } from './Commands';
+import { commandKeys, commandLabel, EXAMPLES, MENUS, PART_SECTIONS, parseRate, rateLabel, rateOf, shortcutSections, type CommandId } from './Commands';
 import { PROGRAMS } from './Programs';
 
 /**
@@ -43,6 +43,25 @@ describe('the command table', () => {
     expect(rateOf('rate:max')).toBe('max');
     expect(rateOf('rate:100')).toBe(100);
     expect(rateOf('undo')).toBeNull();
+  });
+
+  it('reads a clock rate the way a person types it', () => {
+    expect(parseRate('440')).toBe(440);
+    expect(parseRate(' 2.5 Hz ')).toBe(2.5);
+    expect(parseRate('15k')).toBe(15_000);
+    expect(parseRate('15 kHz')).toBe(15_000);
+    expect(parseRate('1.2 MHz')).toBe(1_200_000);
+    expect(parseRate('30,000')).toBe(30_000);
+    expect(parseRate('MAX')).toBe('max');
+    for (const bad of ['', '0', '-5', 'fast', '1e3', '10 GHz', '2000 MHz']) expect(parseRate(bad), bad).toBeNull();
+  });
+
+  it('names a typed rate in the unit it reads best in', () => {
+    expect(rateLabel(440)).toBe('440 Hz');
+    expect(rateLabel(0.5)).toBe('0.5 Hz');
+    expect(rateLabel(1500)).toBe('1.5 kHz');
+    expect(rateLabel(1_200_000)).toBe('1.2 MHz');
+    expect(rateLabel(1 / 3)).toBe('0.333333 Hz');
   });
 
   it('lists every part key on the shortcut sheet', () => {
