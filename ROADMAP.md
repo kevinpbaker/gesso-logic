@@ -1792,8 +1792,17 @@ The dialog doesn't scroll to the marked line: an editable scrolls to
 its caret and not to a line it's told to. That would take an engine
 change, or moving the caret, which would be worse.
 
-Still later: a gutter of line numbers and addresses; loading one of
-the example programs into the dialog.
+**Since: start from an example.** A **Start from** picker above the
+field lists the games and the CPU's test programs. Picking one puts
+its source in the field as an edit. **Assemble & load** puts it in
+the ROM, as with any edit. With edits not loaded, it asks first, as
+closing does. Checked in Chrome: `arithmetic.asm` over Pong, then
+`pong.asm` over that, which asked. Pong read as loaded again, since
+it's what the ROM holds.
+
+Still later: a gutter of line numbers and addresses. An editable
+reports no scroll offset, so a gutter can't follow the field yet.
+That has been asked of Gesso.
 
 ---
 

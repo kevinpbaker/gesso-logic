@@ -1,13 +1,14 @@
 import { combineLatest, distinctUntilChanged, map, type Observable } from 'rxjs';
 
 import type { UiChild, UiKeyboardEvent, UiTextChangeEvent, UiTextSpan, UiThemeColorName } from 'gesso-core';
-import { Dialog } from 'gesso-components';
-import { internalState, type ComponentContext } from 'gesso-framework';
+import { Dialog, Select } from 'gesso-components';
+import { createComponent, internalState, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, NO_PROGRAM, type ProgramView } from '../app/CircuitContract';
 import { highlight, type Token, type TokenKind } from '../cpu/Highlight';
 import { action } from './controls';
 import { MOD } from './Commands';
+import { GAMES, PROGRAMS } from './Programs';
 
 /**
  * The program editor: a ROM's source, to change and load.
@@ -23,6 +24,16 @@ const INNER = WIDTH - 40;
 const ROM_WORDS = 256;
 /** The problems listed under the field; the first few are the ones to fix, and the rest often follow from them. */
 const MAX_PROBLEMS = 6;
+
+/** What the dialog can start from: the games, then the CPU's test programs, by file name. */
+const EXAMPLES: readonly { readonly name: string; readonly source: string }[] = [...GAMES, ...PROGRAMS];
+
+/** Something that would throw edits away, waiting for a yes. */
+interface Pending {
+  readonly question: string;
+  readonly confirm: string;
+  readonly then: () => void;
+}
 
 /** Theme colours, so the source reads in light and dark alike. */
 const TOKEN_COLORS: Readonly<Record<TokenKind, UiThemeColorName>> = {
@@ -84,8 +95,10 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
   /** What is in the field, and the program the ROM holds as the dialog knows it: the two differ while there are edits to load. */
   const text = internalState('');
   const loaded = internalState('');
-  /** Asking whether to throw edits away, after a close with edits not loaded. */
-  const confirming = internalState(false);
+  /** Asking whether to throw edits away: a close, or an example, while there are edits not loaded. */
+  const pending = internalState<Pending | null>(null);
+  /** The example picker's value, '' between picks, so the same example can be picked twice. */
+  const example = internalState('');
 
   let view: ProgramView = NO_PROGRAM;
   ctx.effect(program, p => {
@@ -94,7 +107,7 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
     if (opened) {
       text.value = p.source;
       loaded.value = p.source;
-      confirming.value = false;
+      pending.value = null;
     } else if (p.id !== '' && p.problems.length === 0) {
       loaded.value = p.source;
     }
@@ -103,14 +116,29 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
   const load = () => {
     if (view.id !== '') circuit.send.setProgram(view.id, text.value);
   };
-  const close = (force = false) => {
-    if (!force && text.value !== loaded.value) {
-      confirming.value = true;
-      return;
+  /** Runs `then` at once, or once the person agrees to lose the edits not loaded. */
+  const unlessEdited = (question: string, confirm: string, then: () => void) => {
+    if (text.value === loaded.value) {
+      pending.value = null;
+      then();
+    } else {
+      pending.value = { question, confirm, then };
     }
-    confirming.value = false;
-    circuit.send.openProgram('');
-    onClosed();
+  };
+  const close = () =>
+    unlessEdited("Close without loading your edits? They'll be lost.", 'Discard edits', () => {
+      pending.value = null;
+      circuit.send.openProgram('');
+      onClosed();
+    });
+  const startFrom = (name: string) => {
+    example.value = '';
+    const chosen = EXAMPLES.find(e => e.name === name);
+    if (chosen === undefined) return;
+    unlessEdited(`Replace your edits with ${chosen.name}? They'll be lost.`, 'Replace', () => {
+      pending.value = null;
+      text.value = chosen.source;
+    });
   };
 
   /** Under the field: what the ROM holds, what is waiting to be loaded, or what is wrong. */
@@ -141,6 +169,28 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
 
   const content = (
     <column gap={10} width={INNER}>
+      <row gap={8} y="center" width={INNER}>
+        <text text="Start from" fontSize={12} color="textMuted" textWrap="none" />
+        {createComponent(Select, {
+          compact: true,
+          labelHidden: true,
+          label: 'Start from an example program',
+          placeholder: 'An example…',
+          width: 260,
+          value: example,
+          options: EXAMPLES.map(e => ({ value: e.name, label: e.name })),
+          onChange: startFrom
+        })}
+        <text
+          text="It replaces what's here; Assemble & load puts it in the ROM."
+          flex={1}
+          minWidth={0}
+          fontSize={11}
+          color="textMuted"
+          textWrap="none"
+          textOverflow="ellipsis"
+        />
+      </row>
       {/* Not in a scroll view: an editable scrolls its own text to the
           caret, and one in a scroll view is brought into view by its top
           whenever it takes focus, so a click far down jumped back up. */}
@@ -163,7 +213,7 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
         label="Program source"
         onInput={(event: UiTextChangeEvent) => {
           text.value = event.value;
-          confirming.value = false;
+          pending.value = null;
         }}
         onKeyDown={(event: UiKeyboardEvent) => {
           if (event.key === 'Enter' && (event.modifiers.ctrl || event.modifiers.meta)) {
@@ -181,13 +231,13 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
           )
         )}
       </column>
-      {confirming.pipe(
+      {pending.pipe(
         map(asking =>
-          asking ? (
+          asking !== null ? (
             <row key="confirm" gap={8} y="center" width={INNER}>
-              <text text="Close without loading your edits? They'll be lost." flex={1} minWidth={0} fontSize={12} color="text" textWrap="word" />
-              {action('Keep editing', () => (confirming.value = false))}
-              {action('Discard edits', () => close(true), 'danger')}
+              <text text={asking.question} flex={1} minWidth={0} fontSize={12} color="text" textWrap="word" />
+              {action('Keep editing', () => (pending.value = null))}
+              {action(asking.confirm, asking.then, 'danger')}
             </row>
           ) : (
             <row key="actions" gap={8} x="end" width={INNER}>
