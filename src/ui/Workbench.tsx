@@ -11,7 +11,7 @@ import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { confirmDiscard, gettingStarted, pasteHint, recentFiles, shortcuts, type Discard } from './Dialogs';
+import { confirmDiscard, gettingStarted, instructionSet, pasteHint, recentFiles, shortcuts, type Discard } from './Dialogs';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
 import { programEditor } from './ProgramEditor';
@@ -74,6 +74,7 @@ export function workbench(ctx: ComponentContext) {
   const discard = internalState<Discard | null>(null);
   const showShortcuts = internalState(false);
   const showStart = internalState(false);
+  const showIsa = internalState(false);
   const showRecent = internalState(false);
   const showPaste = internalState(false);
 
@@ -302,6 +303,8 @@ export function workbench(ctx: ComponentContext) {
         return openDialog(showShortcuts);
       case 'gettingStarted':
         return openDialog(showStart);
+      case 'instructionSet':
+        return openDialog(showIsa);
       case 'tour':
         tourOpen.value = true;
         return;
@@ -818,6 +821,7 @@ export function workbench(ctx: ComponentContext) {
       {statusBar}
       {confirmDiscard(discard, () => ((discard.value = null), canvas.focus()), () => files.save(false))}
       {shortcuts(showShortcuts, closeDialog(showShortcuts))}
+      {instructionSet(showIsa, closeDialog(showIsa))}
       {gettingStarted(showStart, closeDialog(showStart), () => run('example:counter'))}
       {recentFiles(
         showRecent,

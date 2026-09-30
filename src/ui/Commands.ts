@@ -65,6 +65,7 @@ export type CommandId =
   | `game:${string}`
   | 'shortcuts'
   | 'gettingStarted'
+  | 'instructionSet'
   | 'tour'
   | 'thread'
   | 'theme'
@@ -114,6 +115,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   theme: { label: 'Dark mode', keys: 'Shift+D', group: 'View' },
   shortcuts: { label: 'Keyboard shortcuts', keys: '?', group: 'Help' },
   gettingStarted: { label: 'Getting started', group: 'Help' },
+  instructionSet: { label: 'The CPU’s instruction set', group: 'Help' },
   tour: { label: 'Take the tour', group: 'Help' },
   menuBar: { label: 'Go to the menu bar', keys: 'F10', group: 'Help' }
 };
@@ -191,7 +193,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       'example:bench'
     ]
   },
-  { label: 'Help', mnemonic: 'h', entries: ['tour', 'gettingStarted', 'shortcuts'] }
+  { label: 'Help', mnemonic: 'h', entries: ['tour', 'gettingStarted', 'instructionSet', 'shortcuts'] }
 ];
 
 /** The shortcut sheet: the commands with a key, by menu, then what the pointer and the part keys do. */

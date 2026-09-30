@@ -4,6 +4,7 @@ import type { UiChild } from 'gesso-core';
 import { Dialog } from 'gesso-components';
 import { each, type ShellRecentFile } from 'gesso-framework';
 
+import { INSTRUCTION_GROUPS, written } from '../cpu/Isa';
 import { action, heading, small } from './controls';
 import { MOD, shortcutSections } from './Commands';
 
@@ -113,6 +114,69 @@ export function shortcuts(open: Observable<boolean>, close: () => void): UiChild
             </row>
           </scrollview>
           <row x="end" width={inner(380)}>{action('Close', close, 'accent')}</row>
+        </column>
+      }
+    />
+  );
+}
+
+const ISA_WIDTH = inner(760);
+
+/**
+ * Every instruction the CPU runs, generated from `Isa.ts`, the table
+ * the emulator executes and the assembler encodes, so it says what the
+ * machine does and not what someone remembered it doing.
+ */
+export function instructionSet(open: Observable<boolean>, close: () => void): UiChild {
+  // Inside the scroll view, a little narrower, so its bar never covers the effect column.
+  const width = ISA_WIDTH - 16;
+  const para = (text: string) => <text text={text} width={width} fontSize={12} color="textMuted" textWrap="word" />;
+  // The header row is in the interface's face, and the instructions in the editor's.
+  const line = (form: string, opcode: string, flags: string, effect: string, header = false) => {
+    const cell = (text: string, w: number, color: 'text' | 'textMuted', weight = 400) =>
+      header ? (
+        <text text={text} width={w} flexShrink={0} fontSize={11} color="textMuted" textWrap="none" selectable={false} />
+      ) : (
+        <text text={text} width={w} flexShrink={0} fontSize={12} fontFamily="monospace" fontWeight={weight} color={color} textWrap="none" />
+      );
+    return (
+      <row gap={12} y="center" paddingTop={2} paddingBottom={2} width={width}>
+        {cell(form, 96, 'text', 600)}
+        {cell(opcode, 28, 'textMuted')}
+        {cell(flags, 48, 'text')}
+        <text text={effect} width={width - 96 - 28 - 48 - 36} fontSize={header ? 11 : 12} color={header ? 'textMuted' : 'text'} textWrap="word" />
+      </row>
+    );
+  };
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="The CPU’s instruction set"
+      width={760}
+      content={
+        <column gap={10} width={ISA_WIDTH}>
+          <scrollview height={520} width={ISA_WIDTH} overscrollBehavior="contain">
+            <column gap={10} width={width}>
+              {para(
+                'Registers: A, the accumulator; B, the ALU’s second operand; X, the index; L, where RET returns to; and the flags Z (zero), C (carry) and N (negative). Every instruction is one ROM word and takes two clock cycles.'
+              )}
+              {para(
+                'Operands: #k is the byte k itself; a is the data byte at address a; a,X is the byte at a + X; t is a label in the ROM; p is a port, 0–3; t,X is the low byte of the ROM word at t + X. In the flags column, * sets the flag from the result and - leaves it alone.'
+              )}
+              {INSTRUCTION_GROUPS.map(group => (
+                <column gap={0} width={width}>
+                  {heading(group.title)}
+                  {line('Instruction', 'Op', 'Z C N', 'Effect', true)}
+                  {group.instructions.map(i =>
+                    line(written(i), i.opcode.toString(16).toUpperCase().padStart(2, '0'), `${i.z} ${i.c} ${i.n}`, i.effect)
+                  )}
+                </column>
+              ))}
+              {para('RAM is 0x00–0x3F, the 32 × 16 framebuffer 0x40–0x7F. Port 0 reads the buttons and shows the left score; port 1 reads the frame tick and shows the right score.')}
+            </column>
+          </scrollview>
+          <row x="end" width={ISA_WIDTH}>{action('Close', close, 'accent')}</row>
         </column>
       }
     />

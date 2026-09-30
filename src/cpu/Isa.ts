@@ -130,3 +130,34 @@ export const FRAMEBUFFER = 0x40;
 /** Ports that exist; the rest read 0 and ignore writes. */
 export const PORTS = 4;
 export const ROM_SIZE = 256;
+
+/** How `ISA.md` writes an operand form, with the operand's letter: `#k`, `a,X`, `t`. */
+const WRITTEN: Record<Mode, string> = {
+  none: '',
+  imm: '#k',
+  abs: 'a',
+  absX: 'a,X',
+  b: 'B',
+  target: 't',
+  port: 'p',
+  table: 't,X'
+};
+
+/** An instruction as `ISA.md`'s table writes it: `LDA a,X`. */
+export function written(instruction: Instruction): string {
+  return `${instruction.mnemonic} ${WRITTEN[instruction.mode]}`.trim();
+}
+
+/** The instructions by what they do, for the reference in the Help menu. Each opcode is in exactly one. */
+export const INSTRUCTION_GROUPS: readonly { readonly title: string; readonly instructions: readonly Instruction[] }[] = (
+  [
+    ['Loads', 0x10, 0x1f],
+    ['Stores', 0x20, 0x27],
+    ['Transfers', 0x28, 0x2f],
+    ['Arithmetic and logic', 0x30, 0x5f],
+    ['Shifts and counting', 0x60, 0x6f],
+    ['Jumps and calls', 0x70, 0x7f],
+    ['Input and output', 0x80, 0x8f],
+    ['Control', 0x00, 0x0f]
+  ] as const
+).map(([title, from, to]) => ({ title, instructions: INSTRUCTIONS.filter(i => i.opcode >= from && i.opcode <= to) }));
