@@ -40,9 +40,8 @@ browser.
 
 ## Sixty seconds
 
-You need a checkout of [Gesso](https://github.com/kevinpbaker/gesso)
-beside this one (see [Building against Gesso](#building-against-gesso)),
-then:
+[Gesso](https://github.com/kevinpbaker/gesso) comes from npm with
+everything else:
 
 ```bash
 pnpm install
@@ -347,20 +346,10 @@ drives. The strip has to be decided before any worker starts, so
 
 Gesso is developed alongside this project, and changes to the engine
 are made in the engine when they'd help any app (see
-[ROADMAP.md § Engine changes](ROADMAP.md#engine-changes)). So the
-engine is packed from a sibling checkout into `vendor/` rather than
-installed from the registry:
-
-```bash
-git clone https://github.com/kevinpbaker/gesso ../gesso
-bash scripts/vendor-gesso.sh      # build Gesso, pack it into vendor/, install
-```
-
-`gesso.lock` records the Gesso commit that was last vendored.
-`scripts/ci-install.sh` is the version for machines that have no
-sibling checkout. It fetches exactly that commit and runs the same
-script, so CI and the deploy test the engine the working copy ran, not
-whatever is on Gesso's main branch.
+[ROADMAP.md § Engine changes](ROADMAP.md#engine-changes)). The six
+`gesso-*` packages are installed from npm like any other dependency,
+so a change made there reaches this project when it is released and
+the version here is bumped.
 
 ### The three files
 
@@ -378,7 +367,7 @@ keyboard focus where it was.
 ### CI
 
 `.github/workflows/ci.yml`, on every push to `main` and every pull
-request: install with Gesso at `gesso.lock`, typecheck, the specs, a
+request: install, typecheck, the specs, a
 minute of lockstep, then the frame budget.
 
 ### Reading further

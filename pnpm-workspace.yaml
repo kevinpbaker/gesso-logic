@@ -1,27 +1,14 @@
-# The tarballs in vendor/ again, for pnpm.
-#
-# Written by scripts/vendor-gesso.sh. pnpm 11 reads overrides only
-# from this file, not from package.json.
-overrides:
-  gesso-components: file:vendor/gesso-components-0.4.1-0d5a0e30.tgz
-  gesso-core: file:vendor/gesso-core-0.4.1-7de7a805.tgz
-  gesso-devtools: file:vendor/gesso-devtools-0.4.1-f82680ca.tgz
-  gesso-framework: file:vendor/gesso-framework-0.4.1-5c12eb5a.tgz
-  gesso-testing: file:vendor/gesso-testing-0.4.1-1acf509e.tgz
-  gesso-vite-plugin: file:vendor/gesso-vite-plugin-0.4.1-5b1a4839.tgz
-
 # The engine is exempt from the publish-age cooldown.
 #
 # pnpm will not install anything published in the last day — a good
 # rule, and malware is usually found inside it. It is the wrong rule
-# for these six: they are built from the checkout beside this one and
-# installed from the tarballs in vendor/, so the copy that lands here
-# is never the registry copy and waiting a day protects nothing. The
-# build rejected them the first afternoon 0.4.0 was published.
+# for these six: they are Gesso's own packages, released from the
+# checkout beside this one so an engine change can reach this app the
+# afternoon it is made, and a day's wait would only hold that back.
 #
-# The exemption is by name and only these names. Everything from the
-# registry keeps the cooldown, which is the part that was protecting
-# anything.
+# The exemption is by name and only these names. Everything else from
+# the registry keeps the cooldown, which is the part that was
+# protecting anything.
 minimumReleaseAgeExclude:
   - gesso-components
   - gesso-core

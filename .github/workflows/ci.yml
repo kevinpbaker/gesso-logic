@@ -20,8 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Install, with Gesso built at the commit in gesso.lock
-        run: bash scripts/ci-install.sh
+      - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - name: Lockstep, the gate-level computer against the emulator, a minute of fuzzing
