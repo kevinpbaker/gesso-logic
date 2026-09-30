@@ -176,7 +176,8 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
       pointerEvents={open.pipe(map(o => (o ? 'auto' : 'none')))}>
       <row gap={6} y="center">
         <text text="Analyser" fontSize={12} fontWeight={600} color="text" />
-        <text text={range} fontSize={11} color="textMuted" />
+        {/* Takes the slack, so the controls stay put while the range's width changes every cycle. */}
+        <text text={range} flex={1} minWidth={0} fontSize={11} color="textMuted" textWrap="none" textOverflow="ellipsis" />
         {button(start.pipe(map(s => (s === null ? 'Live ●' : 'Live'))), () => (start.value = null))}
         {button('−', () => zoom(2))}
         {button('+', () => zoom(0.5))}
