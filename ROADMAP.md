@@ -1,11 +1,11 @@
 # Roadmap
 
-A digital logic simulator built on [Gesso](../gesso): wire gates on a
+A digital logic simulator built on [Gesso](https://github.com/kevinpbaker/gesso): wire gates on a
 canvas, wrap them into chips, and run them — up to an 8-bit CPU of
 about ten thousand gates, playing Pong on an LED matrix, every gate
 evaluated on every clock.
 
-It exists to be evidence, the way [gessosheet](../gessosheet) is. The
+It exists to be evidence, the way [gessosheet](https://github.com/kevinpbaker/gesso-sheets) is. The
 sheet's claim is that a recalculation cannot stall a scroll. This one's
 is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
@@ -23,7 +23,7 @@ at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
 and a computer of 8,559 gates runs programs from a ROM, drawing on a
 32 × 16 LED matrix, in lockstep with the emulator. The page opens on
-Pong playing on those gates at 15 kHz, with a tour, and a toggle that
+Pong playing on those gates at 20 kHz, with a tour, and a toggle that
 moves the simulator onto the main thread. A ROM's program can be edited
 and reloaded in the app (Phase 23). Shipping, Phase 22, is not done.
 
