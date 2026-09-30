@@ -23,7 +23,7 @@ at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
 and a computer of 8,559 gates runs programs from a ROM, drawing on a
 32 × 16 LED matrix, in lockstep with the emulator. The page opens on
-Pong playing on those gates at 20 kHz, with a tour, and a toggle that
+Pong playing on those gates at 18 kHz, with a tour, and a toggle that
 moves the simulator onto the main thread. A ROM's program can be edited
 and reloaded in the app (Phase 23). Shipping, Phase 22, is not done.
 

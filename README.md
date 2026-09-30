@@ -56,7 +56,7 @@ a five-step tour in the corner:
 2. **Look inside the CPU.** Double-click it. The breadcrumb reads
    *Top › CPU*.
 3. **Open the ALU.** *Top › CPU › datapath › ALU*. Every wire is
-   drawn in its live colour, at 20 kHz.
+   drawn in its live colour, at 18 kHz.
 4. **Watch the program counter** in the logic analyser along the
    bottom. Drag across it to scrub.
 5. **Rewire it while it plays.** Select a wire and delete it. The

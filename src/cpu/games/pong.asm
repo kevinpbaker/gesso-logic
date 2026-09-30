@@ -219,7 +219,7 @@ pointR: LDA SR
 scored: CMP #WIN
         JNZ serve
         LDX #64                 ; a win: the score stays up for 64 turns
-over:   IN 1                    ; of the tick, 1.6 s at 20 kHz, then a new game
+over:   IN 1                    ; of the tick, 1.8 s at 18 kHz, then a new game
         CMP TICK
         JZ over
         STA TICK
