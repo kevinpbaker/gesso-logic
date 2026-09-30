@@ -1800,9 +1800,20 @@ closing does. Checked in Chrome: `arithmetic.asm` over Pong, then
 `pong.asm` over that, which asked. Pong read as loaded again, since
 it's what the ROM holds.
 
-Still later: a gutter of line numbers and addresses. An editable
-reports no scroll offset, so a gutter can't follow the field yet.
-That has been asked of Gesso.
+**Since: a gutter.** Beside the field, each line's number and, while
+the field holds the loaded program, the ROM address it was assembled
+to. The program counter's row is in the accent colour. The gutter is
+an overflow-hidden box with `scrollWith` on the field (Gesso
+`d6c52da`), so it takes the field's scroll in the same layout pass
+and the two are never a frame apart. Both have an explicit
+`lineHeight` of 15, so rows can't drift, and the gutter has one more
+pixel below than the field, which scrolls one past its text for the
+caret. Checked in Chrome on Pong: `serve:` on 72 at 1D, the counter's
+row lit beside `JZ wait`, and at the end `masks:` on 268 at D5 and
+`columns:` on 269 at DD, lined up. With an edit the addresses go,
+and deleting it brings them back.
+
+That completes the list this phase set aside for later.
 
 ---
 
@@ -1823,6 +1834,7 @@ shipped in.
 | 7     | A scroll layer is built only after a container has scrolled quietly for three frames running, so a virtualised list that mounts rows as it scrolls never builds one (`ScrollLayerCache.wants`). Fixes 62ef127, which tripled gessosheet's scroll cost in software rendering | gesso `4bce853` |
 | 7     | `proofPanel` in `gesso-devtools`: the main-thread proof strip, merged from gessosheet's and this project's copies | gesso `1344d95` |
 | 23    | The wheel scrolls a multiline or wide `editabletext` that overflows, and a multiline one draws the overlay scrollbar a scroll view has (`scrollRange`, `scrollsText`) | gesso `d27e076` |
+| 23    | `scrollWith`: an overflow-hidden box takes another node's scroll offset in the same layout pass, for the program editor's gutter | gesso `d6c52da` |
 
 ---
 

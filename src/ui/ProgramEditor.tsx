@@ -1,6 +1,6 @@
-import { combineLatest, distinctUntilChanged, map, type Observable } from 'rxjs';
+import { BehaviorSubject, combineLatest, distinctUntilChanged, map, type Observable } from 'rxjs';
 
-import type { UiChild, UiKeyboardEvent, UiTextChangeEvent, UiTextSpan, UiThemeColorName } from 'gesso-core';
+import type { UiChild, UiKeyboardEvent, UiNode, UiTextChangeEvent, UiTextSpan, UiThemeColorName } from 'gesso-core';
 import { Dialog, Select } from 'gesso-components';
 import { createComponent, internalState, type ComponentContext } from 'gesso-framework';
 
@@ -22,6 +22,12 @@ import { GAMES, PROGRAMS } from './Programs';
 const WIDTH = 720;
 const INNER = WIDTH - 40;
 const ROM_WORDS = 256;
+/** The field's text and the gutter's, top to bottom; the same for both, or the gutter drifts from the lines it names. */
+const PADDING = 8;
+const LINE_HEIGHT = 15;
+const FIELD_HEIGHT = 420;
+/** Wide enough for `270 1F`: a line number, and the address it assembled to. */
+const GUTTER_WIDTH = 64;
 /** The problems listed under the field; the first few are the ones to fix, and the rest often follow from them. */
 const MAX_PROBLEMS = 6;
 
@@ -51,6 +57,25 @@ let cached: { source: string; tokens: Token[] } = { source: '', tokens: [] };
 function tokensOf(source: string): Token[] {
   if (cached.source !== source) cached = { source, tokens: highlight(source) };
   return cached.tokens;
+}
+
+/**
+ * The gutter beside the source: a line number for each line of it, and,
+ * when `lines` is given, the ROM address each line was assembled to. A
+ * line that made no word has no address, and one that made several —
+ * a `.byte` list — has its first.
+ */
+export function gutterOf(lineCount: number, lines: readonly number[] | null): string {
+  const addressOf = new Map<number, number>();
+  lines?.forEach((line, address) => {
+    if (line > 0 && !addressOf.has(line)) addressOf.set(line, address);
+  });
+  const rows: string[] = [];
+  for (let line = 1; line <= lineCount; line++) {
+    const address = addressOf.get(line);
+    rows.push(`${String(line).padStart(3)} ${address === undefined ? '  ' : address.toString(16).toUpperCase().padStart(2, '0')}`);
+  }
+  return rows.join('\n');
 }
 
 /** Behind the line the program counter is at. */
@@ -167,6 +192,23 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
     map(([t, m]) => spansOf(t, m))
   );
 
+  /** The field, for the gutter to scroll with. */
+  const field = new BehaviorSubject<UiNode | null>(null);
+  /** The gutter's rows, the program counter's in the accent colour. */
+  const gutter = combineLatest([text, loaded, program, marked.pipe(distinctUntilChanged())]).pipe(
+    map(([t, l, p, m]): UiTextSpan[] => {
+      const rows = gutterOf(t.split('\n').length, t === l ? p.lines : null).split('\n');
+      if (m <= 0 || m > rows.length) return [{ text: rows.join('\n'), color: 'textMuted' }];
+      const before = rows.slice(0, m - 1).join('\n');
+      const after = rows.slice(m).join('\n');
+      return [
+        { text: m > 1 ? `${before}\n` : '', color: 'textMuted' },
+        { text: rows[m - 1]!, color: 'primary' },
+        { text: m < rows.length ? `\n${after}` : '', color: 'textMuted' }
+      ].filter(span => span.text !== '');
+    })
+  );
+
   const content = (
     <column gap={10} width={INNER}>
       <row gap={8} y="center" width={INNER}>
@@ -194,34 +236,47 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
       {/* Not in a scroll view: an editable scrolls its own text to the
           caret, and one in a scroll view is brought into view by its top
           whenever it takes focus, so a click far down jumped back up. */}
-      <editabletext
-        value={text as never}
-        spans={spans}
-        multiline={true}
-        width={INNER}
-        height={420}
-        padding={8}
-        backgroundColor="background"
-        borderColor="border"
-        borderWidth={1}
-        borderRadius={4}
-        fontSize={12}
-        fontFamily="monospace"
-        color="text"
-        textWrap="none"
-        role="textbox"
-        label="Program source"
-        onInput={(event: UiTextChangeEvent) => {
-          text.value = event.value;
-          pending.value = null;
-        }}
-        onKeyDown={(event: UiKeyboardEvent) => {
-          if (event.key === 'Enter' && (event.modifiers.ctrl || event.modifiers.meta)) {
-            load();
-            event.preventDefault();
-          }
-        }}
-      />
+      <row width={INNER} height={FIELD_HEIGHT} backgroundColor="background" borderColor="border" borderWidth={1} borderRadius={4} overflow="hidden">
+        {/* Follows the field's vertical scroll in the same layout pass, so the two never disagree by a frame. */}
+        <box
+          overflow="hidden"
+          width={GUTTER_WIDTH}
+          height={FIELD_HEIGHT - 2}
+          scrollWith={field}
+          scrollWithAxis="y"
+          backgroundColor="surface">
+          {/* A pixel more below than the field has: it scrolls one past its text, for the caret. */}
+          <column paddingTop={PADDING} paddingBottom={PADDING + 1} paddingX={PADDING}>
+            <text spans={gutter} fontSize={12} fontFamily="monospace" lineHeight={LINE_HEIGHT} textWrap="none" selectable={false} />
+          </column>
+        </box>
+        <editabletext
+          ref={(node: UiNode | null) => field.next(node)}
+          value={text as never}
+          spans={spans}
+          multiline={true}
+          width={INNER - GUTTER_WIDTH - 2}
+          height={FIELD_HEIGHT - 2}
+          padding={PADDING}
+          lineHeight={LINE_HEIGHT}
+          fontSize={12}
+          fontFamily="monospace"
+          color="text"
+          textWrap="none"
+          role="textbox"
+          label="Program source"
+          onInput={(event: UiTextChangeEvent) => {
+            text.value = event.value;
+            pending.value = null;
+          }}
+          onKeyDown={(event: UiKeyboardEvent) => {
+            if (event.key === 'Enter' && (event.modifiers.ctrl || event.modifiers.meta)) {
+              load();
+              event.preventDefault();
+            }
+          }}
+        />
+      </row>
       <column gap={2} width={INNER}>
         {report.pipe(
           map(r =>

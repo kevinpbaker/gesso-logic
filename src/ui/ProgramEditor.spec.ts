@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { spansOf } from './ProgramEditor';
+import { gutterOf, spansOf } from './ProgramEditor';
 
 describe('the program editor’s runs', () => {
   const source = 'start: LDA #1   ; one\n        JMP start\nHLT';
@@ -22,5 +22,17 @@ describe('the program editor’s runs', () => {
     expect(markedText(3)).toBe('HLT');
     // A line past the end marks nothing.
     expect(markedText(9)).toBe('');
+  });
+});
+
+describe('the program editor’s gutter', () => {
+  it('numbers every line, and gives each the address it was assembled to', () => {
+    // Line 1 a comment, 2 an instruction, 3 blank, 4 a .byte list of two words.
+    const lines = [2, 4, 4];
+    expect(gutterOf(4, lines).split('\n')).toEqual(['  1   ', '  2 00', '  3   ', '  4 01']);
+  });
+
+  it('numbers lines alone while there are none to address', () => {
+    expect(gutterOf(3, null)).toBe('  1   \n  2   \n  3   ');
   });
 });
