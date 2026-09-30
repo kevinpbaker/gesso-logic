@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 21 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 21 done, with 0b, and Phase 23. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -24,8 +24,8 @@ ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
 and a computer of 8,559 gates runs programs from a ROM, drawing on a
 32 × 16 LED matrix, in lockstep with the emulator. The page opens on
 Pong playing on those gates at 15 kHz, with a tour, and a toggle that
-moves the simulator onto the main thread. Shipping, Phase 22, is not
-done.
+moves the simulator onto the main thread. A ROM's program can be edited
+and reloaded in the app (Phase 23). Shipping, Phase 22, is not done.
 
 ---
 
@@ -1722,9 +1722,9 @@ What the code says today, which shapes the steps:
    at 15 kHz: the editor types without a dropped frame, a game ends at
    3, undo brings back 11, a reload keeps whichever is loaded.
 
-**Progress, 2026-09-29.** Steps 1 to 6 are built and specced
-(`Assembler.spec`, `Rom.spec`, `Program.spec`). Step 7 is checked in
-Chrome, except that nobody has played a game through to 3 yet:
+**Done, 2026-09-29.** Steps 1 to 6 are built and specced
+(`Assembler.spec`, `Rom.spec`, `Program.spec`), and step 7 is checked
+in Chrome:
 
 - Double-clicking Pong's ROM, or pressing **Edit program**, opened its
   source with its comments, the game running behind it at 14,9xx Hz.
@@ -1736,6 +1736,15 @@ Chrome, except that nobody has played a game through to 3 yet:
   game ran on, not restarted.
 - Closing with edits not loaded asked first. Discarding closed the
   dialog.
+- With nobody at the paddle, the `0x03` build's scores went 01, 02,
+  03, held there for Pong's two seconds, and a new game began at 00.
+  The `0x11` build, watched the same way, ran through 09 to 11.
+
+One thing to know when checking by hand: every tab of the app on one
+origin shares one autosave, and the last to write wins. A reload once
+brought back `0x11` after an undo to `0x03` had been saved. A scratch
+spec showed the undo reaching the autosave, so it was most likely
+another tab writing over it.
 
 Found on the way:
 
