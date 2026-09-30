@@ -1766,8 +1766,16 @@ Found on the way:
   the field already says whether there are edits to load, so the
   suffix stays out.
 
-Later, not in this phase: syntax colouring through the field's
-`spans`; the line being executed highlighted as it runs (the
+**Since: syntax colouring.** `highlight` in `src/cpu/Highlight.ts`
+reads a line the way the assembler does, and the dialog draws the runs
+as the field's `spans` in theme colours: comments muted, mnemonics
+`primary`, labels, constants and directives `secondary`, numbers and
+`B`/`X` `controlAccent`. A spec checks that the runs spell out every
+program in the repository exactly, since an editable draws its runs
+only when they do. Checked in Chrome on Pong, in light and dark, with
+typing recoloured as it goes.
+
+Still later: the line being executed highlighted as it runs (the
 assembler's `lineOf` has the map); a gutter of line numbers and
 addresses; loading one of the example programs into the dialog.
 

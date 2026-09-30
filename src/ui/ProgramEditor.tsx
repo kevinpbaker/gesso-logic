@@ -1,10 +1,11 @@
 import { combineLatest, distinctUntilChanged, map } from 'rxjs';
 
-import type { UiChild, UiKeyboardEvent, UiTextChangeEvent } from 'gesso-core';
+import type { UiChild, UiKeyboardEvent, UiTextChangeEvent, UiTextSpan, UiThemeColorName } from 'gesso-core';
 import { Dialog } from 'gesso-components';
 import { internalState, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type ProgramView } from '../app/CircuitContract';
+import { highlight, type TokenKind } from '../cpu/Highlight';
 import { action } from './controls';
 import { MOD } from './Commands';
 
@@ -22,6 +23,21 @@ const INNER = WIDTH - 40;
 const ROM_WORDS = 256;
 /** The problems listed under the field; the first few are the ones to fix, and the rest often follow from them. */
 const MAX_PROBLEMS = 6;
+
+/** Theme colours, so the source reads in light and dark alike. */
+const TOKEN_COLORS: Readonly<Record<TokenKind, UiThemeColorName>> = {
+  plain: 'text',
+  comment: 'textMuted',
+  mnemonic: 'primary',
+  definition: 'secondary',
+  directive: 'secondary',
+  number: 'controlAccent',
+  register: 'controlAccent'
+};
+
+function spansOf(source: string): UiTextSpan[] {
+  return highlight(source).map(t => ({ text: t.text, color: TOKEN_COLORS[t.kind] }));
+}
 
 export function programEditor(ctx: ComponentContext, onClosed: () => void): UiChild {
   const circuit = ctx.channel(Circuit);
@@ -80,6 +96,7 @@ export function programEditor(ctx: ComponentContext, onClosed: () => void): UiCh
           whenever it takes focus, so a click far down jumped back up. */}
       <editabletext
         value={text as never}
+        spans={text.pipe(map(spansOf))}
         multiline={true}
         width={INNER}
         height={420}
