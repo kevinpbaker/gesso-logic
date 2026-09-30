@@ -139,8 +139,22 @@ function PaletteRow(inputs: Inputs<PaletteRowProps>, ctx: ComponentContext): UiC
       <row gap={6} y="center" width={percent(100)}>
         <text text={label} flex={1} minWidth={0} fontSize={12} color="text" textWrap="none" textOverflow="ellipsis" selectable={false} />
         {keys === '' ? null : (
-          <box paddingLeft={5} paddingRight={5} paddingTop={1} paddingBottom={1} borderRadius={3} borderWidth={1} borderColor="border">
-            <text text={keys} fontSize={10} color="textMuted" textWrap="none" selectable={false} />
+          // A 10px line keeps its bottom ~3px for descenders that a key
+          // never has, so the capitals sit high: a pixel more padding on
+          // top evens the ink out. The minimum width makes the one-letter
+          // keys one size, a column rather than a ragged edge.
+          <box
+            minWidth={18}
+            x="center"
+            y="center"
+            paddingLeft={5}
+            paddingRight={5}
+            paddingTop={2}
+            paddingBottom={1}
+            borderRadius={3}
+            borderWidth={1}
+            borderColor="border">
+            <text text={keys} fontSize={10} lineHeight={12} color="textMuted" textWrap="none" selectable={false} />
           </box>
         )}
       </row>
