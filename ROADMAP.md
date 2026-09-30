@@ -1614,6 +1614,14 @@ and back again.
   the next wire under it, nearest first, and Tab does the same; the
   status bar says "Wire 2 of 3 here: clk.out → power-on.clk", with the
   pills showing where it goes. Checked on Pong's three clock wires.
+- **Inside a chip is no longer called read-only.** It hadn't been since
+  Phase 8 made edits there change the definition, but the breadcrumb,
+  the status bar and the readout still said so, and the menus greyed
+  out Delete, Cut, Paste, Duplicate, Rotate and Make chip while their
+  keys worked. They now say what an edit there does — "edits change
+  every memory and ports" — and the menus match the keys. An input's
+  value field stays hidden inside a chip: there it is a pin, driven
+  from outside.
 - **`pnpm proof` passes**, unchanged: `/proof` still measures the
   10,000-gate bench, and its instrument has a Pong button beside it.
 

@@ -64,7 +64,8 @@ export interface DocumentSummary {
   /**
    * Which level is on the canvas: the chips opened from the top, each
    * by its instance id and its definition's name. Empty at the top. A
-   * level inside a chip is shown live and read-only.
+   * level inside a chip is live, and an edit there changes the chip's
+   * definition, so every instance of it.
    */
   readonly path: readonly { readonly id: string; readonly chip: string }[];
   /** True for the document a first visit opened (see `restore`), until another is opened: the page greets it. */

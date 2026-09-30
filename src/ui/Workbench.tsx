@@ -150,9 +150,12 @@ export function workbench(ctx: ComponentContext) {
     () => canvas.focus()
   );
 
-  /** The level shown is inside a chip: live, and read-only. */
+  /**
+   * The chip whose inside is shown, or null at the top. It is live, and
+   * an edit made there changes the chip's definition, so every instance.
+   */
   const inside = document.pipe(
-    map(d => d.path.length > 0),
+    map(d => d.path.at(-1)?.chip ?? null),
     distinctUntilChanged()
   );
 
@@ -289,7 +292,6 @@ export function workbench(ctx: ComponentContext) {
 
   function enabled(id: CommandId): boolean {
     const d = document.value;
-    const editable = d.path.length === 0;
     const s = canvas.selection();
     switch (id) {
       case 'undo':
@@ -298,16 +300,13 @@ export function workbench(ctx: ComponentContext) {
         return d.canRedo;
       case 'cut':
       case 'delete':
-        return editable && s.parts + s.wires > 0;
+        return s.parts + s.wires > 0;
       case 'copy':
         return s.parts > 0;
       case 'duplicate':
       case 'rotate':
-        return editable && s.parts > 0;
       case 'makeChip':
-        return editable && s.parts > 0;
-      case 'paste':
-        return editable;
+        return s.parts > 0;
       case 'deselect':
         return s.parts + s.wires > 0;
       case 'openChip':
@@ -510,7 +509,7 @@ export function workbench(ctx: ComponentContext) {
                       small(`${level.chip} · ${level.id}`, () => (circuit.send.closeChip(i + 1), canvas.focus()), `crumb${i}`)
                     )
                   ])}
-                  <text text="Live · read-only" fontSize={11} color="textMuted" marginLeft={6} selectable={false} />
+                  <text text={`Live · edits change every ${d.path.at(-1)!.chip}`} fontSize={11} color="textMuted" marginLeft={6} textWrap="none" selectable={false} />
                 </row>
               ]
         )
@@ -718,7 +717,9 @@ export function workbench(ctx: ComponentContext) {
       )}
       <text
         text={combineLatest([canvas.editorChanged, inside]).pipe(
-          map(([, readOnly]) => (readOnly ? 'Inside a chip: live and read-only · U goes up a level · Double-click a chip to go deeper' : editor.hint))
+          map(([, chip]) =>
+            chip !== null && editor.idle ? `Inside ${chip}: an edit here changes every ${chip} · U goes up a level · Double-click a chip to go deeper` : editor.hint
+          )
         )}
         flex={1}
         minWidth={0}

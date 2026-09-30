@@ -163,6 +163,11 @@ export class Editor {
     return this.mode.kind === 'placing' ? { what: this.mode.what, chip: this.mode.chip ?? null } : null;
   }
 
+  /** Nothing is selected and nothing is under way: the status bar may say something of its own. */
+  get idle(): boolean {
+    return this.mode.kind === 'idle' && this.selection.size === 0;
+  }
+
   /**
    * What can be done from here, for the status bar: the keys that act
    * on what is selected, or on nothing, so that none of them has to be

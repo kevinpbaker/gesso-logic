@@ -55,7 +55,7 @@ const same = (a: SelectionSummary, b: SelectionSummary) =>
   a.one?.chip === b.one?.chip &&
   a.one?.label === b.one?.label;
 
-export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: Observable<boolean>): UiChild {
+export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: Observable<string | null>): UiChild {
   const circuit = ctx.channel(Circuit);
   const selection = canvas.editorChanged.pipe(
     map(() => canvas.selection()),
@@ -105,7 +105,7 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
   );
 
   const body = combineLatest([selection, inside]).pipe(
-    map(([s, readOnly]): UiChild[] => {
+    map(([s, chip]): UiChild[] => {
       if (s.parts === 0 && s.wires === 0) return [];
       const one = s.one;
       const title =
@@ -124,18 +124,16 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
           {one === null ? null : <text text={one.label ?? one.id} fontSize={11} color="textMuted" textWrap="none" />}
         </row>
       ];
-      if (readOnly) {
-        rows.push(
-          <text key="ro" text="Inside a chip everything is live and read-only. Go up a level to edit." fontSize={11} color="textMuted" textWrap="word" />
-        );
-        return rows;
+      if (chip !== null) {
+        rows.push(<text key="inside" text={`Inside ${chip}: an edit here changes every ${chip}. Undo takes it back.`} fontSize={11} color="textMuted" textWrap="word" />);
       }
       if (one?.kind === 'chip' && one.chip !== null) {
         rows.push(labelled('Name', <row gap={6}>{field('name', 'Chip name', chipName, 120, rename)}{small('Rename', rename)}</row>, 'name'));
       }
       if (one !== null && WIDENABLE.has(one.kind)) {
         rows.push(labelled('Width', <row gap={6} y="center">{field('width', 'Width in bits', widthText, 44, applyWidth)}<text text="bits · Enter" fontSize={11} color="textMuted" /></row>, 'width'));
-        if (one.kind === 'input' && one.width > 1) {
+        // Inside a chip an input is a pin, driven from outside it.
+        if (one.kind === 'input' && one.width > 1 && chip === null) {
           rows.push(labelled('Value', <row gap={6} y="center">{field('value', 'Value, 0x for hex', valueText, 72, applyValue)}<text text="0x for hex" fontSize={11} color="textMuted" /></row>, 'value'));
         }
       }
