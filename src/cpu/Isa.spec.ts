@@ -31,6 +31,10 @@ describe('the ISA', () => {
     expect(new Set(grouped).size).toBe(INSTRUCTIONS.length);
   });
 
+  it('says what every instruction does in words', () => {
+    for (const i of INSTRUCTIONS) expect(i.about, written(i)).toMatch(/^[A-Z].*\.$/);
+  });
+
   it('halts on an empty ROM word', () => {
     expect(disassemble(0x0000)).toBe('HLT');
   });

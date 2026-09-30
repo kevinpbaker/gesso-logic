@@ -120,7 +120,7 @@ export function shortcuts(open: Observable<boolean>, close: () => void): UiChild
   );
 }
 
-const ISA_WIDTH = inner(760);
+const ISA_WIDTH = inner(900);
 
 /**
  * Every instruction the CPU runs, generated from `Isa.ts`, the table
@@ -132,7 +132,8 @@ export function instructionSet(open: Observable<boolean>, close: () => void): Ui
   const width = ISA_WIDTH - 16;
   const para = (text: string) => <text text={text} width={width} fontSize={12} color="textMuted" textWrap="word" />;
   // The header row is in the interface's face, and the instructions in the editor's.
-  const line = (form: string, opcode: string, flags: string, effect: string, header = false) => {
+  const EFFECT = 210;
+  const line = (form: string, opcode: string, flags: string, effect: string, about: string, header = false) => {
     const cell = (text: string, w: number, color: 'text' | 'textMuted', weight = 400) =>
       header ? (
         <text text={text} width={w} flexShrink={0} fontSize={11} color="textMuted" textWrap="none" selectable={false} />
@@ -140,11 +141,12 @@ export function instructionSet(open: Observable<boolean>, close: () => void): Ui
         <text text={text} width={w} flexShrink={0} fontSize={12} fontFamily="monospace" fontWeight={weight} color={color} textWrap="none" />
       );
     return (
-      <row gap={12} y="center" paddingTop={2} paddingBottom={2} width={width}>
+      <row gap={12} y="start" paddingTop={2} paddingBottom={2} width={width}>
         {cell(form, 96, 'text', 600)}
         {cell(opcode, 28, 'textMuted')}
         {cell(flags, 48, 'text')}
-        <text text={effect} width={width - 96 - 28 - 48 - 36} fontSize={header ? 11 : 12} color={header ? 'textMuted' : 'text'} textWrap="word" />
+        <text text={effect} width={EFFECT} flexShrink={0} fontSize={header ? 11 : 12} color={header ? 'textMuted' : 'text'} textWrap="word" />
+        <text text={about} width={width - 96 - 28 - 48 - EFFECT - 48} fontSize={header ? 11 : 12} color="textMuted" textWrap="word" />
       </row>
     );
   };
@@ -153,7 +155,7 @@ export function instructionSet(open: Observable<boolean>, close: () => void): Ui
       open={open}
       onClose={close}
       title="The CPU’s instruction set"
-      width={760}
+      width={900}
       content={
         <column gap={10} width={ISA_WIDTH}>
           <scrollview height={520} width={ISA_WIDTH} overscrollBehavior="contain">
@@ -167,9 +169,9 @@ export function instructionSet(open: Observable<boolean>, close: () => void): Ui
               {INSTRUCTION_GROUPS.map(group => (
                 <column gap={0} width={width}>
                   {heading(group.title)}
-                  {line('Instruction', 'Op', 'Z C N', 'Effect', true)}
+                  {line('Instruction', 'Op', 'Z C N', 'Effect', 'In words', true)}
                   {group.instructions.map(i =>
-                    line(written(i), i.opcode.toString(16).toUpperCase().padStart(2, '0'), `${i.z} ${i.c} ${i.n}`, i.effect)
+                    line(written(i), i.opcode.toString(16).toUpperCase().padStart(2, '0'), `${i.z} ${i.c} ${i.n}`, i.effect, i.about)
                   )}
                 </column>
               ))}
