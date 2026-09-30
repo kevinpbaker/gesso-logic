@@ -64,6 +64,8 @@ export type CommandId =
   | `game:${string}`
   | 'shortcuts'
   | 'gettingStarted'
+  | 'tour'
+  | 'thread'
   | 'menuBar';
 
 /** ⌘ on a Mac, Ctrl everywhere else; a worker has a navigator too. */
@@ -105,8 +107,10 @@ const FIXED: Readonly<Record<string, Command>> = {
   truthTable: { label: 'Truth table of the selection', keys: 'T', group: 'View' },
   runPause: { label: 'Run', keys: `${MOD}+Enter`, group: 'Simulate' },
   step: { label: 'Step one clock cycle', keys: '.', group: 'Simulate' },
+  thread: { label: 'Run the simulator on the main thread', group: 'Simulate' },
   shortcuts: { label: 'Keyboard shortcuts', keys: '?', group: 'Help' },
   gettingStarted: { label: 'Getting started', group: 'Help' },
+  tour: { label: 'Take the tour', group: 'Help' },
   menuBar: { label: 'Go to the menu bar', keys: 'F10', group: 'Help' }
 };
 
@@ -167,7 +171,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'Simulate',
     mnemonic: 's',
-    entries: ['runPause', 'step', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`)]
+    entries: ['runPause', 'step', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), MENU_SEPARATOR, 'thread']
   },
   {
     label: 'Examples',
@@ -182,7 +186,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       'example:bench'
     ]
   },
-  { label: 'Help', mnemonic: 'h', entries: ['gettingStarted', 'shortcuts'] }
+  { label: 'Help', mnemonic: 'h', entries: ['tour', 'gettingStarted', 'shortcuts'] }
 ];
 
 /** The shortcut sheet: the commands with a key, by menu, then what the pointer and the part keys do. */

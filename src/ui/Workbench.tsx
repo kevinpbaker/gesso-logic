@@ -1,10 +1,11 @@
-import { combineLatest, distinctUntilChanged, filter, map, take } from 'rxjs';
+import { combineLatest, distinctUntilChanged, filter, map, of, startWith, take } from 'rxjs';
 
 import { percent, type UiNode } from 'gesso-core';
 import { MenuBar, Select } from 'gesso-components';
-import { createComponent, FocusService, internalState, type ComponentContext } from 'gesso-framework';
+import { createComponent, FocusService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type ClockRate, type SceneName } from '../app/CircuitContract';
+import { isMainThread } from '../canvas/Bench';
 import { circuitCanvas, type CanvasKeys } from '../canvas/CircuitCanvas';
 import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
@@ -16,6 +17,7 @@ import { inspector } from './Inspector';
 import { palette } from './Palette';
 import { GAMES, PROGRAMS } from './Programs';
 import { ringingParts } from './Problems';
+import { tour } from './Tour';
 
 /**
  * The simulator as a person uses it.
@@ -43,6 +45,9 @@ export function workbench(ctx: ComponentContext) {
   const document = circuit.view.document;
   const status = circuit.view.status;
   const focusService = ctx.inject(FocusService);
+  const shell = ctx.inject(ShellService);
+  const mainThread = isMainThread();
+  const tourOpen = internalState(false);
 
   // ---------------------------------------------------------------------
   // Dialogs, and the guard in front of everything that replaces the document
@@ -130,8 +135,10 @@ export function workbench(ctx: ComponentContext) {
   ctx.effect(analyser.open, open => (analyserOpen = open));
 
   // Whatever was open when the tab closed, brought back by the
-  // application worker from its autosave.
-  circuit.send.restore();
+  // application worker from its autosave — or, the first time, Pong,
+  // already playing.
+  const pong = GAMES.find(g => g.name === 'pong.asm');
+  circuit.send.restore(pong === undefined ? undefined : { name: pong.name, source: pong.source, rate: pong.rate });
   files.refreshRecent();
   // The keyboard starts on the canvas, once it is on screen, so the part
   // keys work before anything has been clicked.
@@ -263,6 +270,15 @@ export function workbench(ctx: ComponentContext) {
         return openDialog(showShortcuts);
       case 'gettingStarted':
         return openDialog(showStart);
+      case 'tour':
+        tourOpen.value = true;
+        return;
+      case 'thread':
+        // The same page with `?main` added, or taken away: `main.ts`
+        // navigates to it in place, and the autosave brings the circuit
+        // back, running, on the other thread.
+        shell.openUrl(mainThread ? '?' : '?main');
+        return;
       case 'menuBar':
         if (menuBarNode !== null) focusService.focus(menuBarNode);
         return;
@@ -313,6 +329,7 @@ export function workbench(ctx: ComponentContext) {
     if (rate !== null) return `${status.value.clockHz === rate ? '✓' : '  '}  ${rateLabel(rate)}`;
     if (id === 'runPause') return status.value.running ? 'Pause' : 'Run';
     if (id === 'analyser') return analyserOpen ? 'Hide the logic analyser' : 'Show the logic analyser';
+    if (id === 'thread') return mainThread ? 'Run the simulator in its worker again' : 'Run the simulator on the main thread';
     return commandLabel(id);
   }
 
@@ -442,6 +459,17 @@ export function workbench(ctx: ComponentContext) {
       })}
       {tool({ label: 'Logic analyser', text: 'Analyser', icon: ICONS.analyser, tip: tip('analyser'), onRun: () => run('analyser'), on: analyser.open })}
       <box flex={1} />
+      {tool({
+        label: mainThread ? 'Simulator on the main thread' : 'Simulator in a worker',
+        text: mainThread ? 'Main thread' : 'Worker',
+        icon: ICONS.chip,
+        on: of(mainThread),
+        tip: () =>
+          mainThread
+            ? 'The simulator is sharing the page’s thread. Set the clock to “As fast as it goes” and drag the canvas to feel it. Click to put it back in its worker.'
+            : 'The simulator runs in a worker of its own, so the page never waits for it. Click to run it on the main thread instead, and feel the difference.',
+        onRun: () => run('thread')
+      })}
       {tool({ label: 'Keyboard shortcuts', icon: ICONS.help, tip: tip('shortcuts'), onRun: () => run('shortcuts') })}
     </row>
   );
@@ -488,6 +516,50 @@ export function workbench(ctx: ComponentContext) {
         )
       )}
     </row>
+  );
+
+  // The tour opens by itself when a first visit lands on Pong.
+  ctx.effect(
+    document.pipe(
+      map(d => d.welcome),
+      distinctUntilChanged()
+    ),
+    welcome => {
+      if (welcome) tourOpen.value = true;
+    }
+  );
+  const tourCard = tour(
+    tourOpen,
+    {
+      document,
+      status,
+      analyser: analyser.open,
+      analyserHeight: analyser.height,
+      played: canvas.editorChanged.pipe(
+        map(() => editor.playedWithArrows),
+        startWith(editor.playedWithArrows),
+        distinctUntilChanged()
+      )
+    },
+    {
+      openChips: path => {
+        circuit.send.closeChip(0);
+        for (const id of path) circuit.send.openChip(id);
+        canvas.focus();
+      },
+      toTop: () => {
+        circuit.send.closeChip(0);
+        canvas.focus();
+      },
+      showAnalyser: () => {
+        if (!analyserOpen) analyser.toggle();
+        canvas.focus();
+      },
+      close: () => {
+        tourOpen.value = false;
+        canvas.focus();
+      }
+    }
   );
 
   const emptyState = combineLatest([document, canvas.editorChanged]).pipe(
@@ -676,6 +748,7 @@ export function workbench(ctx: ComponentContext) {
           {canvas.element}
           {emptyState}
           {breadcrumb}
+          {tourCard}
           {inspector(ctx, canvas, inside)}
           {analyser.element as never}
           {toast}

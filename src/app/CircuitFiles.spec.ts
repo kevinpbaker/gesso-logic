@@ -126,3 +126,30 @@ describe('the autosave, restored late', () => {
     expect(slow.summary()).toMatchObject({ components: 0, name: null });
   });
 });
+
+describe('a first visit', () => {
+  const first = { name: 'three.asm', source: 'LDA #5\nADD #3\nHLT', rate: 15_000 };
+
+  it('opens the program it is given, running, and greets it, when nothing was saved', async () => {
+    const { service, summary, running } = harness();
+    await service.restore(first);
+    expect(summary().components).toBeGreaterThan(0);
+    expect(summary().welcome).toBe(true);
+    expect(running()).toBe(true);
+    // The greeting is for that document only.
+    service.loadScene('counter');
+    expect(summary().welcome).toBe(false);
+  });
+
+  it('restores what was saved instead, when there is something', async () => {
+    const saved = harness();
+    await saved.service.restore(); // autosaving begins once restore has read
+    saved.service.load(counterScene());
+    saved.flush();
+    const again = harness(saved.stored);
+    await again.service.restore(first);
+    expect(again.summary().welcome).toBe(false);
+    expect(again.summary().components).toBe(saved.summary().components);
+    expect(again.summary().name).toBe(saved.summary().name);
+  });
+});

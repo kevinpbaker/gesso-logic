@@ -318,14 +318,42 @@ export class SceneIndex {
     return found;
   }
 
+  /**
+   * The component whose box, grown by `margin` on every side, holds a
+   * point, nearest the point if several do — one it is inside beats one
+   * it is only near — or -1. `skip` leaves a component out.
+   */
+  componentNear(p: Point, margin: number, skip?: number): number {
+    let found = -1;
+    let bestDistance = Infinity;
+    this.forEach(
+      { left: p.x - margin, top: p.y - margin, right: p.x + margin, bottom: p.y + margin },
+      c => {
+        if (c === skip) return;
+        const x = this.x[c]!;
+        const y = this.y[c]!;
+        const dx = Math.max(x - p.x, 0, p.x - (x + this.width(c)));
+        const dy = Math.max(y - p.y, 0, p.y - (y + this.height(c)));
+        const d = Math.hypot(dx, dy);
+        if (d <= margin && d < bestDistance) {
+          bestDistance = d;
+          found = c;
+        }
+      },
+      null
+    );
+    return found;
+  }
+
   /** The pin nearest a point within `radius` units, or null. */
-  pinNear(p: Point, radius: number): PinRef | null {
+  pinNear(p: Point, radius: number, accept?: (c: number, pin: string) => boolean): PinRef | null {
     let best: PinRef | null = null;
     let bestDistance = radius;
     this.forEach(
       { left: p.x - radius, top: p.y - radius, right: p.x + radius, bottom: p.y + radius },
       c => {
         for (const { pin, at } of this.pins(c)) {
+          if (accept !== undefined && !accept(c, pin)) continue;
           const d = Math.hypot(at.x - p.x, at.y - p.y);
           if (d <= bestDistance) {
             bestDistance = d;
@@ -335,6 +363,21 @@ export class SceneIndex {
       },
       null
     );
+    return best;
+  }
+
+  /** A component's pin nearest a point, however far, among those `accept` takes; null if it takes none. */
+  nearestPinOf(c: number, p: Point, accept?: (pin: string) => boolean): PinRef | null {
+    let best: PinRef | null = null;
+    let bestDistance = Infinity;
+    for (const { pin, at } of this.pins(c)) {
+      if (accept !== undefined && !accept(pin)) continue;
+      const d = Math.hypot(at.x - p.x, at.y - p.y);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { component: this.ids[c]!, pin };
+      }
+    }
     return best;
   }
 
@@ -353,6 +396,27 @@ export class SceneIndex {
       }
     });
     return best;
+  }
+
+  /**
+   * Every wire whose route passes within `tolerance` units of a point,
+   * nearest first — the wires a click there could mean, where wires
+   * overlap. Ties keep the scene's order, so the list is the same each
+   * time it is asked.
+   */
+  wiresNear(p: Point, tolerance: number): number[] {
+    const found: { w: number; d: number }[] = [];
+    this.forEach({ left: p.x - tolerance, top: p.y - tolerance, right: p.x + tolerance, bottom: p.y + tolerance }, null, w => {
+      const pts = this.wirePoints;
+      let nearest = Infinity;
+      for (let i = this.wireStart[w]!; i + 3 < this.wireStart[w + 1]!; i += 2) {
+        nearest = Math.min(nearest, distanceToSegment(p, pts[i]!, pts[i + 1]!, pts[i + 2]!, pts[i + 3]!));
+      }
+      if (nearest <= tolerance) found.push({ w, d: nearest });
+    });
+    // Near enough to the same distance is the same: overlapping wires
+    // differ by a rounding error, and should cycle in a fixed order.
+    return found.sort((a, b) => (Math.abs(a.d - b.d) < 1e-6 ? a.w - b.w : a.d - b.d)).map(f => f.w);
   }
 
   /** Every component whose box lies wholly inside a rectangle: what a marquee selects. */

@@ -47,7 +47,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         requestSave: asNew => service.requestSave(asNew),
         finishSave: (saved, message) => service.finishSave(saved, message),
         rememberCamera: (x, y, scale) => service.rememberCamera(x, y, scale),
-        restore: () => void service.restore(),
+        restore: first => void service.restore(first),
         makeChip: (ids, name) => service.makeChip(ids, name),
         openChip: id => service.openChip(id),
         closeChip: depth => service.closeChip(depth),

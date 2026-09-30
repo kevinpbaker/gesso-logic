@@ -207,6 +207,8 @@ export class CircuitService {
   private saveSerial = 0;
   private readonly store: AutosaveStore | null;
   private readonly delay: (run: () => void, ms: number) => () => void;
+  /** The `opened` count of the document a first visit opened, or -1: see `DocumentSummary.welcome`. */
+  private welcomeOpened = -1;
   /** Whether autosaving has begun: only once `restore` has read what was there, or it would be overwritten. */
   private autosaving = false;
   private cancelAutosave: (() => void) | null = null;
@@ -316,7 +318,7 @@ export class CircuitService {
   }
 
   /** Reads the autosave back and loads it, running if it was; then autosaves from here on. */
-  async restore(): Promise<void> {
+  async restore(first?: { readonly name: string; readonly source: string; readonly rate: number }): Promise<void> {
     if (this.autosaving || this.store === null) {
       return;
     }
@@ -338,6 +340,13 @@ export class CircuitService {
         });
         this.camera = saved.camera;
         if (saved.running) this.run();
+      } else if (untouched && value === null && first !== undefined) {
+        // A first visit: the showpiece, already playing.
+        this.loadProgram(first.name, first.source, first.rate);
+        this.message = null;
+        this.welcomeOpened = this.opened;
+        this.documentSubject.next(this.summary());
+        this.run();
       }
     } catch {
       // An autosave that cannot be read is one that is not there: the
@@ -938,6 +947,7 @@ export class CircuitService {
       camera: this.openCamera,
       message: this.message,
       path: this.pathNow(),
+      welcome: this.welcomeOpened === this.opened,
       library: LIBRARY_PALETTE,
       chips: Object.keys(this.circuit.chips ?? {})
         .sort()

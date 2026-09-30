@@ -11,7 +11,7 @@ is harder to fake: **a circuit simulating as fast as the machine allows
 cannot make the editor hesitate.** On a single-threaded framework you
 pause the simulation to edit it. Here you rewire a running CPU.
 
-**Status:** Phases 0 to 20 done, with 0b. Phase 0's findings are in
+**Status:** Phases 0 to 21 done, with 0b. Phase 0's findings are in
 [PHASE0.md](PHASE0.md), and the phases below are amended where they
 changed anything. The simulator runs behind the `circuit` channel, and
 the canvas draws it: a 10,000-gate scene pans and zooms at 60 fps with
@@ -22,9 +22,10 @@ library and a logic analyser are built, and a 10,000-gate circuit runs
 at over 100 kHz and takes an edit mid-run inside a frame. The CPU's
 ISA is frozen in [ISA.md](ISA.md), with an emulator and an assembler,
 and a computer of 8,559 gates runs programs from a ROM, drawing on a
-32 × 16 LED matrix, in lockstep with the emulator. Pong plays on those
-gates in the browser at 15 kHz, from Examples → Pong. The showpiece
-page, Phase 21 on, is not built.
+32 × 16 LED matrix, in lockstep with the emulator. The page opens on
+Pong playing on those gates at 15 kHz, with a tour, and a toggle that
+moves the simulator onto the main thread. Shipping, Phase 22, is not
+done.
 
 ---
 
@@ -1526,6 +1527,95 @@ so anyone can feel the difference in one click.
 **Exit:** someone who has never seen the project opens the url, plays
 Pong, opens the CPU and edits a wire while the game runs, without
 reading anything.
+
+**Done.** A first visit opens on Pong, running. In Chrome, with the
+site's storage cleared:
+
+- the page came up on the computer playing Pong at 14,943 Hz, with 8,559
+  gates in the status bar;
+- the tour card opened in the corner;
+- a held ↑ moved the paddle and ticked the first step;
+- the CPU opened, then the ALU (Top › CPU › datapath › ALU), with every
+  wire lit;
+- the analyser showed the program counter's waveform;
+- back at the top, a wire deleted while the game ran ticked the last
+  step. The game never stopped.
+
+The toolbar's **Worker** button reloaded the page on `?main`, with the
+simulator on the main thread and the game carrying on from the autosave,
+and back again.
+
+- **First visit, not every visit.** `restore` takes a program to open
+  when nothing is saved. With a save, it brings that back as before.
+  The render worker hands it Pong's source, since it's the thread that
+  can bundle `.asm` as text. The summary's `welcome` flag marks the
+  document a first visit opened, and the tour opens on it.
+- **The tour** (`src/ui/Tour.tsx`) is five steps in a small card in the
+  canvas's lower left, clear of the matrix, lifted above the analyser
+  when that's open:
+  1. play Pong;
+  2. look inside the CPU;
+  3. open the ALU;
+  4. watch the program counter;
+  5. rewire it while it plays.
+
+  Each ticks when it happens, not when a button is pressed: the arrow
+  keys held a button, the path went through the CPU or the ALU, the
+  analyser opened, the revision moved while running. A tick stays once
+  made. The next step says how, with a **Show me** that does it. Help →
+  Take the tour opens it again.
+- **The program counter has a probe** in the computer scene, since the
+  analyser traces the top level's probes and LEDs.
+- **Main-thread mode, with no engine change.** `?main` makes `main.ts`
+  open a `MessageChannel`, serve the circuit on the page through one
+  end (`serveCircuit`, shared with `AppWorker.ts`), and hand `createApp`
+  the other as its application endpoint. Gesso takes a `MessagePort`
+  there, and `serveChannels` a port host. The render worker can't tell,
+  and the simulator's code is imported only in this mode. The toggle
+  asks the shell to open `?main` (or `?`), `main.ts`'s `onOpenUrl`
+  navigates in place, and the autosave brings the circuit back running.
+  At 15 kHz the simulator's slices take about a fifth of the page's
+  thread; at "As fast as it goes" they follow one another, and every
+  event the page forwards waits behind one. The tooltip says to try
+  that. (The render worker still draws on time; what suffers is
+  input.) Not measured yet: how that feels, in numbers.
+- **Fixed on the way:** stepping out of a chip restored the camera
+  remembered for the level above. On a page that had opened deep inside
+  a chip, as a hot reload did inside the ALU, that camera belonged to
+  no level, and going back to the top showed a speck at 0%. A level's
+  camera is now only remembered once something was framed.
+- **A selection is purple now** (the theme's `secondary`), not blue. A
+  selected wire on a live net was blue on blue, and where it went was
+  lost. A selected wire also gets a dot on each end, and each end is
+  named on a pill, part and pin — `clk.out`, `memory.clk` — in the
+  style the pins a wire is being drawn to are named in; up to four
+  wires selected at once.
+- **A wire let go near a pin now reaches it.** A drop took only a pin
+  within 8 screen pixels. At close zoom that's under half a unit, and a
+  chip's pin names are drawn a unit inside its edge, so letting go on
+  the name — the natural place — made no wire and said nothing. Now a
+  drop takes a pin within 16 pixels, or, let go on a part's body, that
+  part's nearest pin, preferring the other kind to the one the wire
+  started from. Near a part counts as on it, within 24 pixels of its
+  edge, so beside a chip the pin level with the pointer is the one
+  taken. A drop on the part the wire started from makes nothing.
+- **While a wire is drawn, the pins it could end on are named,** on
+  pills beside them at any zoom: the painter writes pin names only
+  close in. The one it will end on is purple and bold, with its pin
+  ringed and filled, and the dashed wire runs to it. That showed a
+  second bug: the ring and the preview had always used the chip's
+  *kind* to find a pin, and a chip's kind has no pins, so on every chip
+  they sat at its first pin, whichever one was meant. The wire itself
+  went to the right pin; what was shown didn't. Reproduced in Chrome on
+  Pong's clock wire, and fixed there.
+- **Overlapping wires: click again for the next.** Wires from one
+  output share their first run, and a click there took whichever came
+  first. Now a second click in the same place (within 5 pixels) selects
+  the next wire under it, nearest first, and Tab does the same; the
+  status bar says "Wire 2 of 3 here: clk.out → power-on.clk", with the
+  pills showing where it goes. Checked on Pong's three clock wires.
+- **`pnpm proof` passes**, unchanged: `/proof` still measures the
+  10,000-gate bench, and its instrument has a Pong button beside it.
 
 ## Phase 22 — Ship it
 

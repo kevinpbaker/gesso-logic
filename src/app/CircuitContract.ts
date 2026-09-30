@@ -67,6 +67,8 @@ export interface DocumentSummary {
    * level inside a chip is shown live and read-only.
    */
   readonly path: readonly { readonly id: string; readonly chip: string }[];
+  /** True for the document a first visit opened (see `restore`), until another is opened: the page greets it. */
+  readonly welcome: boolean;
   /** The document's chip definitions, by name, with the body each gives an instance: for the palette. */
   readonly chips: readonly { readonly name: string; readonly shape: KindLayout }[];
   /** The standard library, for the palette: each part's name, body and a line on what it does. Placing one brings it in. */
@@ -271,7 +273,8 @@ export interface CircuitCommands {
    * start, by an application that wants it — not by the bench, which
    * loads its own scene and must not overwrite a person's work.
    */
-  restore(): void;
+  /** Brings back what was open when the tab closed; with nothing saved, opens `first` — a program for the computer — running. */
+  restore(first?: { readonly name: string; readonly source: string; readonly rate: number }): void;
   /** Makes the selected components into a chip, named `name` or the next free `chip N`. */
   makeChip(ids: readonly string[], name?: string): void;
   /** Opens a chip on the current level, to show its insides live. */
@@ -323,6 +326,7 @@ export const EMPTY_SUMMARY: DocumentSummary = {
   camera: null,
   message: null,
   path: [],
+  welcome: false,
   chips: [],
   library: []
 };

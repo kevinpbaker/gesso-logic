@@ -219,7 +219,12 @@ export function isBench(): boolean {
 
 /** `/proof`: Phase 7's page, measured by `pnpm proof` (see `scripts/proof.ts`). */
 export function isProof(): boolean {
-  return workerName() === 'proof';
+  return workerName() === 'proof' || workerName() === 'proof+main';
+}
+
+/** `?main`: the simulator runs on the page's thread, not in its worker (see `main.ts`). */
+export function isMainThread(): boolean {
+  return workerName() === 'main' || workerName().endsWith('+main');
 }
 
 /** `?bench&only=regex` keeps only the runs whose label matches. */

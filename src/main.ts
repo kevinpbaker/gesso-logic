@@ -21,7 +21,7 @@
  *   });
  */
 import { proofPanel } from 'gesso-devtools';
-import { createApp } from 'gesso-framework';
+import { createApp, type PortHost } from 'gesso-framework';
 
 import { isProofPath } from './route';
 
@@ -39,9 +39,41 @@ if (host === null) {
 const params = new URLSearchParams(location.search);
 const proof = isProofPath(location.pathname);
 const panel = proof ? proofPanel(host, { global: 'gessologicProof' }) : null;
+
+// `?main`: the circuit and its simulator run here, on the page's own
+// thread, rather than in the application worker — Phase 21's toggle, so
+// anyone can feel what the worker is for. A `MessageChannel` stands in
+// for the worker: one end goes to `createApp` as the application
+// endpoint, the other is served here. The simulator's code is imported
+// only in this mode, and the port holds what arrives until it is.
+const mainThread = params.has('main');
+let appLogic: MessagePort | undefined;
+if (mainThread) {
+  const { port1, port2 } = new MessageChannel();
+  appLogic = port1;
+  void import('./app/serveCircuit').then(({ serveCircuit }) => {
+    const hostPort: PortHost = { onmessage: null };
+    port2.onmessage = event => hostPort.onmessage?.({ data: event.data, ports: event.ports });
+    port2.start();
+    serveCircuit(hostPort);
+  });
+}
+const workerName = params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : proof ? 'proof' : undefined;
+
 const app = createApp({
   ...(panel?.options ?? {}),
-  workerName: params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : proof ? 'proof' : undefined,
+  // The render worker is told the mode in its name, as it is `/proof`'s.
+  workerName: mainThread && !params.has('bench') ? (workerName === undefined ? 'main' : `${workerName}+main`) : workerName,
+  ...(appLogic === undefined ? {} : { appLogicWorker: appLogic }),
+  // The toggle asks for this page with `?main` added or taken away; that
+  // is navigated here, in place. Any other url opens in a new tab.
+  onOpenUrl: url => {
+    const target = new URL(url, location.href);
+    if (target.origin === location.origin && target.pathname === location.pathname) {
+      location.assign(`${target.pathname}${target.search === '?' ? '' : target.search}${target.hash}`);
+    }
+    else window.open(target.href, '_blank', 'noopener,noreferrer');
+  },
   // Save, Open and Duplicate are the circuit's, not the page's, and so
   // is F10, which goes to the menu bar. The shell has to say so before
   // the render worker has heard of the key, or Chrome's "Save page as"

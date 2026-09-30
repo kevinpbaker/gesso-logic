@@ -512,6 +512,9 @@ export function computerScene(program: string | readonly number[] = THREE_INSTRU
   b.display('hex', 'right', { in: { component: io, pin: 'S1' } }, 8);
   b.display('hex', 'PC', { in: { component: processor, pin: 'PC' } }, 8);
   b.display('hex', 'A', { in: { component: processor, pin: 'A' } }, 8);
+  // A probe on the program counter, for the logic analyser, which traces
+  // the top level's probes and LEDs.
+  b.display('probe', 'program counter', { in: { component: processor, pin: 'PC' } }, 8);
   b.output('halted', { component: processor, pin: 'halted' });
   const built = b.build();
   return layOut({

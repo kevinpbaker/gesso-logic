@@ -53,6 +53,7 @@ describe('the circuit channel', () => {
       camera: null,
       message: null,
       path: [],
+      welcome: false,
       chips: [],
       library: expect.any(Array)
     });

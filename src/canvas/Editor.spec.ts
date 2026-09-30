@@ -15,12 +15,13 @@ import { SceneIndex } from './SceneIndex';
  */
 const SCALE = 16;
 
-function setup(button = 'push') {
+function setup(button = 'push', wire?: (b: CircuitBuilder) => void) {
   const b = new CircuitBuilder();
   b.input('a');
   b.button(button);
   b.gate('and', 'g');
   b.output('led', { component: 'g', pin: 'out' });
+  wire?.(b);
   const circuit = b.build();
   const placed = {
     ...circuit,
@@ -103,6 +104,72 @@ describe('the editor', () => {
     editor.pointerUp(at(6, 1));
 
     expect(sent).toEqual([['connect', { component: 'a', pin: 'out' }, { component: 'g', pin: 'a' }, 'w1']]);
+  });
+
+  it('ends a wire let go on a part’s body at its nearest input, and one let go nearby at the pin', () => {
+    // The gate's inputs are at (6, 1) and (6, 3); let go inside its body,
+    // well away from either, as on a chip's pin name.
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(2, 1), 1, false);
+    editor.pointerMove(at(5, 1));
+    editor.pointerUp(at(8.5, 1.4));
+    editor.pointerDown(at(2, 1), 1, false);
+    editor.pointerMove(at(5, 3));
+    editor.pointerUp(at(8.5, 2.8));
+    // A pixel or ten from a pin, off the part, still reaches it: 16 pixels
+    // at 16 a unit is a unit.
+    editor.pointerDown(at(2, 1), 1, false);
+    editor.pointerMove(at(5, 3));
+    editor.pointerUp(at(5.2, 3.3));
+    expect(sent.map(s => s.slice(1, 3))).toEqual([
+      [{ component: 'a', pin: 'out' }, { component: 'g', pin: 'a' }],
+      [{ component: 'a', pin: 'out' }, { component: 'g', pin: 'b' }],
+      [{ component: 'a', pin: 'out' }, { component: 'g', pin: 'b' }]
+    ]);
+  });
+
+  it('ends a wire let go just beside a part at the pin level with the pointer', () => {
+    // 1.2 units left of the gate's edge: more than 16 pixels from either
+    // input at 16 a unit, but within 24 of the part.
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(2, 1), 1, false);
+    editor.pointerMove(at(4, 3));
+    editor.pointerUp(at(4.8, 2.7));
+    expect(sent.map(s => s[2])).toEqual([{ component: 'g', pin: 'b' }]);
+  });
+
+  it('picks the next of overlapping wires with each click in the same place, and with Tab', () => {
+    // Two wires leave the switch's output together, for the gate's two
+    // inputs: where they overlap, a click is ambiguous.
+    const { editor, at } = setup('push', b => {
+      b.connect({ component: 'a', pin: 'out' }, { component: 'g', pin: 'a' });
+      b.connect({ component: 'a', pin: 'out' }, { component: 'g', pin: 'b' });
+    });
+    const click = () => {
+      editor.pointerDown(at(2.6, 1), 1, false);
+      editor.pointerUp(at(2.6, 1));
+      return [...editor.selection];
+    };
+    const first = click();
+    expect(editor.hint).toMatch(/^Wire 1 of 2 here: a\.out → g\.(a|b) · click again or Tab for the next/);
+    const second = click();
+    expect(second).not.toEqual(first);
+    expect(editor.hint).toMatch(/^Wire 2 of 2 here/);
+    expect(click()).toEqual(first);
+    expect(editor.keyDown('Tab', false, false)).toBe(true);
+    expect([...editor.selection]).toEqual(second);
+    // A click somewhere else starts over.
+    editor.pointerDown(at(12, 12), 1, false);
+    editor.pointerUp(at(12, 12));
+    expect(editor.keyDown('Tab', false, false)).toBe(false);
+  });
+
+  it('draws no wire let go on the part it started from', () => {
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(10, 2), 1, false); // the gate's output
+    editor.pointerMove(at(12, 4));
+    editor.pointerUp(at(8, 2));
+    expect(sent).toEqual([]);
   });
 
   it('draws the wire for a flick with no move reported between press and release', () => {

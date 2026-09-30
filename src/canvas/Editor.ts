@@ -80,7 +80,13 @@ const DOUBLE_CLICK_MS = 400;
 const DRAG_THRESHOLD = 4;
 /** How near a pin or a wire a press must land, in screen pixels. */
 const PIN_REACH = 8;
+/** How far a wire being drawn reaches for a pin to end on, in pixels; see `dropTarget`. */
+const DROP_REACH = 16;
+/** How near a part's edge a wire being drawn counts as over the part, in pixels. */
+const PART_REACH = 24;
 const WIRE_REACH = 5;
+/** How near a click must be to the last one, in pixels, to pick the next of the wires there. */
+const CYCLE_REACH = 5;
 
 /** A key per part. Shift gives the inverted gate. */
 const PART_KEYS: Readonly<Record<string, Kind>> = {
@@ -125,8 +131,12 @@ export class Editor {
   private readonly now: () => number;
   /** Whether the space bar is held, which turns a left drag into a pan. */
   private spaceHeld = false;
+  /** The wires under the last wire click, and which of them is selected: see `clickWire`. */
+  private wireCycle: { readonly screen: Point; readonly ids: readonly string[]; readonly at: number } | null = null;
   /** Arrow keys holding a button down: see `pressArrowButton`. */
   private readonly arrowsHeld = new Set<string>();
+  /** Whether an arrow key has held a button yet: the tour's first step. */
+  playedWithArrows = false;
 
   constructor(private readonly deps: EditorDeps) {
     this.now = deps.now ?? (() => performance.now());
@@ -173,6 +183,13 @@ export class Editor {
     }
     const scene = this.deps.scene();
     const ids = this.selectedComponents();
+    const cycle = this.wireCycle;
+    if (cycle !== null && this.selection.size === 1 && this.selection.has(cycle.ids[cycle.at]!) && cycle.ids.length > 1) {
+      const w = scene.wireIds.indexOf(cycle.ids[cycle.at]!);
+      const ends = w < 0 ? null : scene.wireEnds[w]!;
+      const what = ends === null ? '' : `: ${this.pinTitle(ends.from)} → ${this.pinTitle(ends.to)}`;
+      return `Wire ${cycle.at + 1} of ${cycle.ids.length} here${what} · click again or Tab for the next · Del deletes it`;
+    }
     if (ids.length === 0 && this.selection.size > 0) return 'Wire selected · Del deletes it';
     if (ids.length === 0) {
       return scene.componentCount === 0
@@ -302,15 +319,15 @@ export class Editor {
         } else if (hit.kind === 'component') {
           this.clickComponent(hit.id, mode.additive);
         } else if (hit.kind === 'wire') {
-          this.select([hit.id], mode.additive);
+          this.clickWire(mode.screen, mode.additive);
         } else if (hit.kind === 'empty' && !mode.additive) {
           this.selection.clear();
         }
         break;
       }
       case 'wiring': {
-        const target = this.deps.scene().pinNear(world, PIN_REACH / this.deps.scale());
-        if (target !== null && !(target.component === mode.from.component && target.pin === mode.from.pin)) {
+        const target = this.dropTarget(world, mode.from);
+        if (target !== null) {
           this.deps.send.connect(mode.from, target, this.fresh('w'));
         }
         break;
@@ -376,6 +393,8 @@ export class Editor {
       case 't':
         this.tabulate();
         return true;
+      case 'Tab':
+        return this.nextOverlappingWire();
       case 'r':
       case 'R':
         this.rotateSelection();
@@ -488,6 +507,10 @@ export class Editor {
     if (value === 1) this.arrowsHeld.add(key);
     else if (!this.arrowsHeld.delete(key)) return false;
     this.deps.send.setInput(id, value);
+    if (!this.playedWithArrows) {
+      this.playedWithArrows = true;
+      this.deps.changed();
+    }
     return true;
   }
 
@@ -537,14 +560,17 @@ export class Editor {
           surface.rect(scene.x[c]! - 3 * px, scene.y[c]! - 3 * px, scene.width(c) + 6 * px, scene.height(c) + 6 * px);
         }
       }
-      surface.strokeColor('primary');
+      // The selection is drawn in the secondary colour, not the primary:
+      // primary is what a high signal is lit in, and a selected wire on a
+      // live net was blue on blue, its route and its ends lost.
+      surface.strokeColor('secondary');
       surface.lineWidth(2 * px);
       surface.stroke();
       const wires = scene.wireIds.map((id, w) => (this.selection.has(id) ? w : -1)).filter(w => w >= 0);
       if (wires.length > 0) {
+        const p = scene.wirePoints;
         surface.beginPath();
         for (const w of wires) {
-          const p = scene.wirePoints;
           surface.moveTo(p[scene.wireStart[w]!]!, p[scene.wireStart[w]! + 1]!);
           for (let i = scene.wireStart[w]! + 2; i < scene.wireStart[w + 1]!; i += 2) {
             surface.lineTo(p[i]!, p[i + 1]!);
@@ -552,18 +578,38 @@ export class Editor {
         }
         surface.lineWidth(4 * px);
         surface.stroke();
+        // And a dot on each end: the two pins it joins.
+        surface.beginPath();
+        const r = Math.max(0.45, 5 * px);
+        for (const w of wires) {
+          for (const at of [scene.wireStart[w]!, scene.wireStart[w + 1]! - 2]) {
+            surface.moveTo(p[at]! + r, p[at + 1]!);
+            surface.arc(p[at]!, p[at + 1]!, r, 0, Math.PI * 2);
+            surface.closePath();
+          }
+        }
+        surface.fillColor('secondary');
+        surface.fill();
+        // And what it joins, named at each end: the part and the pin. A
+        // few wires at most, or the names are a crowd.
+        if (wires.length <= 4) {
+          for (const w of wires) {
+            const ends = scene.wireEnds[w]!;
+            for (const end of [ends.from, ends.to]) this.drawPinPill(surface, end, this.pinTitle(end), true, px);
+          }
+        }
       }
     }
 
     const mode = this.mode;
     if (mode.kind === 'wiring') {
-      const target = scene.pinNear(this.pointer, PIN_REACH / this.deps.scale());
+      const target = this.dropTarget(this.pointer, mode.from);
       const end = target === null ? this.pointer : pinOf(scene, target);
       const path = route(mode.fromAt, end, target === null ? 0 : slotOf(target.pin));
       surface.beginPath();
       surface.moveTo(path[0]!.x, path[0]!.y);
       for (const p of path.slice(1)) surface.lineTo(p.x, p.y);
-      surface.strokeColor('primary');
+      surface.strokeColor(target === null ? 'textMuted' : 'secondary');
       surface.lineWidth(2 * px);
       surface.lineDash([4 * px, 3 * px]);
       surface.stroke();
@@ -594,13 +640,21 @@ export class Editor {
       surface.text((mode.chip ?? mode.what).toUpperCase(), at.x + size.width / 2, at.y - 0.4, { fontSize: 12 * px, align: 'center' });
     }
 
+    // Drawing a wire: the part it would end on, with the names of the
+    // pins it could take and the one it will, at any zoom — the painter
+    // writes pin names only close in, and a chip's pins are points.
+    if (mode.kind === 'wiring') {
+      const target = this.dropTarget(this.pointer, mode.from);
+      if (target !== null) this.drawPinNames(surface, target, mode.from, px);
+    }
+
     // The pin under the pointer, so drawing a wire has somewhere to aim.
-    const hovered = mode.kind === 'wiring' ? scene.pinNear(this.pointer, PIN_REACH / this.deps.scale()) : this.hover.kind === 'pin' ? this.hover.pin : null;
+    const hovered = mode.kind === 'wiring' ? this.dropTarget(this.pointer, mode.from) : this.hover.kind === 'pin' ? this.hover.pin : null;
     if (hovered !== null && mode.kind !== 'placing') {
       const at = pinOf(scene, hovered);
       surface.beginPath();
-      surface.arc(at.x, at.y, 5 * px, 0, Math.PI * 2);
-      surface.strokeColor('primary');
+      surface.arc(at.x, at.y, (mode.kind === 'wiring' ? 7 : 5) * px, 0, Math.PI * 2);
+      surface.strokeColor(mode.kind === 'wiring' ? 'secondary' : 'primary');
       surface.lineWidth(2 * px);
       surface.stroke();
     }
@@ -652,6 +706,129 @@ export class Editor {
       return { kind: 'wire', id: scene.wireIds[w]! };
     }
     return { kind: 'empty' };
+  }
+
+  /**
+   * The names of a part's pins a wire could end on, each beside its pin
+   * on a pill, and the one it will end on — `target` — in the secondary
+   * colour and bold, with its pin filled: what is lit is what letting go
+   * makes.
+   */
+  private drawPinNames(surface: PaintSurface, target: PinRef, from: PinRef, px: number): void {
+    const scene = this.deps.scene();
+    const c = scene.indexOf.get(target.component);
+    if (c === undefined) return;
+    const start = scene.indexOf.get(from.component);
+    const fromDrives = start !== undefined && scene.drives(start, from.pin);
+    for (const { pin } of scene.pins(c)) {
+      if (pin === target.pin || scene.drives(c, pin) !== fromDrives) this.drawPinPill(surface, { component: target.component, pin }, pin, pin === target.pin, px);
+    }
+    const at = pinOf(scene, target);
+    surface.beginPath();
+    surface.arc(at.x, at.y, 4 * px, 0, Math.PI * 2);
+    surface.fillColor('secondary');
+    surface.fill();
+  }
+
+  /** A pin as a person reads it: its part's label, or id, and the pin — `clk.out`. */
+  private pinTitle(ref: PinRef): string {
+    const scene = this.deps.scene();
+    const c = scene.indexOf.get(ref.component);
+    const part = c === undefined ? ref.component : (scene.labels[c] ?? ref.component);
+    return `${part}.${ref.pin}`;
+  }
+
+  /**
+   * A pin's name on a pill beside it, outside its part on the side the
+   * pin is on, a screen size at any zoom; `strong` in the secondary colour
+   * and bold, as the pin a wire is about to end on or a selected wire's
+   * end.
+   */
+  private drawPinPill(surface: PaintSurface, ref: PinRef, text: string, strong: boolean, px: number): void {
+    const scene = this.deps.scene();
+    const c = scene.indexOf.get(ref.component);
+    if (c === undefined) return;
+    const at = pinOf(scene, ref);
+    const size = 11 * px;
+    const left = at.x < scene.x[c]! + scene.width(c) / 2;
+    const width = text.length * 0.62 * size + 8 * px;
+    const x = left ? at.x - 8 * px - width : at.x + 8 * px;
+    surface.beginPath();
+    surface.roundRect(x, at.y - size * 0.75, width, size * 1.5, 3 * px);
+    surface.fillColor(strong ? 'selectionBackground' : 'surface');
+    surface.fill();
+    surface.strokeColor(strong ? 'secondary' : 'border');
+    surface.lineWidth((strong ? 1.5 : 1) * px);
+    surface.stroke();
+    surface.fillColor(strong ? 'secondary' : 'textMuted');
+    surface.text(text, x + width / 2, at.y + size * 0.35, { fontSize: size, align: 'center', fontWeight: strong ? 700 : 400 });
+  }
+
+  /**
+   * Where a wire being drawn would end if let go here — the same pin the
+   * overlay rings, so what is shown is what is made.
+   *
+   * Forgiving, because a pin is a point: a pin within `DROP_REACH`
+   * pixels, and failing that, anywhere on a part's body, that part's
+   * nearest pin. Either way, the other kind of pin to the one the wire
+   * started from — an input for a wire from an output — when the part
+   * has one. The first version took only a pin within eight pixels, so
+   * a wire let go on the pin's name, a unit inside a chip, went nowhere.
+   */
+  private dropTarget(world: Point, from: PinRef): PinRef | null {
+    const scene = this.deps.scene();
+    const start = scene.indexOf.get(from.component);
+    const fromDrives = start !== undefined && scene.drives(start, from.pin);
+    const other = (c: number, pin: string) => !(scene.ids[c] === from.component && pin === from.pin) && scene.drives(c, pin) !== fromDrives;
+    const notItself = (c: number, pin: string) => !(scene.ids[c] === from.component && pin === from.pin);
+    const reach = DROP_REACH / this.deps.scale();
+    const near = scene.pinNear(world, reach, other);
+    if (near !== null) return near;
+    // On a part, or near its edge — not the part it started from: let go
+    // on its own body, a wire is more likely a slip than a loop — that
+    // part's nearest pin of the other kind. Beside a chip, that is the
+    // pin level with the pointer, wherever along its side it is.
+    const c = scene.componentNear(world, PART_REACH / this.deps.scale(), start);
+    if (c >= 0) {
+      const pin = scene.nearestPinOf(c, world, name => other(c, name));
+      if (pin !== null) return pin;
+    }
+    return scene.pinNear(world, reach, notItself);
+  }
+
+  /**
+   * A click on a wire. Where wires overlap — most often several leaving
+   * one pin together — a click selects the nearest, and another click in
+   * the same place, with it still selected, selects the next, round and
+   * round; so does Tab. The status bar says which of how many it is.
+   */
+  private clickWire(screen: Point, additive: boolean): void {
+    const scene = this.deps.scene();
+    const world = this.deps.toWorld(screen);
+    const ids = scene.wiresNear(world, WIRE_REACH / this.deps.scale()).map(w => scene.wireIds[w]!);
+    if (ids.length === 0) return;
+    const cycle = this.wireCycle;
+    const again =
+      cycle !== null &&
+      !additive &&
+      Math.hypot(screen.x - cycle.screen.x, screen.y - cycle.screen.y) <= CYCLE_REACH &&
+      this.selection.size === 1 &&
+      this.selection.has(cycle.ids[cycle.at]!) &&
+      cycle.ids.length === ids.length &&
+      cycle.ids.every((id, i) => id === ids[i]);
+    const at = again ? (cycle.at + 1) % ids.length : 0;
+    this.wireCycle = { screen, ids, at };
+    this.select([ids[at]!], additive);
+  }
+
+  /** Tab, while a wire picked from several is selected: the next of them. Returns whether it did. */
+  private nextOverlappingWire(): boolean {
+    const cycle = this.wireCycle;
+    if (cycle === null || cycle.ids.length < 2 || this.selection.size !== 1 || !this.selection.has(cycle.ids[cycle.at]!)) return false;
+    this.wireCycle = { ...cycle, at: (cycle.at + 1) % cycle.ids.length };
+    this.select([this.wireCycle.ids[this.wireCycle.at]!], false);
+    this.deps.changed();
+    return true;
   }
 
   /** A click on a component: a switch toggles, a chip clicked twice opens, anything else is selected. */
@@ -811,6 +988,9 @@ function rect(a: Point, b: Point): Box {
 function pinOf(scene: SceneIndex, ref: PinRef): Point {
   const c = scene.indexOf.get(ref.component);
   if (c === undefined) return { x: 0, y: 0 };
-  return pinAt(scene.kindOf(c), scene.x[c]!, scene.y[c]!, ref.pin, scene.rotationOf(c));
+  // The part's shape, not its kind: a chip's pins are its definition's,
+  // and the kind's placeholder has none — which put every chip pin's
+  // ring, and every wire drawn to or from one, at the chip's corner.
+  return pinAt(scene.shapeOf(c), scene.x[c]!, scene.y[c]!, ref.pin, scene.rotationOf(c));
 }
 

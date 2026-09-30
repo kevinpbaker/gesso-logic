@@ -626,9 +626,13 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       geometry.opened !== document.opened ||
       geometry.level !== document.path.map(level => level.id).join('/');
     if (s.width > 0 && document.opened !== framedFor && !waiting) {
+      // The view being left is only worth coming back to if something
+      // was framed before: a page that opens deep inside a chip — a hot
+      // reload, say — has a camera that belongs to no level.
+      const framedBefore = framedFor !== -1;
       framedFor = document.opened;
       const next = document.path.length;
-      if (next > depth) {
+      if (next > depth && framedBefore) {
         levelCameras[depth] = { ...camera.value };
       }
       const back = next < depth ? levelCameras[next] : undefined;

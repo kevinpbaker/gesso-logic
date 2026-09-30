@@ -48,6 +48,8 @@ const MIN_SPAN = 8;
 export interface WaveformPanel {
   readonly element: unknown;
   readonly open: Observable<boolean>;
+  /** How tall the panel is, over the bottom of the canvas, when open. */
+  readonly height: Observable<number>;
   toggle(): void;
 }
 
@@ -223,7 +225,7 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     </column>
   );
 
-  return { element, open, toggle: () => (open.value = !open.value) };
+  return { element, open, height, toggle: () => (open.value = !open.value) };
 }
 
 /** The waves: names in the gutter, a row a trace, and the cursor with each row's value at it. */
