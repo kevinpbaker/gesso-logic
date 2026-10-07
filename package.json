@@ -21,16 +21,16 @@
     "pong": "node --import ./scripts/lib/extensionless.mjs scripts/pong.ts"
   },
   "dependencies": {
-    "gesso-components": "^0.4.2",
-    "gesso-core": "^0.4.2",
-    "gesso-framework": "^0.4.2",
+    "gesso-components": "^0.6.5",
+    "gesso-core": "^0.6.5",
+    "gesso-framework": "^0.6.5",
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
-    "gesso-devtools": "^0.4.2",
-    "gesso-testing": "^0.4.2",
-    "gesso-vite-plugin": "^0.4.2",
+    "gesso-devtools": "^0.6.5",
+    "gesso-testing": "^0.6.5",
+    "gesso-vite-plugin": "^0.6.5",
     "typescript": "~7.0.2",
     "vite": "^8.2.0",
     "vitest": "^4.1.11"
