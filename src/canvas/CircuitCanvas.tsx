@@ -124,6 +124,15 @@ export interface CanvasHandle {
 const TILE = 256;
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 48;
+/**
+ * How far a ctrl-wheel pixel zooms, in natural-log units. A trackpad
+ * pinch arrives as small ctrl-wheel deltas of 100·ln(scale), so at
+ * 0.01 the circuit follows the fingers; at 0.002 it lagged five times
+ * behind them.
+ */
+const WHEEL_ZOOM_RATE = 0.01;
+/** The most one wheel event zooms: a √2 step, as the zoom buttons take, so a mouse wheel's notch is not a lurch. */
+const WHEEL_ZOOM_STEP = Math.LN2 / 2;
 /** How long the zoom must be still before tiles are redrawn at the new size. */
 const SETTLE_MS = 150;
 /** The most tiles redrawn at the new size in one frame, once a zoom settles. */
@@ -682,7 +691,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       onWheel={(event: UiWheelEvent) => {
         if (event.modifiers.ctrl || event.modifiers.meta) {
           const at = local(event);
-          zoomAt(at.x, at.y, Math.exp(-event.deltaY * 0.002));
+          const step = Math.min(WHEEL_ZOOM_STEP, Math.max(-WHEEL_ZOOM_STEP, -event.deltaY * WHEEL_ZOOM_RATE));
+          zoomAt(at.x, at.y, Math.exp(step));
         } else {
           panBy(event.deltaX, event.deltaY);
         }
