@@ -18,6 +18,7 @@ import { kindName } from '../app/Describe';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
 import { programEditor } from './ProgramEditor';
+import { allTestsSummary, testsDialog } from './TestsDialog';
 import { palette } from './Palette';
 import { GAMES, PROGRAMS } from './Programs';
 import { ringingParts } from './Problems';
@@ -92,6 +93,7 @@ export function workbench(ctx: ComponentContext) {
   const showRename = internalState(false);
   const showFind = internalState(false);
   const showShare = internalState(false);
+  const showTests = internalState(false);
   const shareUrl = internalState('');
   const findText = internalState('');
   const findActive = internalState(0);
@@ -167,6 +169,10 @@ export function workbench(ctx: ComponentContext) {
     }
     if (shift && key.toLowerCase() === 'w') {
       run('trace');
+      return true;
+    }
+    if (shift && key.toLowerCase() === 't') {
+      run('tests');
       return true;
     }
     const bound: Readonly<Record<string, CommandId>> = {
@@ -365,6 +371,15 @@ export function workbench(ctx: ComponentContext) {
     void shell.copyText(shareUrl.value);
     openDialog(showShare);
   });
+  // Every level's tests, run: what they found, as a notice.
+  let testedSerial = circuit.view.tested.value.serial;
+  ctx.effect(circuit.view.tested, tested => {
+    if (tested.serial === testedSerial) return;
+    testedSerial = tested.serial;
+    if (!tested.all) return;
+    const summary = allTestsSummary(tested);
+    notify(summary.text, summary.error);
+  });
   files.refreshRecent();
   // The keyboard starts on the canvas, once it is on screen, so the part
   // keys work before anything has been clicked.
@@ -499,6 +514,10 @@ export function workbench(ctx: ComponentContext) {
         return openDialog(showFind);
       case 'share':
         return circuit.send.share();
+      case 'tests':
+        return openDialog(showTests);
+      case 'runAllTests':
+        return circuit.send.runTests(true, false);
       case 'exportVcd':
         return circuit.send.exportWaveforms();
       case 'exportSvg':
@@ -1223,6 +1242,7 @@ export function workbench(ctx: ComponentContext) {
         }}
       />
       {programEditor(ctx, () => canvas.focus())}
+      {testsDialog(ctx, showTests, closeDialog(showTests))}
     </column>
   );
 }

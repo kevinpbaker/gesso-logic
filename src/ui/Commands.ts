@@ -64,6 +64,8 @@ export type CommandId =
   | 'analyser'
   | 'trace'
   | 'truthTable'
+  | 'tests'
+  | 'runAllTests'
   | 'runPause'
   | 'step'
   | 'stepBack'
@@ -129,6 +131,8 @@ const FIXED: Readonly<Record<string, Command>> = {
   analyser: { label: 'Logic analyser', keys: 'W', group: 'View' },
   trace: { label: 'Trace the selection in the analyser', keys: 'Shift+W', group: 'View' },
   truthTable: { label: 'Truth table of the selection', keys: 'T', group: 'View' },
+  tests: { label: 'Tests for this level…', keys: 'Shift+T', group: 'Simulate' },
+  runAllTests: { label: 'Run every test', group: 'Simulate' },
   runPause: { label: 'Run', keys: `${MOD}+Enter`, group: 'Simulate' },
   step: { label: 'Step one clock cycle', keys: '.', group: 'Simulate' },
   stepBack: { label: 'Step back one cycle, from history', keys: ',', group: 'Simulate' },
@@ -222,7 +226,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'Simulate',
     mnemonic: 's',
-    entries: ['runPause', 'step', 'stepBack', 'resumeHere', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), 'customRate', MENU_SEPARATOR, 'keepHistory', 'thread']
+    entries: ['runPause', 'step', 'stepBack', 'resumeHere', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), 'customRate', MENU_SEPARATOR, 'tests', 'runAllTests', MENU_SEPARATOR, 'keepHistory', 'thread']
   },
   {
     label: 'Examples',

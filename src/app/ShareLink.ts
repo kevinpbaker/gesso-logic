@@ -112,6 +112,8 @@ export async function linkOf(document: Circuit): Promise<string> {
   const known = builtinChips();
   const used: Record<string, string> = {};
   for (const [name, definition] of Object.entries(document.chips ?? {})) {
+    // A built-in chip given tests of its own is no longer the built-in one.
+    if (definition.tests !== undefined) continue;
     const print = fingerprint(definitionText(definition));
     if (known.get(name)?.has(print) !== true) continue;
     used[name] = print;

@@ -80,7 +80,8 @@ export function writeCircuit(circuit: Circuit): string {
     items.length === 0 ? '[]' : `[\n${indent}  ${items.join(`,\n${indent}  `)}\n${indent}]`;
   const body = (level: Circuit, indent: string) =>
     `${indent}"components": ${list(level.components.map(component), indent)},\n` +
-    `${indent}"wires": ${list(level.wires.map(wire), indent)}`;
+    `${indent}"wires": ${list(level.wires.map(wire), indent)}` +
+    (level.tests === undefined ? '' : `,\n${indent}"tests": ${JSON.stringify(level.tests)}`);
   // Chips by name, sorted, so the same document writes the same bytes;
   // each definition one part a line, like the top level.
   const names = Object.keys(circuit.chips ?? {}).sort();
@@ -264,7 +265,9 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
     };
     wires.push({ id, from: end('from'), to: end('to') });
   }
-  return { version: CIRCUIT_VERSION, components, wires };
+  const tests = data['tests'];
+  if (tests !== undefined && typeof tests !== 'string') throw new CircuitFileError(`${at('tests')}: not text`);
+  return { version: CIRCUIT_VERSION, components, wires, ...(tests === undefined ? {} : { tests }) };
 }
 
 /** Every wire's pins exist on their components, a chip's by its definition. */

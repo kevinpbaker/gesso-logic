@@ -79,6 +79,10 @@ export interface DocumentSummary {
    * the tooltip on a pin: only the pins that say.
    */
   readonly chips: readonly { readonly name: string; readonly shape: KindLayout; readonly notes: Readonly<Record<string, string>> }[];
+  /** The tests of the level on the canvas, as text; '' when it has none. See `CircuitTests.ts`. */
+  readonly tests: string;
+  /** How many levels — the top and chip definitions — have tests. */
+  readonly testedLevels: number;
   /** The standard library, for the palette: each part's name, body and a line on what it does. Placing one brings it in. */
   readonly library: readonly { readonly name: string; readonly shape: KindLayout; readonly note: string }[];
 }
@@ -398,6 +402,18 @@ export interface CircuitCommands {
   setKeepHistory(keep: boolean): void;
   /** Makes a link that opens the document, traced pins and all: published as `share`. */
   share(): void;
+  /** Replaces the tests of the level on the canvas; blank text takes them away. One edit while typing, for undo. */
+  setTests(text: string): void;
+  /** Writes tests for the level on the canvas from what it does now, replacing any it had. */
+  fillTests(): void;
+  /**
+   * Runs the tests of the level on the canvas, or of every level, and
+   * publishes how they went as `tested`. With `follow`, the level's are
+   * run again after every edit until `stopTests`.
+   */
+  runTests(all: boolean, follow: boolean): void;
+  /** Stops running the level's tests after every edit. */
+  stopTests(): void;
   /** Writes what the analyser holds as a VCD file, published as `exported`. */
   exportWaveforms(): void;
   /** Opens a link's circuit, the text after its `#`, as a new document that is not saved anywhere yet. */
@@ -423,6 +439,7 @@ export interface CircuitView {
   readonly found: FoundView;
   readonly share: ShareView;
   readonly exported: ExportView;
+  readonly tested: TestsView;
 }
 
 /**
@@ -450,6 +467,25 @@ export interface ExportView {
   readonly error: string | null;
 }
 
+/**
+ * How tests went: the level on the canvas's, while its tests are open,
+ * run again after every edit; or every level's, when all were asked
+ * for. `serial` counts runs; 0 is none.
+ */
+export interface TestsView {
+  readonly serial: number;
+  /** Every level's, rather than the one on the canvas. */
+  readonly all: boolean;
+  readonly results: readonly {
+    /** Where: “the top level”, or the chip's name. */
+    readonly level: string;
+    readonly rows: number;
+    readonly failed: number;
+    readonly failures: readonly { readonly line: number; readonly message: string }[];
+    readonly error: string | null;
+  }[];
+}
+
 /** What `find` found: the query it answers, so a stale answer can be told from the latest, and the parts. */
 export interface FoundView {
   readonly query: string;
@@ -474,6 +510,8 @@ export const EMPTY_SUMMARY: DocumentSummary = {
   path: [],
   welcome: false,
   changedChips: [],
+  tests: '',
+  testedLevels: 0,
   chips: [],
   library: []
 };
@@ -497,6 +535,7 @@ export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
 export const NO_SHARE: ShareView = { serial: 0, fragment: '', error: null };
+export const NO_TESTS: TestsView = { serial: 0, all: false, results: [] };
 export const NO_EXPORT: ExportView = { serial: 0, name: '', text: '', mediaType: '', error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [], history: null, past: null };
 
@@ -512,7 +551,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   program: NO_PROGRAM,
   found: NOTHING_FOUND,
   share: NO_SHARE,
-  exported: NO_EXPORT
+  exported: NO_EXPORT,
+  tested: NO_TESTS
 });
 
 /**

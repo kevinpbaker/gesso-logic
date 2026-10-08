@@ -25,7 +25,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         program: service.program,
         found: service.found,
         share: service.shared,
-        exported: service.exported
+        exported: service.exported,
+        tested: service.tested
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -70,6 +71,10 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         find: query => service.find(query),
         share: () => service.share(),
         exportWaveforms: () => service.exportWaveforms(),
+        setTests: text => service.setTests(text),
+        fillTests: () => service.fillTests(),
+        runTests: (all, follow) => service.runTests(all, follow),
+        stopTests: () => service.stopTests(),
         openShared: fragment => service.openShared(fragment),
         showCycle: cycle => service.showCycle(cycle),
         resumeFromHere: () => service.resumeFromHere(),

@@ -17,18 +17,20 @@ import type {
   FoundView,
   ShareView,
   ExportView,
+  TestsView,
   ProgramView,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
 import { History } from './History';
 import { circuitOfLink, linkOf } from './ShareLink';
 import { Analyser } from './Analyser';
 import { writeVcd } from './Vcd';
+import { runTests, testsFromNow } from './CircuitTests';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
 import {
@@ -115,6 +117,9 @@ export interface AutosaveStore {
 export const AUTOSAVE_KEY = 'autosave';
 const AUTOSAVE_MS = 1000;
 
+/** How long after the last edit a followed level's tests run again. */
+const TEST_RUN_MS = 300;
+
 /** The widest window the analyser shows: each column of it is folded from the ring on every publish. */
 const MAX_ANALYSER_SPAN = 8192;
 
@@ -169,6 +174,7 @@ export class CircuitService {
   readonly found: Observable<FoundView>;
   readonly shared: Observable<ShareView>;
   readonly exported: Observable<ExportView>;
+  readonly tested: Observable<TestsView>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
   readonly analyserView: Observable<AnalyserView>;
@@ -184,6 +190,10 @@ export class CircuitService {
   private shareSerial = 0;
   private readonly exportSubject = new BehaviorSubject<ExportView>(NO_EXPORT);
   private exportSerial = 0;
+  private readonly testsSubject = new BehaviorSubject<TestsView>(NO_TESTS);
+  /** Whether the level's tests run again after each edit, and the run waiting for edits to stop. */
+  private followingTests = false;
+  private cancelTestRun: (() => void) | null = null;
   private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
   private readonly clipboardSubject = new BehaviorSubject<ClipRequest>(NO_CLIP);
   private readonly analyserSubject = new BehaviorSubject<AnalyserView>(CLOSED_ANALYSER);
@@ -293,6 +303,7 @@ export class CircuitService {
     this.found = this.foundSubject;
     this.shared = this.shareSubject;
     this.exported = this.exportSubject;
+    this.tested = this.testsSubject;
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
     this.analyserView = this.analyserSubject;
@@ -353,6 +364,65 @@ export class CircuitService {
     } catch (error) {
       this.shareSubject.next({ serial, fragment: '', error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  setTests(text: string): void {
+    this.editLevel(level => {
+      if ((level.tests ?? '') === text) return level;
+      if (text.trim() === '') {
+        const { tests: _, ...rest } = level;
+        return rest;
+      }
+      return { ...level, tests: text };
+    }, `tests:${this.opened}:${this.path.join('/')}`);
+  }
+
+  fillTests(): void {
+    const level = this.levelWithChips();
+    this.lastGesture = null;
+    this.setTests(testsFromNow(level, this.circuit.chips));
+    this.lastGesture = null;
+  }
+
+  runTests(all: boolean, follow: boolean): void {
+    this.followingTests = follow && !all;
+    this.cancelTestRun?.();
+    this.cancelTestRun = null;
+    this.testsSubject.next(this.testsNow(all));
+  }
+
+  stopTests(): void {
+    this.followingTests = false;
+    this.cancelTestRun?.();
+    this.cancelTestRun = null;
+  }
+
+  /** The level's tests run again once edits stop for a moment, while they are followed. */
+  private testsChanged(): void {
+    if (!this.followingTests) return;
+    this.cancelTestRun?.();
+    this.cancelTestRun = this.delay(() => {
+      this.cancelTestRun = null;
+      if (this.followingTests) this.testsSubject.next(this.testsNow(false));
+    }, TEST_RUN_MS);
+  }
+
+  private testsNow(all: boolean): TestsView {
+    const chips = this.circuit.chips;
+    const levels: { level: string; circuit: Circuit }[] = all
+      ? [
+          ...(this.circuit.tests === undefined ? [] : [{ level: 'the top level', circuit: this.circuit }]),
+          ...Object.keys(chips ?? {})
+            .sort()
+            .filter(name => chips![name]!.tests !== undefined)
+            .map(name => ({ level: name, circuit: chips![name]! }))
+        ]
+      : [{ level: this.pathNow().at(-1)?.chip ?? 'the top level', circuit: this.level().circuit }];
+    return {
+      serial: this.testsSubject.value.serial + 1,
+      all,
+      results: levels.map(({ level, circuit }) => ({ level, ...runTests(circuit, chips, circuit.tests ?? '') }))
+    };
   }
 
   exportWaveforms(): void {
@@ -722,6 +792,7 @@ export class CircuitService {
     this.tableSubject.next(NO_TABLE);
     this.documentSubject.next(this.summary());
     this.geometrySubject.next(this.geometryNow());
+    this.testsChanged();
     this.publish(true);
   }
 
@@ -1110,6 +1181,7 @@ export class CircuitService {
       this.documentSubject.next(this.summary());
       this.geometrySubject.next(this.geometryNow());
       this.traceNow();
+      this.testsChanged();
       this.publish(true);
       return;
     }
@@ -1159,6 +1231,7 @@ export class CircuitService {
     if (program.id !== '' && this.romOnLevel(program.id) === undefined) {
       this.programSubject.next(NO_PROGRAM);
     }
+    this.testsChanged();
     const table = this.tableSubject.value;
     if (table.ids.length > 0) {
       const level = this.level().circuit;
@@ -1482,6 +1555,8 @@ export class CircuitService {
       path: this.pathNow(),
       welcome: this.welcomeOpened === this.opened,
       changedChips: this.changedChips(),
+      tests: this.level().circuit.tests ?? '',
+      testedLevels: (this.circuit.tests === undefined ? 0 : 1) + Object.values(this.circuit.chips ?? {}).filter(c => c.tests !== undefined).length,
       library: LIBRARY_PALETTE,
       chips: Object.keys(this.circuit.chips ?? {})
         .sort()

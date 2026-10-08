@@ -55,6 +55,8 @@ describe('the circuit channel', () => {
       path: [],
       welcome: false,
       changedChips: [],
+      tests: '',
+      testedLevels: 0,
       chips: [],
       library: expect.any(Array)
     });

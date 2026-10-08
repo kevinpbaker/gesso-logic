@@ -38,6 +38,12 @@ export interface Circuit {
    * traces nothing, until an edit puts it back.
    */
   readonly traces?: readonly TracedPin[];
+  /**
+   * What this level should do, as test text: the top's tests, or a
+   * chip's, kept in its definition. See `CircuitTests.ts`. Absent when
+   * it has none.
+   */
+  readonly tests?: string;
 }
 
 /** A pin traced in the analyser: the chips that open its level, from the top, and the pin there. */
