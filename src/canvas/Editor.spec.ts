@@ -410,6 +410,27 @@ describe('tracing in the analyser', () => {
   });
 });
 
+describe('a right-click', () => {
+  it('says what it is on, selects a part or wire it is on unless already selected, and ends the pan its press began', () => {
+    const { editor, sent, at } = setup('push', b => b.connect({ component: 'g', pin: 'out' }, { component: 'led', pin: 'in' }));
+    editor.pointerDown(at(7, 2), 1, false);
+    editor.pointerUp(at(7, 2));
+    editor.pointerDown(at(15.5, 2), 1, true);
+    editor.pointerUp(at(15.5, 2));
+    // On a part already selected: the selection stands.
+    editor.pointerDown(at(7, 2), 2, false);
+    expect(editor.contextAt(at(7, 2))).toEqual({ kind: 'component', id: 'g' });
+    expect([...editor.selection].sort()).toEqual(['g', 'led']);
+    // A move after it pans nothing.
+    editor.pointerMove(at(9, 4), 2);
+    expect(sent.filter(([name]) => name === 'panBy')).toEqual([]);
+    // On a wire: the wire alone.
+    expect(editor.contextAt(at(12, 2)).kind).toBe('wire');
+    expect(editor.selection.size).toBe(1);
+    expect(editor.contextAt(at(3, 6))).toEqual({ kind: 'empty' });
+  });
+});
+
 describe('the tooltip on a pin', () => {
   it('names a gate’s pin, says what it does and shows its value', () => {
     const { editor, at } = setup('push', undefined, { value: () => 1 });

@@ -92,7 +92,8 @@ export interface HoverCard {
  */
 export type Highlight = { readonly kind: 'pin'; readonly pin: PinRef } | { readonly kind: 'chip'; readonly id: string };
 
-type Hit =
+/** What is at a point on the canvas: a pin, a part, a wire, or nothing. */
+export type Hit =
   | { readonly kind: 'pin'; readonly pin: PinRef; readonly at: Point }
   | { readonly kind: 'component'; readonly id: string }
   | { readonly kind: 'wire'; readonly id: string }
@@ -347,6 +348,20 @@ export class Editor {
     this.deps.changed();
   }
 
+  /**
+   * What is under a point in screen pixels — what a right-click asks
+   * about — and, for a part or a wire, made the selection unless it is
+   * in it already, as a right-click on a file selects it.
+   */
+  contextAt(screen: Point): Hit {
+    // The press was a pan's start; a menu is opening instead.
+    this.mode = { kind: 'idle' };
+    const hit = this.hitAt(this.deps.toWorld(screen));
+    if ((hit.kind === 'component' || hit.kind === 'wire') && !this.selection.has(hit.id)) this.select([hit.id], false);
+    this.deps.changed();
+    return hit;
+  }
+
   /** The pointer has left the canvas: nothing is under it, so no tooltip. */
   pointerLeave(): void {
     if (this.hover.kind === 'empty') return;
@@ -527,6 +542,12 @@ export class Editor {
       for (const { pin } of scene.pins(c)) if (scene.drives(c, pin)) pins.push({ component: id, pin });
     }
     if (pins.length > 0) this.trace(pins);
+  }
+
+  /** Traces a pin, or a wire by the pin driving it, in the analyser. */
+  traceHit(hit: Hit): void {
+    const pin = hit.kind === 'pin' ? hit.pin : hit.kind === 'wire' ? this.driverOf(hit.id) : null;
+    if (pin !== null) this.trace([pin]);
   }
 
   private trace(pins: readonly PinRef[]): void {

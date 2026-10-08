@@ -21,10 +21,10 @@ import {
 import { each, FocusService, FrameService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type Signals } from '../app/CircuitContract';
-import { intersects, pinAt, type Box } from '../app/Layout';
+import { intersects, pinAt, type Box, type Point } from '../app/Layout';
 import type { PinRef } from '../sim/Circuit';
 import { signalOf } from '../app/SignalPacking';
-import { Editor } from './Editor';
+import { Editor, type Hit } from './Editor';
 import type { Kind } from '../sim/Primitives';
 import type { FileActions } from './Files';
 import { paintLive, paintOver, paintUnder } from './Painters';
@@ -120,12 +120,16 @@ export interface CanvasHandle {
   focus(): void;
   /** A component's label, or null; for naming parts in messages. */
   labelOf(id: string): string | null;
+  /** The chip definition a part on this level is an instance of; null for any other part. */
+  chipOf(id: string): string | null;
   /** Selection, gestures and the keys that drive them. */
   readonly editor: Editor;
   /** Bumped whenever the editor has something new to show. */
   readonly editorChanged: BehaviorSubject<number>;
   /** Something was just sent to the analyser to trace, for the page to open it. */
   readonly traced: Observable<void>;
+  /** A right-click that was not a pan: where, in page pixels, and what it was on, now selected. */
+  readonly contextMenu: Observable<{ readonly at: Point; readonly hit: Hit }>;
   /**
    * Lights what an analyser row traces: its pin and net when it is on
    * this level, the chip it is inside when it is deeper; null for none.
@@ -545,6 +549,30 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
 
   const editorChanged = new BehaviorSubject(0);
   const traced = new Subject<void>();
+  // A right press pans when dragged, and asks for a menu when not: the
+  // menu opens once the press has held still a moment, or at once when
+  // it is let go — whichever is first — and not at all once it moves.
+  const contextMenu = new Subject<{ readonly at: Point; readonly hit: Hit }>();
+  let asking: { readonly page: Point; readonly screen: Point; readonly timer: ReturnType<typeof setTimeout> } | null = null;
+  const askMenu = () => {
+    const ask = asking;
+    if (ask === null) return;
+    clearTimeout(ask.timer);
+    asking = null;
+    contextMenu.next({ at: ask.page, hit: editor.contextAt(ask.screen) });
+  };
+  const pointerMoved = (event: UiPointerEvent) => {
+    const ask = asking;
+    if (ask !== null) {
+      const moved = Math.hypot(event.x - ask.page.x, event.y - ask.page.y) >= 4;
+      if ((event.buttons & 2) === 0) askMenu();
+      else if (moved) {
+        clearTimeout(ask.timer);
+        asking = null;
+      }
+    }
+    editor.pointerMove(local(event), event.buttons);
+  };
   const shell = ctx.inject(ShellService);
   const editor = new Editor({
     scene: () => scene,
@@ -781,7 +809,11 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       }}
       focusable
       onPointerDown={(event: UiPointerEvent) => editor.pointerDown(local(event), event.buttons, event.modifiers.shift, event.modifiers.alt)}
-      onPointerMove={(event: UiPointerEvent) => editor.pointerMove(local(event), event.buttons)}
+      onPointerMove={pointerMoved}
+      onContextMenu={(event: UiPointerEvent) => {
+        if (asking !== null) clearTimeout(asking.timer);
+        asking = { page: { x: event.x, y: event.y }, screen: local(event), timer: setTimeout(askMenu, 250) };
+      }}
       onPointerUp={(event: UiPointerEvent) => editor.pointerUp(local(event))}
       onPointerLeave={() => editor.pointerLeave()}
       onKeyDown={(event: UiKeyboardEvent) => {
@@ -869,6 +901,10 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     focus: () => {
       if (node !== null) focusService.focus(node);
     },
+    chipOf: (id: string) => {
+      const c = scene.indexOf.get(id);
+      return c === undefined ? null : (scene.chipNames[c] ?? null);
+    },
     labelOf: (id: string) => {
       const c = scene.indexOf.get(id);
       return c === undefined ? null : scene.labels[c] ?? null;
@@ -881,6 +917,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     editor,
     editorChanged,
     traced,
+    contextMenu,
     highlightTrace: where => {
       hoveredTrace = where;
       lightTrace();

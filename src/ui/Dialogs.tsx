@@ -327,3 +327,29 @@ export function clockRate(open: Observable<boolean>, text: InternalState<string>
     />
   );
 }
+
+/**
+ * A part renamed from its right-click menu: the same edit as the
+ * inspector's Label field, for when the inspector is out of mind. Blank
+ * text takes the name away, and the part goes by its id.
+ */
+export function renamePart(open: Observable<boolean>, text: InternalState<string>, what: Observable<string>, apply: () => void, close: () => void): UiChild {
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Rename"
+      width={380}
+      content={
+        <column gap={10} width={inner(380)}>
+          <text width={inner(380)} text={what} fontSize={12} color="text" textWrap="word" />
+          {field('label', 'New name', text, inner(380), apply)}
+          <row gap={8} x="end" width={inner(380)}>
+            {action('Cancel', close)}
+            {action('Rename', apply, 'accent')}
+          </row>
+        </column>
+      }
+    />
+  );
+}

@@ -1,17 +1,18 @@
 import { combineLatest, distinctUntilChanged, filter, map, of, startWith, take } from 'rxjs';
 
 import { darkTheme, lightTheme, percent, type UiNode } from 'gesso-core';
-import { MenuBar, Select } from 'gesso-components';
+import { Menu, MenuBar, Select, type MenuItem } from 'gesso-components';
 import { createComponent, FocusService, internalState, OpfsStorage, persisted, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type ClockRate, type SceneName } from '../app/CircuitContract';
 import { isMainThread } from '../canvas/Bench';
 import { circuitCanvas, type Camera, type CanvasKeys, type TraceWhere } from '../canvas/CircuitCanvas';
+import type { Hit } from '../canvas/Editor';
 import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { clockRate, confirmDiscard, gettingStarted, instructionSet, pasteHint, recentFiles, shortcuts, type Discard } from './Dialogs';
+import { clockRate, confirmDiscard, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, type Discard } from './Dialogs';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
 import { programEditor } from './ProgramEditor';
@@ -78,6 +79,10 @@ export function workbench(ctx: ComponentContext) {
   const showRecent = internalState(false);
   const showPaste = internalState(false);
   const showRate = internalState(false);
+  const showRename = internalState(false);
+  const renameText = internalState('');
+  const renameWhat = internalState('');
+  let renaming = '';
   const rateText = internalState('');
 
   const guard = (what: string, then: () => void) => {
@@ -176,6 +181,76 @@ export function workbench(ctx: ComponentContext) {
   // name clicked goes to it.
   ctx.effect(analyser.hovered, where => canvas.highlightTrace(where));
   ctx.effect(analyser.picked, where => jumpTo(where));
+
+  // ---------------------------------------------------------------------
+  // The canvas's right-click menu: what can be done with what was clicked
+  // ---------------------------------------------------------------------
+
+  const canvasMenuOpen = internalState(false);
+  const canvasMenuAt = internalState({ x: 0, y: 0 });
+  const canvasMenuItems = internalState<readonly MenuItem[]>([]);
+  let menuHit: Hit = { kind: 'empty' };
+  /** A command as a menu item, greyed out where it does not apply. */
+  const item = (id: CommandId, label = commandLabel(id)): MenuItem => ({ value: id, label, disabled: !enabled(id) });
+  function menuFor(hit: Hit): MenuItem[] {
+    const s = canvas.selection();
+    switch (hit.kind) {
+      case 'pin': {
+        const items: MenuItem[] = [{ value: 'trace-hit', label: 'Trace this pin in the analyser' }];
+        if (canvas.chipOf(hit.pin.component) !== null) {
+          items.push({ value: `open:${hit.pin.component}`, label: 'Look inside its chip' });
+        }
+        return items;
+      }
+      case 'wire':
+        return [{ value: 'trace-hit', label: 'Trace this wire in the analyser' }, item('delete', 'Delete the wire')];
+      case 'component': {
+        const one = s.one;
+        const items: MenuItem[] = [];
+        if (one !== null) items.push({ value: 'rename', label: 'Rename…' });
+        if (one?.kind === 'chip') items.push(item('openChip'));
+        if (one?.kind === 'rom') items.push({ value: `program:${one.id}`, label: 'Edit the program…' });
+        items.push(item('trace', s.parts === 1 ? 'Trace its outputs in the analyser' : 'Trace their outputs in the analyser'));
+        items.push(item('truthTable'), item('rotate'), item('duplicate'), item('copy'));
+        if (s.parts > 1) items.push(item('makeChip'));
+        items.push(item('delete'));
+        return items;
+      }
+      default: {
+        const items: MenuItem[] = [item('paste'), item('selectAll'), item('fit')];
+        if (document.value.path.length > 0) items.push(item('upLevel'));
+        if (visits.value.length > 0) items.push(item('back'));
+        return items;
+      }
+    }
+  }
+  ctx.effect(canvas.contextMenu, ({ at, hit }) => {
+    menuHit = hit;
+    canvasMenuItems.value = menuFor(hit);
+    canvasMenuAt.value = at;
+    canvasMenuOpen.value = true;
+  });
+  function chooseFromCanvasMenu(choice: string): void {
+    // Closed before acting: a choice that opens a dialog takes the
+    // overlay's focus, and the menu would be left open behind it.
+    canvasMenuOpen.value = false;
+    if (choice === 'trace-hit') {
+      editor.traceHit(menuHit);
+    } else if (choice === 'rename') {
+      const one = canvas.selection().one;
+      if (one === null) return;
+      renaming = one.id;
+      renameText.value = one.ownLabel ?? '';
+      renameWhat.value = `What to call ${one.label ?? one.id}. Blank goes back to its id, ${one.id}.`;
+      openDialog(showRename);
+    } else if (choice.startsWith('open:')) {
+      circuit.send.openChip(choice.slice(5));
+    } else if (choice.startsWith('program:')) {
+      circuit.send.openProgram(choice.slice(8));
+    } else {
+      run(choice as CommandId);
+    }
+  }
 
   /**
    * Where a jump left from — the level and the view there — most recent
@@ -909,6 +984,27 @@ export function workbench(ctx: ComponentContext) {
         },
         closeDialog(showRate)
       )}
+      {renamePart(
+        showRename,
+        renameText,
+        renameWhat,
+        () => {
+          circuit.send.setLabel(renaming, renameText.value);
+          closeDialog(showRename)();
+        },
+        closeDialog(showRename)
+      )}
+      <Menu
+        open={canvasMenuOpen}
+        at={canvasMenuAt}
+        label="Canvas"
+        items={canvasMenuItems}
+        onSelect={chooseFromCanvasMenu}
+        onOpenChange={(isOpen: boolean) => {
+          canvasMenuOpen.value = isOpen;
+          if (!isOpen && !showRename.value) canvas.focus();
+        }}
+      />
       {programEditor(ctx, () => canvas.focus())}
     </column>
   );
