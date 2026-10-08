@@ -1,5 +1,5 @@
 import { BehaviorSubject, combineLatest, type Observable } from 'rxjs';
-import { debounceTime, distinctUntilChanged, map } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, map, skip } from 'rxjs/operators';
 
 import {
   dropTarget,
@@ -531,6 +531,15 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     pinNote: (chip, pin) => circuit.view.document.value.chips.find(c => c.name === chip)?.notes[pin] ?? null,
     viewSize: () => size.current
   });
+  // Another level or document: the selection was the last one's.
+  ctx.effect(
+    circuit.view.geometry.pipe(
+      map(g => `${g.opened}|${g.level}`),
+      distinctUntilChanged(),
+      skip(1)
+    ),
+    () => editor.forget()
+  );
   // What the application worker made of a copy, onto the clipboard.
   let clipped = 0;
   ctx.effect(circuit.view.clipboard, clip => {
@@ -772,9 +781,10 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     selection: () => {
       let parts = 0;
       let wires = 0;
+      // An id in neither is one just handed out, not yet come back.
       for (const id of editor.selection) {
         if (scene.indexOf.has(id)) parts++;
-        else wires++;
+        else if (scene.wireIds.includes(id)) wires++;
       }
       const only = parts === 1 && wires === 0 ? scene.indexOf.get([...editor.selection][0]!) : undefined;
       return {

@@ -474,6 +474,22 @@ export class Editor {
     return this.selectedComponents().length > 0;
   }
 
+  /**
+   * Another level or another document is on the canvas: what was
+   * selected, hovered or under way belonged to the one before. Ids are
+   * only unique within a level — `clk` and `rst` are in most — so a
+   * selection kept across would land on other parts, and Delete delete
+   * them.
+   */
+  forget(): void {
+    this.mode = { kind: 'idle' };
+    this.selection.clear();
+    this.hover = { kind: 'empty' };
+    this.wireCycle = null;
+    this.lastClick = null;
+    this.deps.changed();
+  }
+
   /** Stops whatever is under way and lets go of the selection. */
   cancel(): void {
     this.mode = { kind: 'idle' };

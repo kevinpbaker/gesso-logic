@@ -352,6 +352,25 @@ describe('the editor', () => {
   });
 });
 
+describe('another level', () => {
+  it('forgets the selection, the hover and any gesture of the level before', () => {
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(7, 2), 1, false);
+    editor.pointerUp(at(7, 2));
+    expect([...editor.selection]).toEqual(['g']);
+    editor.pointerMove(at(10, 2));
+    editor.pointerDown(at(10, 2), 1, false);
+    editor.pointerMove(at(12, 4));
+    editor.forget();
+    expect(editor.selection.size).toBe(0);
+    expect(editor.hoverCard()).toBeNull();
+    // The wire under way went with it: letting go draws nothing, and Delete deletes nothing.
+    editor.pointerUp(at(14, 2));
+    editor.keyDown('Delete', false, false);
+    expect(sent.filter(([name]) => name === 'connect' || name === 'remove')).toEqual([]);
+  });
+});
+
 describe('the tooltip on a pin', () => {
   it('names a gate’s pin, says what it does and shows its value', () => {
     const { editor, at } = setup('push', undefined, { value: () => 1 });
