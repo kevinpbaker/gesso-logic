@@ -6,6 +6,7 @@ import type { Signals, Status } from './CircuitContract';
 import { CircuitService, type Schedule } from './CircuitService';
 import { signalOf } from './SignalPacking';
 import { entryOf } from './CircuitContract';
+import { libraryPart } from './LibraryParts';
 
 /**
  * The service on its own, with time in the spec's hands.
@@ -313,5 +314,27 @@ describe('loadProgram', () => {
     service.loadProgram('broken.asm', 'NOPE 1\n');
     expect(summary.gates).toBe(gates);
     expect(summary.message).toMatch(/^Couldn't assemble broken\.asm/);
+  });
+});
+
+describe('pin notes', () => {
+  it('publishes what each chip’s pins are for, and a switch’s or LED’s own note, which an edit can change', () => {
+    const h = new Harness();
+    const service = h.service;
+    const b = new CircuitBuilder();
+    b.chip('ff', 'D flip-flop');
+    b.input('d');
+    service.load({ ...b.build(), chips: libraryPart('D flip-flop') });
+    let notes: Readonly<Record<string, string>> = {};
+    service.document.subscribe(d => (notes = d.chips.find(c => c.name === 'D flip-flop')?.notes ?? {}));
+    expect(notes).toMatchObject({ clk: 'Clock: q takes d as this goes from 0 to 1', qn: 'The opposite of q' });
+
+    let note: string | null = 'unset';
+    service.geometry.subscribe(g => (note = entryOf(g.components, 'd')?.note ?? null));
+    expect(note).toBeNull();
+    service.setNote('d', '  The bit to keep  ');
+    expect(note).toBe('The bit to keep');
+    service.setNote('d', '');
+    expect(note).toBeNull();
   });
 });

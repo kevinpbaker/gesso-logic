@@ -116,6 +116,21 @@ export class CircuitBuilder {
     this.components[at] = { ...this.components[at]!, x, y };
   }
 
+  /**
+   * Says what each pin is for, by its switch's or LED's label: what
+   * hovering the pin of a chip made of this circuit shows. A label no
+   * switch or LED has is a mistake, and throws.
+   */
+  describe(notes: Readonly<Record<string, string>>): void {
+    for (const [label, note] of Object.entries(notes)) {
+      const at = this.components.findIndex(c => (c.kind === 'input' || c.kind === 'output') && c.label === label);
+      if (at < 0) {
+        throw new Error(`No pin '${label}' to describe.`);
+      }
+      this.components[at] = { ...this.components[at]!, note };
+    }
+  }
+
   build(): Circuit {
     return { version: CIRCUIT_VERSION, components: [...this.components], wires: [...this.wires] };
   }

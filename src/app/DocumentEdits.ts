@@ -120,6 +120,23 @@ export const WIDENABLE: ReadonlySet<Kind> = new Set(['input', 'constant', 'outpu
  * bits that still fit. Unchanged for a width out of range or nothing to
  * change.
  */
+/**
+ * Says what a switch or LED is for — what hovering it as a chip's pin
+ * shows — or, given blank text, stops saying. Unchanged for any other
+ * kind of part, or no change.
+ */
+export function setNote(circuit: Circuit, id: string, note: string): Circuit {
+  const text = note.trim();
+  let changed = false;
+  const components = circuit.components.map(c => {
+    if (c.id !== id || (c.kind !== 'input' && c.kind !== 'output') || (c.note ?? '') === text) return c;
+    changed = true;
+    const { note: _, ...rest } = c;
+    return text === '' ? rest : { ...rest, note: text };
+  });
+  return changed ? { ...circuit, components } : circuit;
+}
+
 export function setWidth(circuit: Circuit, ids: readonly string[], width: number): Circuit {
   if (!Number.isInteger(width) || width < 1 || width > MAX_WIDTH) {
     return circuit;

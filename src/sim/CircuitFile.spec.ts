@@ -10,6 +10,7 @@ function small(): Circuit {
   b.connect(b.input('a', 1), g.a);
   b.connect(b.clock(), g.b);
   b.output('led', g.out);
+  b.describe({ led: 'Lights while the switch is on and the clock is high' });
   const c = b.build();
   return {
     ...c,
@@ -55,6 +56,8 @@ describe('the circuit file', () => {
     expect(failure(file(d => (d.wires[0].to.pin = 'z')))).toBe('wires[0].to: a and has no pin "z"');
     expect(failure(file(d => (d.wires[0].from.component = 'gone')))).toBe('wires[0].from: no component "gone"');
     expect(failure(file(d => (d.wires[0].id = d.components[0].id)))).toMatch(/used twice/);
+    expect(failure(file(d => (d.components[0].note = 'an AND')))).toBe('components[0].note: a and is not a pin and has no note');
+    expect(failure(file(d => (d.components[3].note = 7)))).toBe('components[3].note: not text');
   });
 
   it('drops fields it does not know, so a later file that only added some still opens', () => {

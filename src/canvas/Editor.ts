@@ -1,6 +1,7 @@
 import type { PaintSurface } from 'gesso-core';
 
 import type { CircuitCommands } from '../app/CircuitContract';
+import { kindName, primitivePinNote } from '../app/Describe';
 import { relabel, type Fragment } from '../app/DocumentEdits';
 import { pinAt, route, sizeOf, slotOf, type Box, type KindLayout, type Point, type Shape } from '../app/Layout';
 import type { PinRef } from '../sim/Circuit';
@@ -57,6 +58,26 @@ export interface EditorDeps {
   changed(): void;
   /** The clock a double click is timed on; a spec passes its own. */
   now?(): number;
+  /** What a chip definition's pin is for, from the document; null when it does not say. */
+  pinNote?(chip: string, pin: string): string | null;
+  /** The canvas's size in screen pixels, so a tooltip near an edge can open away from it. */
+  viewSize?(): { readonly width: number; readonly height: number };
+}
+
+/**
+ * What the pointer is over, in words: a pin's name, what part it is on
+ * and which way it points, what it is for, and its value now. A bus has
+ * only a value.
+ */
+export interface HoverCard {
+  /** The pin as a person reads it, `alu.Y`; null for a bus. */
+  readonly title: string | null;
+  /** The part and the pin's direction and width: `ALU · output · 8 bits`. */
+  readonly about: string | null;
+  /** What it is for: the chip's note on it, or a built-in part's. */
+  readonly note: string | null;
+  /** Its value: `1`, `0x3C · 60 · 0011 1100`, `?` before one has arrived, `—` while nothing compiles. */
+  readonly value: string;
 }
 
 type Hit =
@@ -232,6 +253,10 @@ export class Editor {
       return;
     }
     const hit = this.hitAt(this.pointer);
+    // What is under a press is what is hovered, though no move came first:
+    // a touch, or a pointer that jumps, would leave the tooltip of
+    // wherever it was last drawn at the press.
+    this.hover = hit;
     // A selected push button is held down for as long as the press lasts.
     const scene = this.deps.scene();
     const c = hit.kind === 'component' ? scene.indexOf.get(hit.id) : undefined;
@@ -300,6 +325,13 @@ export class Editor {
         break;
     }
     this.hover = this.hitAt(world);
+    this.deps.changed();
+  }
+
+  /** The pointer has left the canvas: nothing is under it, so no tooltip. */
+  pointerLeave(): void {
+    if (this.hover.kind === 'empty') return;
+    this.hover = { kind: 'empty' };
     this.deps.changed();
   }
 
@@ -665,30 +697,119 @@ export class Editor {
       surface.stroke();
     }
 
-    // A bus under the pointer says what it holds, in hex.
-    if (this.hover.kind === 'wire' && mode.kind === 'idle') {
-      const w = scene.wireIds.indexOf(this.hover.id);
+    // The pin or bus under the pointer says what it is and holds.
+    if (mode.kind === 'idle') {
+      const card = this.hoverCard();
+      if (card !== null) this.drawCard(surface, card, px);
+    }
+  }
+
+  /**
+   * The tooltip for what is under the pointer, or null when it is not a
+   * pin or a bus, or a gesture is under way. The canvas also asks for
+   * it as the signals change, and redraws the overlay when `value` does,
+   * so the value is live while the pointer holds still.
+   */
+  hoverCard(): HoverCard | null {
+    if (this.mode.kind !== 'idle') return null;
+    const hover = this.hover;
+    const scene = this.deps.scene();
+    if (hover.kind === 'wire') {
+      const w = scene.wireIds.indexOf(hover.id);
       const bits = w < 0 ? null : scene.wireBits[w];
-      if (bits !== null && bits !== undefined) {
-        let value: number | null = 0;
-        for (let i = 0; i < bits.length && value !== null; i++) {
-          const bit = this.deps.value(bits[i]!);
-          value = bit < 0 ? null : value | (bit << i);
-        }
-        const digits = Math.ceil(bits.length / 4);
-        const text = value === null ? '?'.repeat(digits) : `0x${(value >>> 0).toString(16).toUpperCase().padStart(digits, '0')}`;
-        const x = this.pointer.x + 12 * px;
-        const y = this.pointer.y - 10 * px;
-        surface.beginPath();
-        surface.roundRect(x - 4 * px, y - 14 * px, (text.length * 8 + 8) * px, 20 * px, 4 * px);
-        surface.fillColor('surface');
-        surface.fill();
-        surface.strokeColor('border');
-        surface.lineWidth(px);
-        surface.stroke();
-        surface.fillColor('text');
-        surface.text(text, x, y, { fontSize: 13 * px, fontFamily: 'monospace', fontWeight: 600 });
-      }
+      if (bits === null || bits === undefined) return null;
+      return { title: null, about: null, note: null, value: this.valueOf(Array.from(bits)) };
+    }
+    if (hover.kind !== 'pin') return null;
+    const { component, pin } = hover.pin;
+    const c = scene.indexOf.get(component);
+    if (c === undefined) return null;
+    const kind = scene.kindOf(c);
+    const entry = scene.entries[c]!;
+    // A bus pin's nets are under `pin[i]`; a one-bit pin's under its name.
+    const bits: number[] = [];
+    if (entry.nets[`${pin}[0]`] !== undefined) {
+      for (let i = 0; entry.nets[`${pin}[${i}]`] !== undefined; i++) bits.push(entry.nets[`${pin}[${i}]`]!);
+    } else if (entry.nets[pin] !== undefined) {
+      bits.push(entry.nets[pin]!);
+    }
+    const chip = scene.chipNames[c] ?? null;
+    const part = kind === 'chip' && chip !== null ? chip : kindName(kind);
+    const direction = scene.drives(c, pin) ? 'output' : 'input';
+    const width = bits.length > 1 ? ` · ${bits.length} bits` : '';
+    const note =
+      kind === 'chip'
+        ? chip === null
+          ? null
+          : (this.deps.pinNote?.(chip, pin) ?? null)
+        : (entry.note ?? primitivePinNote(kind, pin, scene.widths[c]!));
+    return { title: this.pinTitle(hover.pin), about: `${part} · ${direction}${width}`, note, value: this.valueOf(bits) };
+  }
+
+  /** A value as the tooltip shows it: a bit as itself, a bus in hex, decimal and, up to 16 bits, binary. */
+  private valueOf(bits: readonly number[]): string {
+    if (bits.length === 0 || bits.some(net => net < 0)) return '—';
+    let value = 0;
+    for (let i = 0; i < bits.length; i++) {
+      const bit = this.deps.value(bits[i]!);
+      if (bit < 0) return '?';
+      value += bit * 2 ** i;
+    }
+    if (bits.length === 1) return String(value);
+    const hex = `0x${value.toString(16).toUpperCase().padStart(Math.ceil(bits.length / 4), '0')}`;
+    if (bits.length > 16) return `${hex} · ${value}`;
+    const binary = value.toString(2).padStart(bits.length, '0').replace(/\B(?=(\d{4})+$)/g, ' ');
+    return `${hex} · ${value} · ${binary}`;
+  }
+
+  /**
+   * A tooltip beside the pointer: the pin's name in bold, what it is on,
+   * what it is for wrapped to a few lines, and its value in monospace.
+   * Below and right of the pointer, or above and left of it where that
+   * would run off the canvas. Sizes are screen pixels; text is measured
+   * by estimate, as the pin pills are, since a surface cannot measure.
+   */
+  private drawCard(surface: PaintSurface, card: HoverCard, px: number): void {
+    const PAD = 8;
+    const lines: { text: string; size: number; weight: number; mono: boolean; color: 'text' | 'textMuted'; em: number }[] = [];
+    if (card.title !== null) lines.push({ text: card.title, size: 13, weight: 700, mono: false, color: 'text', em: 0.6 });
+    if (card.about !== null) lines.push({ text: card.about, size: 11, weight: 400, mono: false, color: 'textMuted', em: 0.56 });
+    if (card.note !== null) for (const text of wrap(card.note, NOTE_CHARS)) lines.push({ text, size: 12, weight: 400, mono: false, color: 'text', em: 0.56 });
+    lines.push({ text: card.value, size: 13, weight: 600, mono: true, color: 'text', em: 0.62 });
+    const lineHeight = (size: number) => size + 5;
+    const width = Math.max(...lines.map(l => l.text.length * l.em * l.size)) + PAD * 2;
+    const height = lines.reduce((h, l) => h + lineHeight(l.size), 0) + PAD * 2 - 4;
+
+    // Where it goes, in screen pixels from the pointer, flipped at the edges.
+    let dx = 14;
+    let dy = 16;
+    const view = this.deps.viewSize?.();
+    if (view !== undefined) {
+      const corner = this.deps.toWorld({ x: 0, y: 0 });
+      const sx = (this.pointer.x - corner.x) / px;
+      const sy = (this.pointer.y - corner.y) / px;
+      if (sx + dx + width > view.width - 8) dx = -10 - width;
+      if (sy + dy + height > view.height - 8) dy = -10 - height;
+    }
+    const x = this.pointer.x + dx * px;
+    let y = this.pointer.y + dy * px;
+    surface.beginPath();
+    surface.roundRect(x, y, width * px, height * px, 6 * px);
+    surface.fillColor('surface');
+    surface.fill();
+    surface.strokeColor('border');
+    surface.lineWidth(px);
+    surface.stroke();
+    y += PAD * px;
+    for (const line of lines) {
+      y += line.size * px;
+      surface.fillColor(line.color);
+      surface.text(line.text, x + PAD * px, y, {
+        fontSize: line.size * px,
+        fontWeight: line.weight,
+        ...(line.mono ? { fontFamily: 'monospace' } : {})
+      });
+      y += (lineHeight(line.size) - line.size) * px;
     }
   }
 
@@ -986,6 +1107,25 @@ export class Editor {
 function placement(what: Shape, world: Point): Point {
   const size = sizeOf(what);
   return { x: Math.round(world.x - size.width / 2), y: Math.round(world.y - size.height / 2) };
+}
+
+/** Characters a line of a tooltip's note holds before it wraps. */
+const NOTE_CHARS = 44;
+
+/** Text broken into lines of at most `chars`, at spaces; a word longer than a line is a line. */
+function wrap(text: string, chars: number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (line !== '' && line.length + 1 + word.length > chars) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line === '' ? word : `${line} ${word}`;
+    }
+  }
+  if (line !== '') lines.push(line);
+  return lines;
 }
 
 function snap(p: Point): Point {

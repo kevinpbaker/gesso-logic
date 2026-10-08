@@ -77,6 +77,8 @@ export interface SelectionSummary {
     readonly label: string | null;
     /** A chip's definition name; null for any other kind. */
     readonly chip: string | null;
+    /** A switch's or LED's note; null for none. */
+    readonly note: string | null;
   } | null;
 }
 
@@ -525,7 +527,9 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     chipShape: name => {
       const document = circuit.view.document.value;
       return (document.chips.find(chip => chip.name === name) ?? document.library.find(part => part.name === name))?.shape;
-    }
+    },
+    pinNote: (chip, pin) => circuit.view.document.value.chips.find(c => c.name === chip)?.notes[pin] ?? null,
+    viewSize: () => size.current
   });
   // What the application worker made of a copy, onto the clipboard.
   let clipped = 0;
@@ -567,8 +571,15 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     }
     editor.drawOverlay(surface);
   };
-  const overlay = combineLatest([camera, editorChanged, highlight]).pipe(
-    map(([c, version, flagged]): UiPaint => ({ draw: drawOverlay, inputs: [c.x, c.y, c.scale, version, flagged.join(',')] }))
+  // The value in the tooltip, as the signals change: the overlay is drawn
+  // again when it does, and only then, so it is live while the pointer
+  // holds still and costs nothing while it shows no value.
+  const hoverValue = combineLatest([circuit.view.signals, editorChanged]).pipe(
+    map(() => editor.hoverCard()?.value ?? ''),
+    distinctUntilChanged()
+  );
+  const overlay = combineLatest([camera, editorChanged, highlight, hoverValue]).pipe(
+    map(([c, version, flagged, value]): UiPaint => ({ draw: drawOverlay, inputs: [c.x, c.y, c.scale, version, flagged.join(','), value] }))
   );
 
   const show = (preset: ZoomPreset) => {
@@ -701,6 +712,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       onPointerDown={(event: UiPointerEvent) => editor.pointerDown(local(event), event.buttons, event.modifiers.shift)}
       onPointerMove={(event: UiPointerEvent) => editor.pointerMove(local(event), event.buttons)}
       onPointerUp={(event: UiPointerEvent) => editor.pointerUp(local(event))}
+      onPointerLeave={() => editor.pointerLeave()}
       onKeyDown={(event: UiKeyboardEvent) => {
         const ctrl = event.modifiers.ctrl || event.modifiers.meta;
         const key = event.key.toLowerCase();
@@ -776,7 +788,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
                 kind: scene.kindOf(only),
                 width: scene.widths[only]!,
                 label: scene.labels[only] ?? null,
-                chip: scene.chipNames[only] ?? null
+                chip: scene.chipNames[only] ?? null,
+                note: scene.entries[only]!.note
               }
       };
     },

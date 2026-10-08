@@ -38,6 +38,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         loadProgram: (name, source, rate) => service.loadProgram(name, source, rate),
         setInput: (id, value) => service.setInput(id, value),
         setWidth: (ids, width) => service.setWidth(ids, width),
+        setNote: (id, note) => service.setNote(id, note),
         openProgram: id => service.openProgram(id),
         setProgram: (id, source) => service.setProgram(id, source),
         run: () => service.run(),

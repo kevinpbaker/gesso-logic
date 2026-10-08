@@ -168,6 +168,10 @@ function decoder(bits: number, chips: Record<string, Circuit>): string {
     }
   }
   b.output('Y', { component: y, pin: 'out' }, outputs);
+  b.describe({
+    A: 'Which output bit to raise',
+    Y: 'Only bit A is 1'
+  });
   chips[name] = b.build();
   return name;
 }
@@ -204,6 +208,10 @@ function orTree(inputs: number, width: number, chips: Record<string, Circuit>): 
     b.connect(level[0]!, { component: y, pin: `b${bit}` });
   }
   b.output('Y', { component: y, pin: 'out' }, width);
+  b.describe({
+    ...Object.fromEntries(Array.from({ length: inputs }, (_, i) => [`I${i}`, 'A word to OR in: most often 0, or the one value let through'])),
+    Y: 'Every input ORed together, bit by bit'
+  });
   chips[name] = b.build();
   return name;
 }
@@ -274,6 +282,14 @@ export function ram(bytes = 128, screenFrom?: number): Generated {
     b.output('Q', { component: q, pin: 'out' }, 8);
     // The latches themselves, always: what a framebuffer's pixels are.
     b.output('P', { component: p, pin: 'out' }, 8);
+    b.describe({
+      D: 'The byte to write',
+      sel: '1 when the address picks this byte',
+      we: 'Write enable: while 1 (and sel is 1) the byte follows D',
+      rst: 'Reset: while 1 the byte takes D whatever sel is; the RAM holds D at 0 then, so this clears it',
+      Q: 'The byte, while sel is 1; 0 otherwise',
+      P: 'The byte, always: what the screen shows'
+    });
     chips['RAM byte'] = b.build();
   }
 
@@ -311,6 +327,15 @@ export function ram(bytes = 128, screenFrom?: number): Generated {
       }
       b.output(`P${group}`, { component: pixels, pin: 'out' }, 32);
     }
+    b.describe({
+      C: 'Column lines: one bit high, picking a byte in the row',
+      row: '1 when the address is in this row',
+      D: 'The byte to write',
+      we: 'Write enable',
+      rst: 'Reset: clears every byte',
+      Q: 'The byte the address picks, when it is in this row; 0 otherwise',
+      ...Object.fromEntries(Array.from({ length: ROW_BYTES / 4 }, (_, g) => [`P${g}`, `Bytes ${4 * g}–${4 * g + 3} of the row, always: 32 pixels`]))
+    });
     chips['RAM row'] = b.build();
   }
 
@@ -374,6 +399,16 @@ export function ram(bytes = 128, screenFrom?: number): Generated {
       b.output(`F${y}`, { component: rowChips[Math.floor(first / ROW_BYTES)]!, pin: `P${(first % ROW_BYTES) / 4}` }, 32);
     }
   }
+  b.describe({
+    A: `The address: which of the ${bytes} bytes Q reads and a write writes`,
+    D: 'The byte to write',
+    we: 'Write enable: while 1 the byte at A follows D, and keeps it when this falls',
+    rst: 'Reset: while 1 every byte is cleared to 0',
+    Q: 'The byte at address A',
+    ...(screenFrom === undefined
+      ? {}
+      : Object.fromEntries(Array.from({ length: SCREEN_BYTES / 4 }, (_, y) => [`F${y}`, `Row ${y} of the screen: the four bytes from 0x${(screenFrom + 4 * y).toString(16).toUpperCase()}`])))
+  });
   return laidOut(b.build(), chips, new Set(Object.keys(chips).filter(name => name !== 'D latch')));
 }
 
@@ -403,6 +438,12 @@ export function registerFile(names: readonly string[] = ['A', 'B', 'X']): Genera
     b.connect(loads[i]!, { component: register, pin: 'load' });
     b.connect(clk, { component: register, pin: 'clk' });
     b.output(name, { component: register, pin: 'Q' }, 8);
+  });
+  b.describe({
+    D: 'The byte a register takes when its load line is 1',
+    ...Object.fromEntries(names.map(name => [`load ${name}`, `1 to store D in ${name} on the next rising clock edge`])),
+    clk: 'Clock: registers change only as this rises',
+    ...Object.fromEntries(names.map(name => [name, `What register ${name} holds`]))
   });
   return laidOut(b.build(), chips, new Set());
 }
@@ -500,6 +541,15 @@ function alu(chips: Record<string, Circuit>): string {
   for (let i = 1; i < 8; i++) any = b.or(any, y[i]!, `any ${i}`);
   b.output('Z', b.not(any, 'zero'));
   b.output('N', y[7]!);
+  b.describe({
+    L: 'Left operand: A or X, as the datapath’s left line picks',
+    R: 'Right operand: K, B, M or 0, as the datapath’s right lines pick',
+    op: 'Operation: 0 ADD, 1 SUB, 2 AND, 3 OR, 4 XOR, 5 pass R, 6 pass L, 7 INC, 8 DEC, 9 SHL, 10 SHR',
+    Y: 'The result',
+    C: 'Carry: out of ADD, not-borrow from SUB, or the bit a shift pushed out',
+    Z: 'Zero: 1 when Y is 0',
+    N: 'Negative: the top bit of Y'
+  });
   chips[name] = b.build();
   return name;
 }
@@ -555,6 +605,7 @@ export function datapath(): Generated {
     const d = bitsOf(b, 'D bits', b.input('D', 0, 8));
     const keep = b.not(b.input('rst'), 'not rst');
     b.output('Y', bus(b, 'Y bits', d.map((bit, i) => b.and(bit, keep, `bit ${i}`))), 8);
+    b.describe({ D: 'The byte to pass on', rst: 'Reset: while 1, Y is 0', Y: 'D, or 0 while rst is 1' });
     chips['clear ×8'] = b.build();
   }
   // Flags: Z, C and N, each held, loaded, or cleared on reset.
@@ -576,6 +627,18 @@ export function datapath(): Generated {
       b.connect(clk, { component: ff, pin: 'clk' });
       b.output(flag, { component: ff, pin: 'q' });
     }
+    b.describe({
+      'Z in': 'The ALU’s Z, kept on the clock edge while lzn is 1',
+      'C in': 'The ALU’s C, kept on the clock edge while lc is 1',
+      'N in': 'The ALU’s N, kept on the clock edge while lzn is 1',
+      lzn: 'Load Z and N from the ALU on the next rising clock edge',
+      lc: 'Load C from the ALU on the next rising clock edge',
+      rst: 'Reset: clears every flag on the next rising clock edge',
+      clk: 'Clock: flags change only as this rises',
+      Z: 'Zero flag: the last result kept was 0',
+      C: 'Carry flag',
+      N: 'Negative flag: the last result kept had its top bit set'
+    });
     chips.flags = b.build();
   }
   for (const name of Object.keys(chips)) if (!before.has(name)) generated.add(name);
@@ -688,6 +751,37 @@ export function datapath(): Generated {
   b.output('X', x, 8);
   b.output('L', l, 8);
   for (const flag of ['Z', 'C', 'N']) b.output(flag, { component: flags, pin: flag });
+  b.describe({
+    I: 'The 16-bit instruction word the ROM has at PC',
+    M: 'The data byte read: from RAM, a ROM table or a port',
+    ir: 'Fetch: load the instruction register from I',
+    inc: 'Count PC up by one',
+    jump: 'Load PC from K, or from L when ret is 1',
+    ret: 'Return: a jump takes PC from L, not K',
+    link: 'Save PC in L, for a call to return to',
+    la: 'Load A with the ALU’s result',
+    lb: 'Load B with the ALU’s result',
+    lx: 'Load X with the ALU’s result',
+    lzn: 'Keep the ALU’s Z and N flags',
+    lc: 'Keep the ALU’s C flag',
+    op: 'ALU operation: 0 ADD, 1 SUB, 2 AND, 3 OR, 4 XOR, 5 pass R, 6 pass L, 7 INC, 8 DEC, 9 SHL, 10 SHR',
+    left: 'ALU left operand: 0 A, 1 X',
+    right: 'ALU right operand: 0 K, 1 B, 2 M, 3 zero',
+    index: 'Data address is K + X, not K',
+    rst: 'Reset: zeroes every register and flag on the next clock edge',
+    clk: 'Clock: registers change only as this rises',
+    PC: 'Program counter: the address of the next instruction',
+    OP: 'Opcode: the instruction’s high byte',
+    K: 'Operand: the instruction’s low byte',
+    ADDR: 'The data address: K, or K + X',
+    A: 'Register A, the accumulator: also the byte stores and OUT write',
+    B: 'Register B',
+    X: 'Register X, the index register',
+    L: 'Link register: where RET returns to',
+    Z: 'Zero flag',
+    C: 'Carry flag',
+    N: 'Negative flag'
+  });
   // The register file is generated too; it lays out as the generator
   // left it, like a library part.
   const done = laidOut(b.build(), chips, generated);
@@ -805,6 +899,33 @@ export function controlUnit(chips: Record<string, Circuit> = {}): string {
   b.connect(clk, { component: stepFf, pin: 'clk' });
   b.connect(clk, { component: haltedFf, pin: 'clk' });
   for (const [label, pin, width] of outputs) b.output(label, pin, width ?? 1);
+  b.describe({
+    OP: 'The opcode to decode',
+    Z: 'Zero flag, for conditional jumps',
+    C: 'Carry flag, for conditional jumps',
+    N: 'Negative flag, for conditional jumps',
+    rst: 'Reset: back to fetch, and not halted',
+    clk: 'Clock: each instruction takes two cycles, fetch then execute',
+    ir: 'Fetch: load the instruction register',
+    inc: 'Count PC up by one',
+    jump: 'Load PC: a jump, call or return that is taken',
+    ret: 'Return: PC from L, not K',
+    link: 'Save PC in L, for a call',
+    la: 'Load A with the ALU’s result',
+    lb: 'Load B with the ALU’s result',
+    lx: 'Load X with the ALU’s result',
+    lzn: 'Keep the ALU’s Z and N flags',
+    lc: 'Keep the ALU’s C flag',
+    op: 'ALU operation: 0 ADD, 1 SUB, 2 AND, 3 OR, 4 XOR, 5 pass R, 6 pass L, 7 INC, 8 DEC, 9 SHL, 10 SHR',
+    left: 'ALU left operand: 0 A, 1 X',
+    right: 'ALU right operand: 0 K, 1 B, 2 M, 3 zero',
+    index: 'Data address is K + X, not K',
+    we: 'RAM write strobe: high in the second half of a store',
+    out: 'Port write strobe: high in the second half of OUT',
+    table: 'M should carry the ROM table byte (LDT)',
+    port: 'M should carry the input port (IN)',
+    halted: 'The CPU has run HLT and stopped; reset starts it again'
+  });
   chips[name] = b.build();
   return name;
 }
@@ -857,6 +978,24 @@ export function cpu(): Generated {
   b.output('A', { component: path, pin: 'A' }, 8);
   b.output('B', { component: path, pin: 'B' }, 8);
   b.output('X', { component: path, pin: 'X' }, 8);
+  b.describe({
+    I: 'The 16-bit instruction word the ROM has at PC',
+    M: 'The data byte read: from RAM, a ROM table or a port',
+    rst: 'Reset: zeroes the registers and starts again from address 0',
+    clk: 'Clock: each instruction takes two cycles',
+    PC: 'Program counter: the ROM address to fetch from',
+    ADDR: 'The data address, for RAM and the ROM’s table port',
+    D: 'The byte to write to RAM or a port: register A',
+    K: 'The instruction’s operand byte: its low bits name the port',
+    we: 'RAM write strobe',
+    out: 'Port write strobe',
+    table: 'M should carry the ROM table byte (LDT)',
+    port: 'M should carry the input port (IN)',
+    halted: 'The CPU has run HLT and stopped',
+    A: 'Register A, the accumulator',
+    B: 'Register B',
+    X: 'Register X, the index register'
+  });
   const done = laidOut(b.build(), chips, generated);
   // The datapath's own chips are laid out as `datapath` left them.
   return { ...done, chips: { ...done.chips, ...Object.fromEntries(Object.entries(dataChips)), datapath: dp as Circuit } };
@@ -894,6 +1033,7 @@ function timer(bits: number, chips: Record<string, Circuit>): string {
     if (i < bits - 1) carry = b.and(carry, bit, `carry ${i}`);
   }
   b.output('Q', bus(b, 'Q bits', q), bits);
+  b.describe({ rst: 'Reset: back to 0', clk: 'Clock: counts each rising edge', Q: 'Clock cycles since reset; the top bit is the frame tick' });
   chips[name] = b.build();
   return name;
 }
@@ -937,6 +1077,7 @@ export function memoryAndPorts(): Generated {
       b.connect(en, { component: latch, pin: 'en' });
       return { component: latch, pin: 'q' };
     })), 8);
+    b.describe({ D: 'The byte to hold', en: 'Enable: Q follows D while 1, and holds when it falls', Q: 'The byte held' });
     chips['latch 8'] = b.build();
   }
   const generated = new Set(Object.keys(chips).filter(name => !before.has(name)));
@@ -1002,6 +1143,24 @@ export function memoryAndPorts(): Generated {
   for (let y = 0; y < 16; y++) b.output(`F${y}`, { component: theRam, pin: `F${y}` }, 32);
   b.output('S0', scores[0]!, 8);
   b.output('S1', scores[1]!, 8);
+  b.describe({
+    ADDR: 'The data address: RAM below 0x80',
+    D: 'The byte to write to RAM or a port',
+    K: 'The instruction’s operand: its low bits pick the port',
+    we: 'RAM write strobe',
+    out: 'Port write strobe: OUT stores D in port K',
+    table: 'Put the ROM table byte T on M',
+    port: 'Put input port K on M',
+    T: 'The ROM’s table byte, at ADDR',
+    up: 'The up button: bit 0 of input port 0',
+    down: 'The down button: bit 1 of input port 0',
+    rst: 'Reset: clears RAM, the output ports and the timer',
+    clk: 'Clock: drives the frame timer',
+    M: 'The byte the CPU reads: RAM, a table byte or a port',
+    ...Object.fromEntries(Array.from({ length: 16 }, (_, y) => [`F${y}`, `Row ${y} of the screen, straight from RAM`])),
+    S0: 'Output port 0: the left score display',
+    S1: 'Output port 1: the right score display'
+  });
   const done = laidOut(b.build(), chips, generated);
   return { ...done, chips: { ...done.chips, ...ramChips, 'RAM 128 + screen': memory as Circuit } };
 }

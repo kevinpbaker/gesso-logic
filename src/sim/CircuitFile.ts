@@ -67,7 +67,8 @@ export function writeCircuit(circuit: Circuit): string {
       ...(c.rate !== undefined ? { rate: c.rate } : {}),
       ...(c.chip !== undefined ? { chip: c.chip } : {}),
       ...(c.rom !== undefined ? { rom: c.rom } : {}),
-      ...(c.source !== undefined ? { source: c.source } : {})
+      ...(c.source !== undefined ? { source: c.source } : {}),
+      ...(c.note !== undefined ? { note: c.note } : {})
     });
   const wire = (w: Wire) =>
     JSON.stringify({
@@ -199,6 +200,11 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
       if (kind !== 'rom') throw new CircuitFileError(`${here}.source: a ${kind} has no program`);
       if (typeof source !== 'string') throw new CircuitFileError(`${here}.source: not text`);
     }
+    const note = raw['note'];
+    if (note !== undefined) {
+      if (kind !== 'input' && kind !== 'output') throw new CircuitFileError(`${here}.note: a ${kind} is not a pin and has no note`);
+      if (typeof note !== 'string') throw new CircuitFileError(`${here}.note: not text`);
+    }
     kinds.set(id, kind as Kind);
     components.push({
       id,
@@ -212,7 +218,8 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
       ...(rate !== undefined ? { rate } : {}),
       ...(kind === 'chip' ? { chip: chip as string } : {}),
       ...(rom !== undefined ? { rom: rom as number[] } : {}),
-      ...(source !== undefined ? { source } : {})
+      ...(source !== undefined ? { source } : {}),
+      ...(note !== undefined ? { note } : {})
     });
   }
 

@@ -72,8 +72,12 @@ export interface DocumentSummary {
   readonly welcome: boolean;
   /** The chips that differ from how the document was opened, themselves or in a chip inside them: the ones Reset can put back. */
   readonly changedChips: readonly string[];
-  /** The document's chip definitions, by name, with the body each gives an instance: for the palette. */
-  readonly chips: readonly { readonly name: string; readonly shape: KindLayout }[];
+  /**
+   * The document's chip definitions, by name, with the body each gives an
+   * instance — for the palette — and what each pin is for, by pin, for
+   * the tooltip on a pin: only the pins that say.
+   */
+  readonly chips: readonly { readonly name: string; readonly shape: KindLayout; readonly notes: Readonly<Record<string, string>> }[];
   /** The standard library, for the palette: each part's name, body and a line on what it does. Placing one brings it in. */
   readonly library: readonly { readonly name: string; readonly shape: KindLayout; readonly note: string }[];
 }
@@ -113,6 +117,8 @@ export interface ComponentGeometry {
   /** How many bits wide it is: its `width`, or 1. */
   readonly width: number;
   readonly shape: KindLayout | null;
+  /** A switch's or LED's `note`: what it is for, as a chip's pin; null for none. */
+  readonly note: string | null;
 }
 
 export interface WireGeometry {
@@ -284,6 +290,8 @@ export interface CircuitCommands {
   setInput(id: string, value: number): void;
   /** Makes these components `width` bits wide; see `setWidth` in `DocumentEdits`. */
   setWidth(ids: readonly string[], width: number): void;
+  /** Says what a switch or LED is for, as a chip's pin; see `setNote` in `DocumentEdits`. */
+  setNote(id: string, note: string): void;
   /** Opens the program editor on a ROM of the level on the canvas, published as `program`; '' closes it. */
   openProgram(id: string): void;
   /**

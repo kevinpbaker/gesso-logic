@@ -25,6 +25,8 @@ export interface ChipPin {
   readonly component: string;
   /** Its width in bits: the switch's or LED's. */
   readonly width: number;
+  /** What it is for, from the switch's or LED's `note`; null when it has none. */
+  readonly note: string | null;
 }
 
 export interface ChipInterface {
@@ -37,7 +39,7 @@ export function chipInterface(definition: Circuit): ChipInterface {
     definition.components
       .filter(c => c.kind === kind)
       .sort((a, b) => a.y - b.y || a.x - b.x)
-      .map(c => ({ name: c.label ?? c.id, component: c.id, width: c.width ?? 1 }));
+      .map(c => ({ name: c.label ?? c.id, component: c.id, width: c.width ?? 1, note: c.note ?? null }));
   return { inputs: pinsOfKind('input'), outputs: pinsOfKind('output') };
 }
 

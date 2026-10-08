@@ -2,17 +2,17 @@
   "format": "gessologic",
   "version": 1,
   "components": [
-    {"id":"D","kind":"input","x":0,"y":2,"label":"D","value":0,"width":8},
-    {"id":"load A","kind":"input","x":0,"y":6,"label":"load A","value":0},
-    {"id":"load B","kind":"input","x":0,"y":10,"label":"load B","value":0},
-    {"id":"load X","kind":"input","x":0,"y":14,"label":"load X","value":0},
-    {"id":"clk","kind":"input","x":0,"y":18,"label":"clk","value":0},
+    {"id":"D","kind":"input","x":0,"y":2,"label":"D","value":0,"width":8,"note":"The byte a register takes when its load line is 1"},
+    {"id":"load A","kind":"input","x":0,"y":6,"label":"load A","value":0,"note":"1 to store D in A on the next rising clock edge"},
+    {"id":"load B","kind":"input","x":0,"y":10,"label":"load B","value":0,"note":"1 to store D in B on the next rising clock edge"},
+    {"id":"load X","kind":"input","x":0,"y":14,"label":"load X","value":0,"note":"1 to store D in X on the next rising clock edge"},
+    {"id":"clk","kind":"input","x":0,"y":18,"label":"clk","value":0,"note":"Clock: registers change only as this rises"},
     {"id":"A","kind":"chip","x":10,"y":0,"label":"A","chip":"register 8"},
-    {"id":"A#6","kind":"output","x":25,"y":6,"label":"A","width":8},
+    {"id":"A#6","kind":"output","x":25,"y":6,"label":"A","width":8,"note":"What register A holds"},
     {"id":"B","kind":"chip","x":10,"y":8,"label":"B","chip":"register 8"},
-    {"id":"B#8","kind":"output","x":25,"y":10,"label":"B","width":8},
+    {"id":"B#8","kind":"output","x":25,"y":10,"label":"B","width":8,"note":"What register B holds"},
     {"id":"X","kind":"chip","x":10,"y":16,"label":"X","chip":"register 8"},
-    {"id":"X#10","kind":"output","x":25,"y":14,"label":"X","width":8}
+    {"id":"X#10","kind":"output","x":25,"y":14,"label":"X","width":8,"note":"What register X holds"}
   ],
   "wires": [
     {"id":"w0","from":{"component":"D","pin":"out"},"to":{"component":"A","pin":"D"}},
@@ -31,8 +31,8 @@
   "chips": {
     "D flip-flop": {
       "components": [
-        {"id":"d","kind":"input","x":0,"y":8,"label":"d","value":0},
-        {"id":"clk","kind":"input","x":0,"y":12,"label":"clk","value":0},
+        {"id":"d","kind":"input","x":0,"y":8,"label":"d","value":0,"note":"The bit to store on the next rising clock edge"},
+        {"id":"clk","kind":"input","x":0,"y":12,"label":"clk","value":0,"note":"Clock: q takes d as this goes from 0 to 1"},
         {"id":"ff.clockBar","kind":"not","x":10,"y":6,"label":"ff.clockBar"},
         {"id":"ff.master.sBar","kind":"nand","x":10,"y":0,"label":"ff.master.sBar"},
         {"id":"ff.master.rBar","kind":"nand","x":20,"y":6,"label":"ff.master.rBar"},
@@ -42,8 +42,8 @@
         {"id":"ff.slave.rBar","kind":"nand","x":10,"y":18,"label":"ff.slave.rBar"},
         {"id":"ff.slave.q","kind":"nand","x":20,"y":12,"label":"ff.slave.q"},
         {"id":"ff.slave.qBar","kind":"nand","x":20,"y":18,"label":"ff.slave.qBar"},
-        {"id":"q","kind":"output","x":40,"y":8,"label":"q"},
-        {"id":"qn","kind":"output","x":40,"y":12,"label":"qn"}
+        {"id":"q","kind":"output","x":40,"y":8,"label":"q","note":"The bit stored"},
+        {"id":"qn","kind":"output","x":40,"y":12,"label":"qn","note":"The opposite of q"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"clk","pin":"out"},"to":{"component":"ff.clockBar","pin":"a"}},
@@ -69,14 +69,14 @@
     },
     "mux 2": {
       "components": [
-        {"id":"a","kind":"input","x":0,"y":3,"label":"a","value":0},
-        {"id":"b","kind":"input","x":0,"y":7,"label":"b","value":0},
-        {"id":"s","kind":"input","x":0,"y":11,"label":"s","value":0},
+        {"id":"a","kind":"input","x":0,"y":3,"label":"a","value":0,"note":"Passed to y while s is 0"},
+        {"id":"b","kind":"input","x":0,"y":7,"label":"b","value":0,"note":"Passed to y while s is 1"},
+        {"id":"s","kind":"input","x":0,"y":11,"label":"s","value":0,"note":"Select: 0 picks a, 1 picks b"},
         {"id":"ns","kind":"not","x":10,"y":12,"label":"ns"},
         {"id":"m.a","kind":"and","x":10,"y":0,"label":"m.a"},
         {"id":"m.b","kind":"and","x":10,"y":6,"label":"m.b"},
         {"id":"m.y","kind":"or","x":20,"y":6,"label":"m.y"},
-        {"id":"y","kind":"output","x":30,"y":7,"label":"y"}
+        {"id":"y","kind":"output","x":30,"y":7,"label":"y","note":"a or b, whichever s picks"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"s","pin":"out"},"to":{"component":"ns","pin":"a"}},
@@ -92,9 +92,9 @@
     "register 8": {
       "components": [
         {"id":"D bits","kind":"split","x":16,"y":0,"label":"D bits","width":8},
-        {"id":"D","kind":"input","x":0,"y":56,"label":"D","value":0,"width":8},
-        {"id":"load","kind":"input","x":0,"y":60,"label":"load","value":0},
-        {"id":"clk","kind":"input","x":0,"y":64,"label":"clk","value":0},
+        {"id":"D","kind":"input","x":0,"y":56,"label":"D","value":0,"width":8,"note":"The byte to store"},
+        {"id":"load","kind":"input","x":0,"y":60,"label":"load","value":0,"note":"1 to store D on the next rising clock edge; 0 holds Q"},
+        {"id":"clk","kind":"input","x":0,"y":64,"label":"clk","value":0,"note":"Clock: Q changes only as this rises"},
         {"id":"Q bits","kind":"join","x":32,"y":56,"label":"Q bits","width":8},
         {"id":"m0","kind":"chip","x":16,"y":11,"label":"m0","chip":"mux 2"},
         {"id":"ff0","kind":"chip","x":16,"y":75,"label":"ff0","chip":"D flip-flop"},
@@ -112,7 +112,7 @@
         {"id":"ff6","kind":"chip","x":16,"y":111,"label":"ff6","chip":"D flip-flop"},
         {"id":"m7","kind":"chip","x":16,"y":67,"label":"m7","chip":"mux 2"},
         {"id":"ff7","kind":"chip","x":16,"y":117,"label":"ff7","chip":"D flip-flop"},
-        {"id":"Q","kind":"output","x":48,"y":60,"label":"Q","width":8}
+        {"id":"Q","kind":"output","x":48,"y":60,"label":"Q","width":8,"note":"The byte stored"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"D","pin":"out"},"to":{"component":"D bits","pin":"in"}},

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Geometry } from '../app/CircuitContract';
 import { CircuitService } from '../app/CircuitService';
 import { CircuitBuilder } from '../sim/CircuitBuilder';
-import { Editor } from './Editor';
+import { Editor, type EditorDeps } from './Editor';
 import { SceneIndex } from './SceneIndex';
 
 /**
@@ -15,7 +15,7 @@ import { SceneIndex } from './SceneIndex';
  */
 const SCALE = 16;
 
-function setup(button = 'push', wire?: (b: CircuitBuilder) => void) {
+function setup(button = 'push', wire?: (b: CircuitBuilder) => void, deps: Partial<EditorDeps> = {}) {
   const b = new CircuitBuilder();
   b.input('a');
   b.button(button);
@@ -70,7 +70,8 @@ function setup(button = 'push', wire?: (b: CircuitBuilder) => void) {
     chipShape: () => undefined,
     panBy: record('panBy'),
     value: () => 0,
-    changed: () => {}
+    changed: () => {},
+    ...deps
   });
   const at = (x: number, y: number) => ({ x: x * SCALE, y: y * SCALE });
   return { editor, sent, at };
@@ -348,6 +349,41 @@ describe('the editor', () => {
     editor.keyDown('t', false, false);
 
     expect(sent).toEqual([['tabulate', ['g']]]);
+  });
+});
+
+describe('the tooltip on a pin', () => {
+  it('names a gate’s pin, says what it does and shows its value', () => {
+    const { editor, at } = setup('push', undefined, { value: () => 1 });
+    editor.pointerMove(at(10, 2));
+    expect(editor.hoverCard()).toEqual({ title: 'g.out', about: 'AND gate · output', note: '1 when a and b are both 1', value: '1' });
+    editor.pointerMove(at(6, 3));
+    expect(editor.hoverCard()?.note).toBe('Second input');
+  });
+
+  it('says what a switch or LED’s note says, as the pin it is in a chip', () => {
+    const { editor, at } = setup('push', b => b.describe({ led: 'Lights when both are on' }));
+    editor.pointerMove(at(14, 2));
+    expect(editor.hoverCard()).toMatchObject({ title: 'led.in', about: 'LED · input', note: 'Lights when both are on' });
+  });
+
+  it('shows nothing away from a pin, while a wire is drawn, or once the pointer has left', () => {
+    const { editor, at } = setup();
+    editor.pointerMove(at(3, 6));
+    expect(editor.hoverCard()).toBeNull();
+    editor.pointerMove(at(10, 2));
+    expect(editor.hoverCard()).not.toBeNull();
+    editor.pointerLeave();
+    expect(editor.hoverCard()).toBeNull();
+    // A press with no move before it is over what it lands on.
+    editor.pointerMove(at(10, 2));
+    editor.pointerDown(at(3, 6), 1, false);
+    editor.pointerUp(at(3, 6));
+    expect(editor.hoverCard()).toBeNull();
+    editor.pointerMove(at(10, 2));
+    editor.pointerDown(at(10, 2), 1, false);
+    editor.pointerMove(at(12, 4));
+    expect(editor.hoverCard()).toBeNull();
   });
 });
 

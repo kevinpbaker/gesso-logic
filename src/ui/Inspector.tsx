@@ -7,7 +7,7 @@ import { Circuit, type TableView } from '../app/CircuitContract';
 import { headings } from '../app/TruthTable';
 import { WIDENABLE } from '../app/DocumentEdits';
 import type { CanvasHandle, SelectionSummary } from '../canvas/CircuitCanvas';
-import type { Kind } from '../sim/Primitives';
+import { kindName } from '../app/Describe';
 import { field, heading, small } from './controls';
 
 /**
@@ -21,33 +21,6 @@ import { field, heading, small } from './controls';
  * down and drawn over whatever had grown into that space.
  */
 
-const KIND_NAMES: Readonly<Record<Kind, string>> = {
-  input: 'Switch',
-  button: 'Button',
-  clock: 'Clock',
-  constant: 'Constant',
-  output: 'LED',
-  probe: 'Probe',
-  hex: 'Hex display',
-  seg7: '7-segment display',
-  matrix: 'LED matrix',
-  split: 'Split',
-  join: 'Join',
-  not: 'NOT gate',
-  and: 'AND gate',
-  or: 'OR gate',
-  nand: 'NAND gate',
-  nor: 'NOR gate',
-  xor: 'XOR gate',
-  xnor: 'XNOR gate',
-  chip: 'Chip',
-  rom: 'Program ROM'
-};
-
-export function kindName(kind: Kind): string {
-  return KIND_NAMES[kind] ?? kind;
-}
-
 /** The selection card's width, and the narrowest the truth table under it is. */
 const CARD_WIDTH = 292;
 
@@ -57,7 +30,8 @@ const same = (a: SelectionSummary, b: SelectionSummary) =>
   a.one?.id === b.one?.id &&
   a.one?.width === b.one?.width &&
   a.one?.chip === b.one?.chip &&
-  a.one?.label === b.one?.label;
+  a.one?.label === b.one?.label &&
+  a.one?.note === b.one?.note;
 
 export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: Observable<string | null>): UiChild {
   const circuit = ctx.channel(Circuit);
@@ -69,12 +43,14 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
   const chipName = internalState('');
   const widthText = internalState('');
   const valueText = internalState('');
+  const noteText = internalState('');
   let current: SelectionSummary = { parts: 0, wires: 0, one: null };
   ctx.effect(selection, s => {
     current = s;
     chipName.value = s.one?.chip ?? '';
     widthText.value = s.one === null ? '' : String(s.one.width);
     valueText.value = '';
+    noteText.value = s.one?.note ?? '';
   });
 
   const rename = () => {
@@ -86,6 +62,10 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
     const width = Number.parseInt(widthText.value, 10);
     const one = current.one;
     if (one !== null && Number.isInteger(width) && width >= 1 && width <= 32 && width !== one.width) circuit.send.setWidth([one.id], width);
+  };
+  const applyNote = () => {
+    const one = current.one;
+    if (one !== null && noteText.value.trim() !== (one.note ?? '')) circuit.send.setNote(one.id, noteText.value);
   };
   const applyValue = () => {
     const text = valueText.value.trim();
@@ -144,6 +124,11 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
         if (one.kind === 'input' && one.width > 1 && chip === null) {
           rows.push(labelled('Value', <row gap={6} y="center">{field('value', 'Value, 0x for hex', valueText, 72, applyValue)}<text text="0x for hex" fontSize={11} color="textMuted" /></row>, 'value'));
         }
+      }
+      // A switch or LED is a pin of any chip made of this circuit; its
+      // note is what hovering the pin says.
+      if (one !== null && (one.kind === 'input' || one.kind === 'output')) {
+        rows.push(labelled('Pin note', field('note', 'What this pin is for, shown when its pin is hovered', noteText, 200, applyNote), 'note'));
       }
       const actions: UiChild[] = [];
       if (one?.kind === 'chip') actions.push(small('Look inside', act(() => circuit.send.openChip(one.id)), 'open'));

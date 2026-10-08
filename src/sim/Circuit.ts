@@ -78,6 +78,12 @@ export interface Component {
    * reads. Absent when there was none, as for words given as words.
    */
   readonly source?: string;
+  /**
+   * What a switch or LED is for, in a line: inside a chip it is a pin,
+   * and this is what hovering that pin says, since a pin's name is most
+   * often a letter. Only a switch or an LED has one.
+   */
+  readonly note?: string;
 }
 
 export interface PinRef {

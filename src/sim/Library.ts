@@ -96,6 +96,12 @@ function halfAdder(): Circuit {
   const x = b.input('b');
   b.output('s', b.xor(a, x, 'ha.sum'));
   b.output('c', b.and(a, x, 'ha.carry'));
+  b.describe({
+    a: 'A bit to add',
+    b: 'The other bit to add',
+    s: 'Sum: 1 when exactly one of a and b is 1',
+    c: 'Carry: 1 when a and b are both 1'
+  });
   return b.build();
 }
 
@@ -104,6 +110,13 @@ function fullAdderPart(): Circuit {
   const { sum, carry } = fullAdder(b, b.input('a'), b.input('b'), b.input('cin'), 'fa');
   b.output('s', sum);
   b.output('cout', carry);
+  b.describe({
+    a: 'A bit to add',
+    b: 'The other bit to add',
+    cin: 'Carry in, from the bit below',
+    s: 'Sum bit of a + b + cin',
+    cout: 'Carry out, to the bit above'
+  });
   return b.build();
 }
 
@@ -131,6 +144,13 @@ function addSub8(): Circuit {
   }
   b.output('S', { component: s, pin: 'out' }, 8);
   b.output('cout', carry);
+  b.describe({
+    A: 'The number to add to, or subtract from',
+    B: 'The number to add, or subtract',
+    sub: '0 adds, 1 subtracts B from A',
+    S: 'A + B, or A − B while sub is 1, in 8 bits',
+    cout: 'Carry out of the top bit: on a subtraction, 1 when nothing was borrowed'
+  });
   return b.build();
 }
 
@@ -145,6 +165,12 @@ function mux2(): Circuit {
   const x = b.input('b');
   const s = b.input('s');
   b.output('y', muxGates(b, a, x, s, b.not(s, 'ns'), 'm'));
+  b.describe({
+    a: 'Passed to y while s is 0',
+    b: 'Passed to y while s is 1',
+    s: 'Select: 0 picks a, 1 picks b',
+    y: 'a or b, whichever s picks'
+  });
   return b.build();
 }
 
@@ -171,6 +197,14 @@ function mux4(): Circuit {
   b.connect({ component: high, pin: 'y' }, { component: out, pin: 'b' });
   b.connect(s1, { component: out, pin: 's' });
   b.output('y', { component: out, pin: 'y' });
+  b.describe({
+    a: 'Passed to y while S is 0',
+    b: 'Passed to y while S is 1',
+    c: 'Passed to y while S is 2',
+    d: 'Passed to y while S is 3',
+    S: 'Select: which input y copies, 0–3',
+    y: 'The input S picks'
+  });
   return b.build();
 }
 
@@ -194,6 +228,12 @@ function muxWide(ways: 2 | 4): Circuit {
     b.connect({ component: mux, pin: 'y' }, { component: y, pin: `b${i}` });
   }
   b.output('Y', { component: y, pin: 'out' }, 8);
+  const by = ways === 2 ? 's' : 'S';
+  b.describe({
+    ...Object.fromEntries(names.map((name, k) => [name, `Passed to Y while ${by} is ${k}`])),
+    [by]: ways === 2 ? 'Select: 0 picks A, 1 picks B' : 'Select: which input Y copies, 0–3',
+    Y: `The byte ${by} picks`
+  });
   return b.build();
 }
 
@@ -213,6 +253,11 @@ function decoder3to8(): Circuit {
     b.connect(b.and(low, high, `y${n}`), { component: y, pin: `b${n}` });
   }
   b.output('Y', { component: y, pin: 'out' }, 8);
+  b.describe({
+    A: 'Which output bit to raise, 0–7',
+    en: 'Enable: while 0, every bit of Y is 0',
+    Y: 'Only bit A is 1, while en is 1'
+  });
   return b.build();
 }
 
@@ -221,6 +266,12 @@ function dLatchPart(): Circuit {
   const latch = dLatch(b, b.input('d'), b.input('en'), 'latch');
   b.output('q', latch.q);
   b.output('qn', latch.qBar);
+  b.describe({
+    d: 'The bit to hold',
+    en: 'Enable: q follows d while 1, and holds when it falls',
+    q: 'The bit held',
+    qn: 'The opposite of q'
+  });
   return b.build();
 }
 
@@ -229,6 +280,12 @@ function dFlipFlopPart(): Circuit {
   const ff = dFlipFlop(b, b.input('d'), b.input('clk'), 'ff');
   b.output('q', ff.q);
   b.output('qn', ff.qBar);
+  b.describe({
+    d: 'The bit to store on the next rising clock edge',
+    clk: 'Clock: q takes d as this goes from 0 to 1',
+    q: 'The bit stored',
+    qn: 'The opposite of q'
+  });
   return b.build();
 }
 
@@ -251,6 +308,12 @@ function register8(): Circuit {
     b.connect({ component: ff, pin: 'q' }, { component: q, pin: `b${i}` });
   }
   b.output('Q', { component: q, pin: 'out' }, 8);
+  b.describe({
+    D: 'The byte to store',
+    load: '1 to store D on the next rising clock edge; 0 holds Q',
+    clk: 'Clock: Q changes only as this rises',
+    Q: 'The byte stored'
+  });
   return b.build();
 }
 
@@ -285,5 +348,13 @@ function counter8(): Circuit {
     b.connect({ component: ff, pin: 'q' }, { component: q, pin: `b${i}` });
   }
   b.output('Q', { component: q, pin: 'out' }, 8);
+  b.describe({
+    D: 'The value load puts in',
+    clr: '1 to clear Q to 0 on the next edge, before anything else',
+    load: '1 to load D on the next edge',
+    inc: '1 to count up by one on the next edge',
+    clk: 'Clock: Q changes only as this rises',
+    Q: 'The count'
+  });
   return b.build();
 }

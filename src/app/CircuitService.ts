@@ -41,6 +41,7 @@ import {
   renameChip,
   rotate,
   setProgram,
+  setNote,
   setWidth,
   sameConnectivity,
   type Fragment
@@ -49,7 +50,7 @@ import { adderScene, benchScene, busAdderScene, computerScene, counterScene, dat
 import { isLibraryName, LIBRARY_PALETTE, libraryPart } from './LibraryParts';
 import { truthTable } from './TruthTable';
 import { boundsOf, boxOf, intersects, pinAt, route, shapeOf, slotOf, type KindLayout } from './Layout';
-import { pinsOf } from '../sim/Chips';
+import { chipInterface, pinsOf } from '../sim/Chips';
 import { CHUNK, packChunk } from './SignalPacking';
 
 /**
@@ -665,6 +666,10 @@ export class CircuitService {
     this.editLevel(level => setWidth(level, ids, width));
   }
 
+  setNote(id: string, note: string): void {
+    this.editLevel(level => setNote(level, id, note));
+  }
+
   openProgram(id: string): void {
     const rom = id === '' ? undefined : this.romOnLevel(id);
     if (rom === undefined) {
@@ -1167,7 +1172,11 @@ export class CircuitService {
       library: LIBRARY_PALETTE,
       chips: Object.keys(this.circuit.chips ?? {})
         .sort()
-        .map(name => ({ name, shape: shapeOf({ id: '', kind: 'chip', chip: name, x: 0, y: 0 }, this.circuit.chips) as KindLayout }))
+        .map(name => ({
+          name,
+          shape: shapeOf({ id: '', kind: 'chip', chip: name, x: 0, y: 0 }, this.circuit.chips) as KindLayout,
+          notes: pinNotes(this.circuit.chips![name]!)
+        }))
     };
   }
 
@@ -1273,7 +1282,8 @@ export class CircuitService {
         nets,
         chip: component.kind === 'chip' ? (component.chip ?? null) : null,
         width: component.width ?? 1,
-        shape: typeof shape === 'string' ? null : shape
+        shape: typeof shape === 'string' ? null : shape,
+        note: component.note ?? null
       };
     };
     const buildWire = (wire: Wire, byId: ReadonlyMap<string, Component>): WireGeometry => {
@@ -1479,6 +1489,14 @@ function withRate(circuit: Circuit, rate: ClockRate): Circuit {
  * once a definition rather than once an instance; every other kind's are
  * a table lookup and are not cached.
  */
+/** What a chip definition's pins are for, by pin: the notes its switches and LEDs carry. */
+function pinNotes(definition: Circuit): Record<string, string> {
+  const notes: Record<string, string> = {};
+  const face = chipInterface(definition);
+  for (const pin of [...face.inputs, ...face.outputs]) if (pin.note !== null) notes[pin.name] = pin.note;
+  return notes;
+}
+
 function shapeCache(chips: Circuit['chips']) {
   const chipShapes = new Map<string, ReturnType<typeof shapeOf>>();
   const chipPins = new Map<string, ReturnType<typeof pinsOf>>();

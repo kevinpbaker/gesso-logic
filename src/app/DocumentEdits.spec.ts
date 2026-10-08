@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CIRCUIT_VERSION, type Circuit } from '../sim/Circuit';
-import { connect, extract, insert, moveBy, place, relabel, remove, rotate, sameConnectivity } from './DocumentEdits';
+import { connect, extract, insert, moveBy, place, relabel, remove, rotate, sameConnectivity, setNote } from './DocumentEdits';
 
 const empty: Circuit = { version: CIRCUIT_VERSION, components: [], wires: [] };
 
@@ -102,5 +102,16 @@ describe('document edits', () => {
     expect(sameConnectivity(c, rotate(c, ['g']))).toBe(true);
     expect(sameConnectivity(c, remove(c, ['w1']))).toBe(false);
     expect(sameConnectivity(c, place(c, 'x', 'not', 0, 0))).toBe(false);
+  });
+});
+
+describe('setNote', () => {
+  it('notes a switch or LED, and nothing else, and takes blank text as no note', () => {
+    const c = andCircuit();
+    const noted = setNote(c, 'led', ' Lights when both are on ');
+    expect(noted.components.find(x => x.id === 'led')?.note).toBe('Lights when both are on');
+    expect(setNote(noted, 'led', 'Lights when both are on')).toBe(noted);
+    expect(setNote(c, 'g', 'an AND')).toBe(c);
+    expect('note' in setNote(noted, 'led', '  ').components.find(x => x.id === 'led')!).toBe(false);
   });
 });

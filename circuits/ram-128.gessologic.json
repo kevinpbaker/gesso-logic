@@ -3,11 +3,11 @@
   "version": 1,
   "components": [
     {"id":"A bits","kind":"split","x":10,"y":35,"label":"A bits","width":7},
-    {"id":"A","kind":"input","x":0,"y":40,"label":"A","value":0,"width":7},
+    {"id":"A","kind":"input","x":0,"y":40,"label":"A","value":0,"width":7,"note":"The address: which of the 128 bytes Q reads and a write writes"},
     {"id":"D bits","kind":"split","x":10,"y":45,"label":"D bits","width":8},
-    {"id":"D","kind":"input","x":0,"y":44,"label":"D","value":0,"width":8},
-    {"id":"we","kind":"input","x":0,"y":48,"label":"we","value":0},
-    {"id":"rst","kind":"input","x":0,"y":52,"label":"rst","value":0},
+    {"id":"D","kind":"input","x":0,"y":44,"label":"D","value":0,"width":8,"note":"The byte to write"},
+    {"id":"we","kind":"input","x":0,"y":48,"label":"we","value":0,"note":"Write enable: while 1 the byte at A follows D, and keeps it when this falls"},
+    {"id":"rst","kind":"input","x":0,"y":52,"label":"rst","value":0,"note":"Reset: while 1 every byte is cleared to 0"},
     {"id":"not rst","kind":"not","x":10,"y":56,"label":"not rst"},
     {"id":"written","kind":"join","x":30,"y":49,"label":"written","width":8},
     {"id":"clear 0","kind":"and","x":20,"y":31,"label":"clear 0"},
@@ -32,7 +32,7 @@
     {"id":"row 5","kind":"chip","x":55,"y":60,"label":"row 5","chip":"RAM row"},
     {"id":"row 6","kind":"chip","x":55,"y":72,"label":"row 6","chip":"RAM row"},
     {"id":"row 7","kind":"chip","x":55,"y":84,"label":"row 7","chip":"RAM row"},
-    {"id":"Q","kind":"output","x":81,"y":46,"label":"Q","width":8}
+    {"id":"Q","kind":"output","x":81,"y":46,"label":"Q","width":8,"note":"The byte at address A"}
   ],
   "wires": [
     {"id":"w0","from":{"component":"A","pin":"out"},"to":{"component":"A bits","pin":"in"}},
@@ -125,14 +125,14 @@
   "chips": {
     "D latch": {
       "components": [
-        {"id":"d","kind":"input","x":0,"y":2,"label":"d","value":0},
-        {"id":"en","kind":"input","x":0,"y":6,"label":"en","value":0},
+        {"id":"d","kind":"input","x":0,"y":2,"label":"d","value":0,"note":"The bit to hold"},
+        {"id":"en","kind":"input","x":0,"y":6,"label":"en","value":0,"note":"Enable: q follows d while 1, and holds when it falls"},
         {"id":"latch.sBar","kind":"nand","x":10,"y":0,"label":"latch.sBar"},
         {"id":"latch.rBar","kind":"nand","x":10,"y":6,"label":"latch.rBar"},
         {"id":"latch.q","kind":"nand","x":20,"y":0,"label":"latch.q"},
         {"id":"latch.qBar","kind":"nand","x":20,"y":6,"label":"latch.qBar"},
-        {"id":"q","kind":"output","x":30,"y":2,"label":"q"},
-        {"id":"qn","kind":"output","x":30,"y":6,"label":"qn"}
+        {"id":"q","kind":"output","x":30,"y":2,"label":"q","note":"The bit held"},
+        {"id":"qn","kind":"output","x":30,"y":6,"label":"qn","note":"The opposite of q"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"d","pin":"out"},"to":{"component":"latch.sBar","pin":"a"}},
@@ -150,11 +150,11 @@
     "RAM byte": {
       "components": [
         {"id":"D bits","kind":"split","x":10,"y":21,"label":"D bits","width":8},
-        {"id":"D","kind":"input","x":0,"y":22,"label":"D","value":0,"width":8},
-        {"id":"sel","kind":"input","x":0,"y":26,"label":"sel","value":0},
-        {"id":"we","kind":"input","x":0,"y":30,"label":"we","value":0},
+        {"id":"D","kind":"input","x":0,"y":22,"label":"D","value":0,"width":8,"note":"The byte to write"},
+        {"id":"sel","kind":"input","x":0,"y":26,"label":"sel","value":0,"note":"1 when the address picks this byte"},
+        {"id":"we","kind":"input","x":0,"y":30,"label":"we","value":0,"note":"Write enable: while 1 (and sel is 1) the byte follows D"},
         {"id":"write","kind":"and","x":10,"y":32,"label":"write"},
-        {"id":"rst","kind":"input","x":0,"y":34,"label":"rst","value":0},
+        {"id":"rst","kind":"input","x":0,"y":34,"label":"rst","value":0,"note":"Reset: while 1 the byte takes D whatever sel is; the RAM holds D at 0 then, so this clears it"},
         {"id":"enable","kind":"or","x":20,"y":27,"label":"enable"},
         {"id":"Q bits","kind":"join","x":53,"y":24,"label":"Q bits","width":8},
         {"id":"P bits","kind":"join","x":43,"y":24,"label":"P bits","width":8},
@@ -174,8 +174,8 @@
         {"id":"read 6","kind":"and","x":43,"y":47,"label":"read 6"},
         {"id":"bit 7","kind":"chip","x":30,"y":48,"label":"bit 7","chip":"D latch"},
         {"id":"read 7","kind":"and","x":43,"y":53,"label":"read 7"},
-        {"id":"Q","kind":"output","x":61,"y":26,"label":"Q","width":8},
-        {"id":"P","kind":"output","x":61,"y":30,"label":"P","width":8}
+        {"id":"Q","kind":"output","x":61,"y":26,"label":"Q","width":8,"note":"The byte, while sel is 1; 0 otherwise"},
+        {"id":"P","kind":"output","x":61,"y":30,"label":"P","width":8,"note":"The byte, always: what the screen shows"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"D","pin":"out"},"to":{"component":"D bits","pin":"in"}},
@@ -238,11 +238,11 @@
     "RAM row": {
       "components": [
         {"id":"column lines","kind":"split","x":10,"y":96,"label":"column lines","width":16},
-        {"id":"C","kind":"input","x":0,"y":95,"label":"C","value":0,"width":16},
-        {"id":"row","kind":"input","x":0,"y":99,"label":"row","value":0},
-        {"id":"D","kind":"input","x":0,"y":103,"label":"D","value":0,"width":8},
-        {"id":"we","kind":"input","x":0,"y":107,"label":"we","value":0},
-        {"id":"rst","kind":"input","x":0,"y":111,"label":"rst","value":0},
+        {"id":"C","kind":"input","x":0,"y":95,"label":"C","value":0,"width":16,"note":"Column lines: one bit high, picking a byte in the row"},
+        {"id":"row","kind":"input","x":0,"y":99,"label":"row","value":0,"note":"1 when the address is in this row"},
+        {"id":"D","kind":"input","x":0,"y":103,"label":"D","value":0,"width":8,"note":"The byte to write"},
+        {"id":"we","kind":"input","x":0,"y":107,"label":"we","value":0,"note":"Write enable"},
+        {"id":"rst","kind":"input","x":0,"y":111,"label":"rst","value":0,"note":"Reset: clears every byte"},
         {"id":"read","kind":"chip","x":42,"y":88,"label":"read","chip":"or 16 ×8"},
         {"id":"byte 0","kind":"chip","x":28,"y":25,"label":"byte 0","chip":"RAM byte"},
         {"id":"sel 0","kind":"and","x":18,"y":57,"label":"sel 0"},
@@ -276,31 +276,31 @@
         {"id":"sel 14","kind":"and","x":18,"y":141,"label":"sel 14"},
         {"id":"byte 15","kind":"chip","x":28,"y":175,"label":"byte 15","chip":"RAM byte"},
         {"id":"sel 15","kind":"and","x":18,"y":147,"label":"sel 15"},
-        {"id":"Q","kind":"output","x":64,"y":95,"label":"Q","width":8},
+        {"id":"Q","kind":"output","x":64,"y":95,"label":"Q","width":8,"note":"The byte the address picks, when it is in this row; 0 otherwise"},
         {"id":"P0 bits","kind":"join","x":56,"y":35,"label":"P0 bits","width":32},
         {"id":"byte 0 bits","kind":"split","x":42,"y":0,"label":"byte 0 bits","width":8},
         {"id":"byte 1 bits","kind":"split","x":42,"y":11,"label":"byte 1 bits","width":8},
         {"id":"byte 2 bits","kind":"split","x":42,"y":22,"label":"byte 2 bits","width":8},
         {"id":"byte 3 bits","kind":"split","x":42,"y":33,"label":"byte 3 bits","width":8},
-        {"id":"P0","kind":"output","x":64,"y":99,"label":"P0","width":32},
+        {"id":"P0","kind":"output","x":64,"y":99,"label":"P0","width":32,"note":"Bytes 0–3 of the row, always: 32 pixels"},
         {"id":"P1 bits","kind":"join","x":56,"y":70,"label":"P1 bits","width":32},
         {"id":"byte 4 bits","kind":"split","x":42,"y":44,"label":"byte 4 bits","width":8},
         {"id":"byte 5 bits","kind":"split","x":42,"y":55,"label":"byte 5 bits","width":8},
         {"id":"byte 6 bits","kind":"split","x":42,"y":66,"label":"byte 6 bits","width":8},
         {"id":"byte 7 bits","kind":"split","x":42,"y":77,"label":"byte 7 bits","width":8},
-        {"id":"P1","kind":"output","x":64,"y":103,"label":"P1","width":32},
+        {"id":"P1","kind":"output","x":64,"y":103,"label":"P1","width":32,"note":"Bytes 4–7 of the row, always: 32 pixels"},
         {"id":"P2 bits","kind":"join","x":56,"y":105,"label":"P2 bits","width":32},
         {"id":"byte 8 bits","kind":"split","x":42,"y":122,"label":"byte 8 bits","width":8},
         {"id":"byte 9 bits","kind":"split","x":42,"y":133,"label":"byte 9 bits","width":8},
         {"id":"byte 10 bits","kind":"split","x":42,"y":144,"label":"byte 10 bits","width":8},
         {"id":"byte 11 bits","kind":"split","x":42,"y":155,"label":"byte 11 bits","width":8},
-        {"id":"P2","kind":"output","x":64,"y":107,"label":"P2","width":32},
+        {"id":"P2","kind":"output","x":64,"y":107,"label":"P2","width":32,"note":"Bytes 8–11 of the row, always: 32 pixels"},
         {"id":"P3 bits","kind":"join","x":56,"y":140,"label":"P3 bits","width":32},
         {"id":"byte 12 bits","kind":"split","x":42,"y":166,"label":"byte 12 bits","width":8},
         {"id":"byte 13 bits","kind":"split","x":42,"y":177,"label":"byte 13 bits","width":8},
         {"id":"byte 14 bits","kind":"split","x":42,"y":188,"label":"byte 14 bits","width":8},
         {"id":"byte 15 bits","kind":"split","x":42,"y":199,"label":"byte 15 bits","width":8},
-        {"id":"P3","kind":"output","x":64,"y":111,"label":"P3","width":32}
+        {"id":"P3","kind":"output","x":64,"y":111,"label":"P3","width":32,"note":"Bytes 12–15 of the row, always: 32 pixels"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"C","pin":"out"},"to":{"component":"column lines","pin":"in"}},
@@ -569,10 +569,10 @@
     },
     "decoder 1→2": {
       "components": [
-        {"id":"A","kind":"input","x":0,"y":1,"label":"A","value":0},
+        {"id":"A","kind":"input","x":0,"y":1,"label":"A","value":0,"note":"Which output bit to raise"},
         {"id":"Y bits","kind":"join","x":18,"y":1,"label":"Y bits","width":2},
         {"id":"not a0","kind":"not","x":8,"y":0,"label":"not a0"},
-        {"id":"Y","kind":"output","x":26,"y":1,"label":"Y","width":2}
+        {"id":"Y","kind":"output","x":26,"y":1,"label":"Y","width":2,"note":"Only bit A is 1"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"A","pin":"out"},"to":{"component":"not a0","pin":"a"}},
@@ -583,7 +583,7 @@
     },
     "decoder 2→4": {
       "components": [
-        {"id":"A","kind":"input","x":0,"y":7,"label":"A","value":0,"width":2},
+        {"id":"A","kind":"input","x":0,"y":7,"label":"A","value":0,"width":2,"note":"Which output bit to raise"},
         {"id":"A bits","kind":"split","x":10,"y":7,"label":"A bits","width":2},
         {"id":"Y bits","kind":"join","x":38,"y":6,"label":"Y bits","width":4},
         {"id":"not a0","kind":"not","x":18,"y":0,"label":"not a0"},
@@ -592,7 +592,7 @@
         {"id":"y1","kind":"and","x":28,"y":12,"label":"y1"},
         {"id":"y2","kind":"and","x":28,"y":6,"label":"y2"},
         {"id":"y3","kind":"and","x":18,"y":12,"label":"y3"},
-        {"id":"Y","kind":"output","x":46,"y":7,"label":"Y","width":4}
+        {"id":"Y","kind":"output","x":46,"y":7,"label":"Y","width":4,"note":"Only bit A is 1"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"A","pin":"out"},"to":{"component":"A bits","pin":"in"}},
@@ -615,7 +615,7 @@
     },
     "decoder 3→8": {
       "components": [
-        {"id":"A","kind":"input","x":0,"y":22,"label":"A","value":0,"width":3},
+        {"id":"A","kind":"input","x":0,"y":22,"label":"A","value":0,"width":3,"note":"Which output bit to raise"},
         {"id":"A bits","kind":"split","x":10,"y":21,"label":"A bits","width":3},
         {"id":"Y bits","kind":"join","x":68,"y":19,"label":"Y bits","width":8},
         {"id":"low","kind":"chip","x":18,"y":19,"label":"low","chip":"decoder 1→2"},
@@ -631,7 +631,7 @@
         {"id":"y5","kind":"and","x":58,"y":30,"label":"y5"},
         {"id":"y6","kind":"and","x":58,"y":36,"label":"y6"},
         {"id":"y7","kind":"and","x":58,"y":42,"label":"y7"},
-        {"id":"Y","kind":"output","x":76,"y":22,"label":"Y","width":8}
+        {"id":"Y","kind":"output","x":76,"y":22,"label":"Y","width":8,"note":"Only bit A is 1"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"A","pin":"out"},"to":{"component":"A bits","pin":"in"}},
@@ -670,7 +670,7 @@
     },
     "decoder 4→16": {
       "components": [
-        {"id":"A","kind":"input","x":0,"y":46,"label":"A","value":0,"width":4},
+        {"id":"A","kind":"input","x":0,"y":46,"label":"A","value":0,"width":4,"note":"Which output bit to raise"},
         {"id":"A bits","kind":"split","x":10,"y":45,"label":"A bits","width":4},
         {"id":"Y bits","kind":"join","x":60,"y":39,"label":"Y bits","width":16},
         {"id":"low","kind":"chip","x":26,"y":42,"label":"low","chip":"decoder 2→4"},
@@ -695,7 +695,7 @@
         {"id":"y13","kind":"and","x":50,"y":78,"label":"y13"},
         {"id":"y14","kind":"and","x":50,"y":84,"label":"y14"},
         {"id":"y15","kind":"and","x":50,"y":90,"label":"y15"},
-        {"id":"Y","kind":"output","x":68,"y":46,"label":"Y","width":16}
+        {"id":"Y","kind":"output","x":68,"y":46,"label":"Y","width":16,"note":"Only bit A is 1"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"A","pin":"out"},"to":{"component":"A bits","pin":"in"}},
@@ -761,37 +761,37 @@
     "or 16 ×8": {
       "components": [
         {"id":"I0 bits","kind":"split","x":10,"y":104,"label":"I0 bits","width":8},
-        {"id":"I0","kind":"input","x":0,"y":160,"label":"I0","value":0,"width":8},
+        {"id":"I0","kind":"input","x":0,"y":160,"label":"I0","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I1 bits","kind":"split","x":10,"y":115,"label":"I1 bits","width":8},
-        {"id":"I1","kind":"input","x":0,"y":164,"label":"I1","value":0,"width":8},
+        {"id":"I1","kind":"input","x":0,"y":164,"label":"I1","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I2 bits","kind":"split","x":10,"y":126,"label":"I2 bits","width":8},
-        {"id":"I2","kind":"input","x":0,"y":168,"label":"I2","value":0,"width":8},
+        {"id":"I2","kind":"input","x":0,"y":168,"label":"I2","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I3 bits","kind":"split","x":10,"y":137,"label":"I3 bits","width":8},
-        {"id":"I3","kind":"input","x":0,"y":172,"label":"I3","value":0,"width":8},
+        {"id":"I3","kind":"input","x":0,"y":172,"label":"I3","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I4 bits","kind":"split","x":10,"y":148,"label":"I4 bits","width":8},
-        {"id":"I4","kind":"input","x":0,"y":176,"label":"I4","value":0,"width":8},
+        {"id":"I4","kind":"input","x":0,"y":176,"label":"I4","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I5 bits","kind":"split","x":10,"y":159,"label":"I5 bits","width":8},
-        {"id":"I5","kind":"input","x":0,"y":180,"label":"I5","value":0,"width":8},
+        {"id":"I5","kind":"input","x":0,"y":180,"label":"I5","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I6 bits","kind":"split","x":10,"y":170,"label":"I6 bits","width":8},
-        {"id":"I6","kind":"input","x":0,"y":184,"label":"I6","value":0,"width":8},
+        {"id":"I6","kind":"input","x":0,"y":184,"label":"I6","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I7 bits","kind":"split","x":10,"y":181,"label":"I7 bits","width":8},
-        {"id":"I7","kind":"input","x":0,"y":188,"label":"I7","value":0,"width":8},
+        {"id":"I7","kind":"input","x":0,"y":188,"label":"I7","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I8 bits","kind":"split","x":10,"y":192,"label":"I8 bits","width":8},
-        {"id":"I8","kind":"input","x":0,"y":192,"label":"I8","value":0,"width":8},
+        {"id":"I8","kind":"input","x":0,"y":192,"label":"I8","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I9 bits","kind":"split","x":10,"y":203,"label":"I9 bits","width":8},
-        {"id":"I9","kind":"input","x":0,"y":196,"label":"I9","value":0,"width":8},
+        {"id":"I9","kind":"input","x":0,"y":196,"label":"I9","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I10 bits","kind":"split","x":10,"y":214,"label":"I10 bits","width":8},
-        {"id":"I10","kind":"input","x":0,"y":200,"label":"I10","value":0,"width":8},
+        {"id":"I10","kind":"input","x":0,"y":200,"label":"I10","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I11 bits","kind":"split","x":10,"y":225,"label":"I11 bits","width":8},
-        {"id":"I11","kind":"input","x":0,"y":204,"label":"I11","value":0,"width":8},
+        {"id":"I11","kind":"input","x":0,"y":204,"label":"I11","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I12 bits","kind":"split","x":10,"y":236,"label":"I12 bits","width":8},
-        {"id":"I12","kind":"input","x":0,"y":208,"label":"I12","value":0,"width":8},
+        {"id":"I12","kind":"input","x":0,"y":208,"label":"I12","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I13 bits","kind":"split","x":10,"y":247,"label":"I13 bits","width":8},
-        {"id":"I13","kind":"input","x":0,"y":212,"label":"I13","value":0,"width":8},
+        {"id":"I13","kind":"input","x":0,"y":212,"label":"I13","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I14 bits","kind":"split","x":10,"y":258,"label":"I14 bits","width":8},
-        {"id":"I14","kind":"input","x":0,"y":216,"label":"I14","value":0,"width":8},
+        {"id":"I14","kind":"input","x":0,"y":216,"label":"I14","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I15 bits","kind":"split","x":10,"y":269,"label":"I15 bits","width":8},
-        {"id":"I15","kind":"input","x":0,"y":220,"label":"I15","value":0,"width":8},
+        {"id":"I15","kind":"input","x":0,"y":220,"label":"I15","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"Y bits","kind":"join","x":58,"y":187,"label":"Y bits","width":8},
         {"id":"or33","kind":"or","x":18,"y":0},
         {"id":"or34","kind":"or","x":18,"y":48},
@@ -913,7 +913,7 @@
         {"id":"or150","kind":"or","x":38,"y":186},
         {"id":"or151","kind":"or","x":38,"y":234},
         {"id":"or152","kind":"or","x":48,"y":210},
-        {"id":"Y","kind":"output","x":66,"y":190,"label":"Y","width":8}
+        {"id":"Y","kind":"output","x":66,"y":190,"label":"Y","width":8,"note":"Every input ORed together, bit by bit"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"I0","pin":"out"},"to":{"component":"I0 bits","pin":"in"}},
@@ -1186,21 +1186,21 @@
     "or 8 ×8": {
       "components": [
         {"id":"I0 bits","kind":"split","x":10,"y":52,"label":"I0 bits","width":8},
-        {"id":"I0","kind":"input","x":0,"y":80,"label":"I0","value":0,"width":8},
+        {"id":"I0","kind":"input","x":0,"y":80,"label":"I0","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I1 bits","kind":"split","x":10,"y":63,"label":"I1 bits","width":8},
-        {"id":"I1","kind":"input","x":0,"y":84,"label":"I1","value":0,"width":8},
+        {"id":"I1","kind":"input","x":0,"y":84,"label":"I1","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I2 bits","kind":"split","x":10,"y":74,"label":"I2 bits","width":8},
-        {"id":"I2","kind":"input","x":0,"y":88,"label":"I2","value":0,"width":8},
+        {"id":"I2","kind":"input","x":0,"y":88,"label":"I2","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I3 bits","kind":"split","x":10,"y":85,"label":"I3 bits","width":8},
-        {"id":"I3","kind":"input","x":0,"y":92,"label":"I3","value":0,"width":8},
+        {"id":"I3","kind":"input","x":0,"y":92,"label":"I3","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I4 bits","kind":"split","x":10,"y":96,"label":"I4 bits","width":8},
-        {"id":"I4","kind":"input","x":0,"y":96,"label":"I4","value":0,"width":8},
+        {"id":"I4","kind":"input","x":0,"y":96,"label":"I4","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I5 bits","kind":"split","x":10,"y":107,"label":"I5 bits","width":8},
-        {"id":"I5","kind":"input","x":0,"y":100,"label":"I5","value":0,"width":8},
+        {"id":"I5","kind":"input","x":0,"y":100,"label":"I5","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I6 bits","kind":"split","x":10,"y":118,"label":"I6 bits","width":8},
-        {"id":"I6","kind":"input","x":0,"y":104,"label":"I6","value":0,"width":8},
+        {"id":"I6","kind":"input","x":0,"y":104,"label":"I6","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"I7 bits","kind":"split","x":10,"y":129,"label":"I7 bits","width":8},
-        {"id":"I7","kind":"input","x":0,"y":108,"label":"I7","value":0,"width":8},
+        {"id":"I7","kind":"input","x":0,"y":108,"label":"I7","value":0,"width":8,"note":"A word to OR in: most often 0, or the one value let through"},
         {"id":"Y bits","kind":"join","x":48,"y":91,"label":"Y bits","width":8},
         {"id":"or17","kind":"or","x":18,"y":0},
         {"id":"or18","kind":"or","x":18,"y":48},
@@ -1258,7 +1258,7 @@
         {"id":"or70","kind":"or","x":28,"y":90},
         {"id":"or71","kind":"or","x":28,"y":138},
         {"id":"or72","kind":"or","x":38,"y":114},
-        {"id":"Y","kind":"output","x":56,"y":94,"label":"Y","width":8}
+        {"id":"Y","kind":"output","x":56,"y":94,"label":"Y","width":8,"note":"Every input ORed together, bit by bit"}
       ],
       "wires": [
         {"id":"w0","from":{"component":"I0","pin":"out"},"to":{"component":"I0 bits","pin":"in"}},
