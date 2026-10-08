@@ -2,6 +2,7 @@ import { channel } from 'gesso-framework';
 
 import type { PinRef, Rotation } from '../sim/Circuit';
 import type { Fragment } from './DocumentEdits';
+import type { FoundPart } from './Search';
 import type { KindLayout } from './Layout';
 import type { Kind } from '../sim/Primitives';
 
@@ -374,6 +375,8 @@ export interface CircuitCommands {
   watch(pins: readonly PinRef[]): void;
   /** Stops tracing a pin traced with `watch`, by its trace's id. */
   unwatch(id: string): void;
+  /** Finds parts by name at every depth: published as `found`. Blank text finds nothing. */
+  find(query: string): void;
   /** Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`. */
   copy(ids: readonly string[]): void;
   /** Copies these parts in place, moved by (dx, dy), under the new ids `rename` gives, by old id, for parts and the wires between them. */
@@ -390,6 +393,13 @@ export interface CircuitView {
   readonly clipboard: ClipRequest;
   readonly analyser: AnalyserView;
   readonly program: ProgramView;
+  readonly found: FoundView;
+}
+
+/** What `find` found: the query it answers, so a stale answer can be told from the latest, and the parts. */
+export interface FoundView {
+  readonly query: string;
+  readonly parts: readonly FoundPart[];
 }
 
 export const EMPTY_SUMMARY: DocumentSummary = {
@@ -431,6 +441,7 @@ export const CLOSED_ANALYSER: AnalyserView = {
 export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {}, level: '', opened: 0 };
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
+export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [] };
 
 export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
@@ -442,7 +453,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   saving: NO_SAVE,
   clipboard: NO_CLIP,
   analyser: CLOSED_ANALYSER,
-  program: NO_PROGRAM
+  program: NO_PROGRAM,
+  found: NOTHING_FOUND
 });
 
 /**

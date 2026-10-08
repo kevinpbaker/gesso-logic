@@ -22,7 +22,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         saving: service.saving,
         clipboard: service.clipboard,
         analyser: service.analyserView,
-        program: service.program
+        program: service.program,
+        found: service.found
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -64,6 +65,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         setTrigger: (trace, value) => service.setTrigger(trace, value),
         watch: pins => service.watch(pins),
         unwatch: id => service.unwatch(id),
+        find: query => service.find(query),
         copy: ids => service.copy(ids),
         duplicate: (ids, rename, dx, dy) => service.duplicate(ids, rename, dx, dy)
       }

@@ -45,6 +45,7 @@ export type CommandId =
   | 'duplicate'
   | 'delete'
   | 'selectAll'
+  | 'find'
   | 'deselect'
   | 'rotate'
   | 'makeChip'
@@ -102,6 +103,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   duplicate: { label: 'Duplicate', keys: `${MOD}+D`, group: 'Edit' },
   delete: { label: 'Delete', keys: 'Del', group: 'Edit' },
   selectAll: { label: 'Select all', keys: `${MOD}+A`, group: 'Edit' },
+  find: { label: 'Find a part or a command…', keys: `${MOD}+F`, group: 'Edit' },
   deselect: { label: 'Select nothing', keys: 'Esc', group: 'Edit' },
   rotate: { label: 'Rotate', keys: 'R', group: 'Edit' },
   makeChip: { label: 'Make a chip of the selection', keys: 'M', group: 'Edit' },
@@ -191,6 +193,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       MENU_SEPARATOR,
       'selectAll',
       'deselect',
+      'find',
       MENU_SEPARATOR,
       'rotate',
       'makeChip',

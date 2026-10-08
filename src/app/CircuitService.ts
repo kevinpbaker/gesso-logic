@@ -14,13 +14,15 @@ import type {
   AnalyserView,
   Camera,
   ClipRequest,
+  FoundView,
   ProgramView,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_SAVE, NO_TABLE, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_SAVE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { findParts } from './Search';
 import { Analyser } from './Analyser';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
@@ -159,6 +161,7 @@ export class CircuitService {
   readonly signals: Observable<Signals>;
   readonly status: Observable<Status>;
   readonly table: Observable<TableView>;
+  readonly found: Observable<FoundView>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
   readonly analyserView: Observable<AnalyserView>;
@@ -169,6 +172,7 @@ export class CircuitService {
   private readonly signalsSubject: BehaviorSubject<Signals>;
   private readonly statusSubject: BehaviorSubject<Status>;
   private readonly tableSubject = new BehaviorSubject<TableView>(NO_TABLE);
+  private readonly foundSubject = new BehaviorSubject<FoundView>(NOTHING_FOUND);
   private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
   private readonly clipboardSubject = new BehaviorSubject<ClipRequest>(NO_CLIP);
   private readonly analyserSubject = new BehaviorSubject<AnalyserView>(CLOSED_ANALYSER);
@@ -264,6 +268,7 @@ export class CircuitService {
     this.signals = this.signalsSubject;
     this.status = this.statusSubject;
     this.table = this.tableSubject;
+    this.found = this.foundSubject;
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
     this.analyserView = this.analyserSubject;
@@ -1195,6 +1200,10 @@ export class CircuitService {
     if (this.savedRevision === this.revision) this.savedRevision = -1;
     this.autosave();
     this.documentSubject.next(this.summary());
+  }
+
+  find(query: string): void {
+    this.foundSubject.next({ query, parts: findParts(this.circuit, query) });
   }
 
   unwatch(id: string): void {

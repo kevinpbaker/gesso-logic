@@ -759,7 +759,11 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     }
     const c = scene.indexOf.get(where.pin.component);
     if (c === undefined) return;
-    const at = pinAt(scene.shapeOf(c), scene.x[c]!, scene.y[c]!, where.pin.pin, scene.rotationOf(c));
+    // No pin named: the part's middle, for a part found by name.
+    const at =
+      where.pin.pin === ''
+        ? { x: scene.x[c]! + scene.width(c) / 2, y: scene.y[c]! + scene.height(c) / 2 }
+        : pinAt(scene.shapeOf(c), scene.x[c]!, scene.y[c]!, where.pin.pin, scene.rotationOf(c));
     const s = size.current;
     const scale = Math.max(camera.value.scale, 12);
     camera.value = { scale, x: at.x - s.width / scale / 2, y: at.y - s.height / scale / 2 };

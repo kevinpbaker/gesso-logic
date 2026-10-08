@@ -1,6 +1,6 @@
-import { map, type Observable } from 'rxjs';
+import { combineLatest, map, type Observable } from 'rxjs';
 
-import type { UiChild } from 'gesso-core';
+import type { UiChild, UiKeyboardEvent, UiTextChangeEvent } from 'gesso-core';
 import { Dialog } from 'gesso-components';
 import { each, type InternalState, type ShellRecentFile } from 'gesso-framework';
 
@@ -348,6 +348,96 @@ export function renamePart(open: Observable<boolean>, text: InternalState<string
             {action('Cancel', close)}
             {action('Rename', apply, 'accent')}
           </row>
+        </column>
+      }
+    />
+  );
+}
+
+/** A line in Find's list: a command, or a part somewhere in the circuit. */
+export interface FindItem {
+  readonly key: string;
+  readonly title: string;
+  readonly detail: string;
+}
+
+/**
+ * Find: a part at any depth by its name, or a command by its label, in
+ * one list. Typing narrows it; the arrows walk it and Enter chooses, or
+ * a click does. The list is the caller's, rebuilt as the text changes.
+ */
+export function findDialog(
+  open: Observable<boolean>,
+  text: InternalState<string>,
+  items: Observable<readonly FindItem[]>,
+  active: InternalState<number>,
+  choose: (index: number) => void,
+  close: () => void
+): UiChild {
+  const WIDTH = 460;
+  let count = 0;
+  const rows = combineLatest([items, active]).pipe(
+    map(([list, at]) => {
+      count = list.length;
+      if (list.length === 0) {
+        return [<text key="none" text={text.value.trim() === '' ? 'Type a part’s name, or a command.' : 'Nothing by that name.'} fontSize={12} color="textMuted" />];
+      }
+      return list.map((item, i) => (
+        <button
+          key={item.key}
+          label={item.title}
+          onClick={() => choose(i)}
+          width={inner(WIDTH)}
+          paddingLeft={8}
+          paddingRight={8}
+          paddingTop={5}
+          paddingBottom={5}
+          borderRadius={5}
+          backgroundColor={i === at ? 'selectionBackground' : 'surface'}
+          cursor="pointer">
+          <row gap={8} y="center" width={inner(WIDTH) - 16}>
+            <text text={item.title} fontSize={13} fontWeight={600} color="text" textWrap="none" textOverflow="ellipsis" minWidth={0} />
+            <text text={item.detail} flex={1} minWidth={0} fontSize={11} color="textMuted" textWrap="none" textOverflow="ellipsis" textAlign="end" />
+          </row>
+        </button>
+      ));
+    })
+  );
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Find"
+      width={WIDTH}
+      content={
+        <column gap={8} width={inner(WIDTH)}>
+          <editabletext
+            value={text as never}
+            width={inner(WIDTH)}
+            fontSize={13}
+            color="text"
+            textWrap="none"
+            backgroundColor="background"
+            borderColor="border"
+            borderWidth={1}
+            borderRadius={4}
+            padding={6}
+            role="textbox"
+            label="Find a part or a command"
+            onInput={(event: UiTextChangeEvent) => (text.value = event.value)}
+            onKeyDown={(event: UiKeyboardEvent) => {
+              if (event.key === 'ArrowDown') active.value = Math.min(count - 1, active.value + 1);
+              else if (event.key === 'ArrowUp') active.value = Math.max(0, active.value - 1);
+              else if (event.key === 'Enter') choose(active.value);
+              else return;
+              event.preventDefault();
+            }}
+          />
+          <scrollview maxHeight={340} overscrollBehavior="contain">
+            <column gap={1} width={inner(WIDTH)}>
+              {rows}
+            </column>
+          </scrollview>
         </column>
       }
     />

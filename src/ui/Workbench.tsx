@@ -1,7 +1,7 @@
-import { combineLatest, distinctUntilChanged, filter, map, of, startWith, take } from 'rxjs';
+import { combineLatest, debounceTime, distinctUntilChanged, filter, map, of, startWith, take } from 'rxjs';
 
 import { darkTheme, lightTheme, percent, type UiNode } from 'gesso-core';
-import { Menu, MenuBar, Select, type MenuItem } from 'gesso-components';
+import { Menu, MENU_SEPARATOR, MenuBar, Select, type MenuItem } from 'gesso-components';
 import { createComponent, FocusService, internalState, OpfsStorage, persisted, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type ClockRate, type SceneName } from '../app/CircuitContract';
@@ -12,7 +12,8 @@ import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { clockRate, confirmDiscard, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, type Discard } from './Dialogs';
+import { clockRate, confirmDiscard, findDialog, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, type Discard, type FindItem } from './Dialogs';
+import { kindName } from '../app/Describe';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
 import { programEditor } from './ProgramEditor';
@@ -80,6 +81,9 @@ export function workbench(ctx: ComponentContext) {
   const showPaste = internalState(false);
   const showRate = internalState(false);
   const showRename = internalState(false);
+  const showFind = internalState(false);
+  const findText = internalState('');
+  const findActive = internalState(0);
   const renameText = internalState('');
   const renameWhat = internalState('');
   let renaming = '';
@@ -133,6 +137,10 @@ export function workbench(ctx: ComponentContext) {
   const keys: CanvasKeys = (key, ctrl, shift, alt) => {
     if (alt && key === 'ArrowLeft') {
       run('back');
+      return true;
+    }
+    if (ctrl && key.toLowerCase() === 'f') {
+      run('find');
       return true;
     }
     if (ctrl) {
@@ -217,7 +225,7 @@ export function workbench(ctx: ComponentContext) {
         return items;
       }
       default: {
-        const items: MenuItem[] = [item('paste'), item('selectAll'), item('fit')];
+        const items: MenuItem[] = [item('find'), item('paste'), item('selectAll'), item('fit')];
         if (document.value.path.length > 0) items.push(item('upLevel'));
         if (visits.value.length > 0) items.push(item('back'));
         return items;
@@ -230,6 +238,46 @@ export function workbench(ctx: ComponentContext) {
     canvasMenuAt.value = at;
     canvasMenuOpen.value = true;
   });
+  // ---------------------------------------------------------------------
+  // Find: a part at any depth, or a command, by name
+  // ---------------------------------------------------------------------
+
+  /** Every command a menu has, once each, for Find to match. */
+  const findable: readonly CommandId[] = [
+    ...new Set(MENUS.flatMap(menu => menu.entries.filter((e): e is CommandId => e !== MENU_SEPARATOR && typeof e === 'string')))
+  ];
+  ctx.effect(findText.pipe(debounceTime(80), distinctUntilChanged()), text => circuit.send.find(text));
+  type Findable = { readonly item: FindItem; readonly command: CommandId | null; readonly where: TraceWhere | null };
+  let findList: readonly Findable[] = [];
+  const findItems = combineLatest([findText, circuit.view.found]).pipe(
+    map(([text, found]): readonly FindItem[] => {
+      const wanted = text.trim().toLowerCase();
+      const commands: Findable[] =
+        wanted === ''
+          ? []
+          : findable
+              .filter(id => commandLabel(id).toLowerCase().includes(wanted) && enabled(id))
+              .slice(0, 6)
+              .map(id => ({ item: { key: `c:${id}`, title: commandLabel(id), detail: commandKeys(id) ?? 'command' }, command: id, where: null }));
+      // An answer to an older query is not shown: the next one is coming.
+      const parts: Findable[] = (found.query.trim().toLowerCase() === wanted ? found.parts : []).map(p => ({
+        item: { key: `p:${p.path.join('/')}/${p.id}`, title: p.name, detail: `${p.chip ?? kindName(p.kind)} · in ${p.where}` },
+        command: null,
+        where: { path: p.path, pin: { component: p.id, pin: '' } }
+      }));
+      findList = [...commands, ...parts];
+      return findList.map(f => f.item);
+    })
+  );
+  ctx.effect(findItems, () => (findActive.value = 0));
+  function chooseFound(index: number): void {
+    const chosen = findList[index];
+    if (chosen === undefined) return;
+    showFind.value = false;
+    if (chosen.command !== null) run(chosen.command);
+    else if (chosen.where !== null) jumpTo(chosen.where);
+  }
+
   function chooseFromCanvasMenu(choice: string): void {
     // Closed before acting: a choice that opens a dialog takes the
     // overlay's focus, and the menu would be left open behind it.
@@ -408,6 +456,9 @@ export function workbench(ctx: ComponentContext) {
         return;
       case 'back':
         return goBack();
+      case 'find':
+        findText.value = '';
+        return openDialog(showFind);
       case 'analyser':
         return analyser.toggle();
       case 'trace':
@@ -984,6 +1035,7 @@ export function workbench(ctx: ComponentContext) {
         },
         closeDialog(showRate)
       )}
+      {findDialog(showFind, findText, findItems, findActive, chooseFound, closeDialog(showFind))}
       {renamePart(
         showRename,
         renameText,
