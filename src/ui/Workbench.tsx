@@ -279,9 +279,6 @@ export function workbench(ctx: ComponentContext) {
   }
 
   function chooseFromCanvasMenu(choice: string): void {
-    // Closed before acting: a choice that opens a dialog takes the
-    // overlay's focus, and the menu would be left open behind it.
-    canvasMenuOpen.value = false;
     if (choice === 'trace-hit') {
       editor.traceHit(menuHit);
     } else if (choice === 'rename') {
@@ -671,11 +668,7 @@ export function workbench(ctx: ComponentContext) {
           onChange: (value: string) => {
             // The select is the status's, so choosing this leaves it on
             // the rate running now until the dialog sets another.
-            // The dialog opens once the list has closed: `Select` calls
-            // this before it releases its own focus trap, and a release
-            // pops the innermost trap — which would be the dialog's,
-            // leaving the keyboard in a list no longer on screen.
-            if (value === 'custom') return queueMicrotask(() => run('customRate'));
+            if (value === 'custom') return run('customRate');
             const rate: ClockRate = value === 'max' ? 'max' : Number(value);
             circuit.send.setClockHz(rate);
             canvas.focus();
