@@ -19,13 +19,15 @@ import type {
   ExportView,
   TestsView,
   VersionsView,
+  LevelView,
+  Readings,
   ProgramView,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_VERSIONS, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_VERSIONS, EMPTY_LEVEL, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
 import { History } from './History';
 import { circuitOfLink, linkOf } from './ShareLink';
@@ -184,6 +186,8 @@ export class CircuitService {
   readonly exported: Observable<ExportView>;
   readonly tested: Observable<TestsView>;
   readonly versionsView: Observable<VersionsView>;
+  readonly levelView: Observable<LevelView>;
+  readonly readings: Observable<Readings>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
   readonly analyserView: Observable<AnalyserView>;
@@ -201,6 +205,10 @@ export class CircuitService {
   private exportSerial = 0;
   private readonly testsSubject = new BehaviorSubject<TestsView>(NO_TESTS);
   private readonly versionsSubject = new BehaviorSubject<VersionsView>(NO_VERSIONS);
+  private readonly levelSubject = new BehaviorSubject<LevelView>(EMPTY_LEVEL);
+  private readonly readingsSubject = new BehaviorSubject<Readings>({});
+  /** The readings last published, as text, so an unchanged set is not published again. */
+  private readingsText = '{}';
   private readonly versions: Versions | null;
   private readonly wallClock: () => number;
   /** The document — by its `opened` count — whose state before its first change has been kept. */
@@ -319,6 +327,8 @@ export class CircuitService {
     this.exported = this.exportSubject;
     this.tested = this.testsSubject;
     this.versionsView = this.versionsSubject;
+    this.levelView = this.levelSubject;
+    this.readings = this.readingsSubject;
     this.wallClock = options.wallClock ?? Date.now;
     this.versions = options.versions === undefined ? null : new Versions(options.versions, this.wallClock);
     this.saving = this.savingSubject;
@@ -857,6 +867,7 @@ export class CircuitService {
     this.tableSubject.next(NO_TABLE);
     this.documentSubject.next(this.summary());
     this.geometrySubject.next(this.geometryNow());
+    this.levelSubject.next(this.levelNow());
     this.testsChanged();
     this.publish(true);
   }
@@ -1258,6 +1269,7 @@ export class CircuitService {
     if (this.netlist !== null && this.simulator !== null && sameConnectivity(previous, next)) {
       this.documentSubject.next(this.summary());
       this.geometrySubject.next(this.geometryNow());
+    this.levelSubject.next(this.levelNow());
       this.traceNow();
       this.testsChanged();
       this.publish(true);
@@ -1303,6 +1315,7 @@ export class CircuitService {
     }
     this.documentSubject.next(this.summary());
     this.geometrySubject.next(this.geometryNow());
+    this.levelSubject.next(this.levelNow());
     this.traceNow();
     // The editor closes on a ROM that has gone: deleted, or undone away.
     const program = this.programSubject.value;
@@ -1450,10 +1463,86 @@ export class CircuitService {
     this.lastPublishAt = at;
     this.signalsSubject.next(this.signalsNow());
     this.statusSubject.next(this.statusNow());
+    this.publishReadings();
     this.followProgram();
     if (this.analyserAsk.columns > 0) {
       this.analyserSubject.next(this.analyserNow());
     }
+  }
+
+  /**
+   * The level on the canvas for an agent: every part with its pins, every
+   * wire by the pins it joins. What the geometry says, without what only
+   * a screen needs — buckets, nets, shapes.
+   */
+  private levelNow(): LevelView {
+    const { circuit } = this.level();
+    const chips = this.circuit.chips;
+    const shapes = shapeCache(chips);
+    const chain = this.pathNow();
+    return {
+      path: chain.length === 0 ? 'the top level' : chain.map(step => step.chip).join(' › '),
+      parts: circuit.components.map(c => {
+        const pins = shapes.pins(c);
+        return {
+          id: c.id,
+          kind: c.kind,
+          x: c.x,
+          y: c.y,
+          ...(c.label === undefined ? {} : { label: c.label }),
+          ...(c.chip === undefined ? {} : { chip: c.chip }),
+          ...(c.width === undefined ? {} : { width: c.width }),
+          ...(c.rotation === undefined || c.rotation === 0 ? {} : { rotation: c.rotation }),
+          inputs: pins.inputs,
+          outputs: pins.outputs
+        };
+      }),
+      wires: circuit.wires.map(w => ({
+        id: w.id,
+        from: `${w.from.component}.${w.from.pin}`,
+        to: `${w.to.component}.${w.to.pin}`,
+        ...(w.via === undefined ? {} : { bent: true as const })
+      }))
+    };
+  }
+
+  /**
+   * What the level's switches, buttons, LEDs, probes and displays show,
+   * by id: what an agent reads to see whether a circuit works. Published
+   * with the signals, and only when something in it changed.
+   */
+  private publishReadings(): void {
+    const simulator = this.simulator;
+    const netlist = this.netlist;
+    const readings: Record<string, number | null> = {};
+    if (simulator !== null && netlist !== null) {
+      const values = this.past?.values ?? simulator.value;
+      const { circuit, prefix } = this.level();
+      for (const c of circuit.components) {
+        const pins =
+          c.kind === 'input' || c.kind === 'button' || c.kind === 'constant' || c.kind === 'clock'
+            ? bitPins('out', c.width ?? 1)
+            : c.kind === 'output' || c.kind === 'probe'
+              ? bitPins('in', c.width ?? 1)
+              : c.kind === 'hex'
+                ? c.width === undefined
+                  ? ['b0', 'b1', 'b2', 'b3']
+                  : bitPins('in', c.width)
+                : null;
+        if (pins === null) continue;
+        let value: number | null = 0;
+        pins.forEach((pin, bit) => {
+          const net = netlist.netOfPin(prefix + c.id, pin);
+          if (net === undefined || value === null) value = null;
+          else value |= (values[net] ?? 0) << bit;
+        });
+        readings[c.id] = value === null ? null : value >>> 0;
+      }
+    }
+    const text = JSON.stringify(readings);
+    if (text === this.readingsText) return;
+    this.readingsText = text;
+    this.readingsSubject.next(readings);
   }
 
   setAnalyserView(start: number | null, span: number, columns: number): void {

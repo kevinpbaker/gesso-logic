@@ -293,12 +293,22 @@ export interface CircuitCommands {
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void;
   /** Joins two pins with a wire. With no id, one is made. */
   connect(from: PinRef, to: PinRef, id?: string): void;
+  /**
+   * Moves a component so its top-left corner is at (x, y), in grid units.
+   * @idempotent
+   */
   move(id: string, x: number, y: number): void;
   /** Moves components by an offset: a selection dragged. */
   moveBy(ids: readonly string[], dx: number, dy: number, gesture?: string): void;
-  /** Bends a wire through these corners, or with null lets it route itself again. Moves of one drag share `gesture`. */
+  /**
+   * Bends a wire through these corners, or with null lets it route itself again. Moves of one drag share `gesture`.
+   * @idempotent
+   */
   setVia(id: string, via: readonly { readonly x: number; readonly y: number }[] | null, gesture?: string): void;
-  /** Lets wires route themselves again: these wires and every wire to or from these parts, or every wire on the level for none. */
+  /**
+   * Lets wires route themselves again: these wires and every wire to or from these parts, or every wire on the level for none.
+   * @idempotent
+   */
   straighten(ids: readonly string[]): void;
   /** Turns components a quarter turn clockwise. */
   rotate(ids: readonly string[]): void;
@@ -306,25 +316,43 @@ export interface CircuitCommands {
   remove(ids: readonly string[]): void;
   /** Adds components and wires whose ids are already fresh: paste, duplicate. */
   insert(fragment: Fragment): void;
+  /** Takes back the last edit; a drag is one edit. */
   undo(): void;
+  /** Puts back the last edit undone. */
   redo(): void;
-  /** Replaces the document with a named one, and forgets its history. */
+  /**
+   * Replaces the document with a named one, and forgets its history.
+   * @destructive
+   * @confirm
+   */
   loadScene(name: SceneName): void;
   /**
    * Replaces the document with the computer, running this program's
-   * assembly source from its ROM; `name` is what to call it when it
-   * does not assemble.
+   * assembly source from its ROM, clocked at `rate` (60 Hz unless it
+   * says); `name` is what to call it when it does not assemble.
+   * @destructive
+   * @confirm
    */
-  /** The computer running `source`, clocked at `rate` (60 Hz unless it says). */
   loadProgram(name: string, source: string, rate?: number): void;
-  /** Drives an input component, as a person flipping a switch does. */
-  /** Sets a switch: a bit, or for a wide one a number. */
+  /**
+   * Sets a switch or holds a button, as a person does: a bit, or for a wide switch a number.
+   * @idempotent
+   */
   setInput(id: string, value: number): void;
-  /** Makes these components `width` bits wide; see `setWidth` in `DocumentEdits`. */
+  /**
+   * Makes these components `width` bits wide; see `setWidth` in `DocumentEdits`.
+   * @idempotent
+   */
   setWidth(ids: readonly string[], width: number): void;
-  /** Names a part on the level shown; blank text takes the name away. See `setLabel` in `DocumentEdits`. */
+  /**
+   * Names a part on the level shown; blank text takes the name away. See `setLabel` in `DocumentEdits`.
+   * @idempotent
+   */
   setLabel(id: string, label: string): void;
-  /** Says what a switch or LED is for, as a chip's pin; see `setNote` in `DocumentEdits`. */
+  /**
+   * Says what a switch or LED is for, as a chip's pin; see `setNote` in `DocumentEdits`.
+   * @idempotent
+   */
   setNote(id: string, note: string): void;
   /** Opens the program editor on a ROM of the level on the canvas, published as `program`; '' closes it. */
   openProgram(id: string): void;
@@ -334,40 +362,77 @@ export interface CircuitCommands {
    * power-on; when it doesn't, nothing changes and `program` says why.
    */
   setProgram(id: string, source: string): void;
+  /**
+   * Runs the circuit at its clock rate, until paused.
+   * @idempotent
+   */
   run(): void;
+  /**
+   * Stops the circuit where it is.
+   * @idempotent
+   */
   pause(): void;
   /** One clock cycle, while paused. */
   step(): void;
+  /**
+   * Sets every clock to `rate` cycles a second, or `max` for as fast as it goes.
+   * @idempotent
+   */
   setClockHz(rate: ClockRate): void;
-  /** The world rectangle on screen. Until the first one, every net is published. */
+  /**
+   * The world rectangle on screen. Until the first one, every net is published.
+   * @hidden
+   */
   setViewport(left: number, top: number, right: number, bottom: number): void;
-  /** Opens the truth table of these components; an empty list closes it. */
+  /**
+   * Opens the truth table of these components; an empty list closes it.
+   * @idempotent
+   */
   tabulate(ids: readonly string[]): void;
-  /** Opens a circuit file's text, read from `name`; `handle` is the shell's, when it gave one. */
+  /**
+   * Opens a circuit file's text, read from `name`; `handle` is the shell's, when it gave one.
+   * @destructive
+   * @confirm
+   */
   open(text: string, name: string, handle: number | null): void;
-  /** Asks for the document as file text, published as `saving`. `asNew` is Save As. */
+  /**
+   * Asks for the document as file text, published as `saving`. `asNew` is Save As.
+   * @hidden
+   */
   requestSave(asNew: boolean): void;
-  /** Says how a save went: where it was written, or null when it was cancelled or failed, with why. */
+  /**
+   * Says how a save went: where it was written, or null when it was cancelled or failed, with why.
+   * @hidden
+   */
   finishSave(saved: { readonly name: string; readonly handle: number | null } | null, message: string | null): void;
-  /** Where the view is, for the autosave to bring back. */
+  /**
+   * Where the view is, for the autosave to bring back.
+   * @hidden
+   */
   rememberCamera(x: number, y: number, scale: number): void;
   /**
-   * Brings back the autosave, and starts autosaving. Sent once, at
-   * start, by an application that wants it — not by the bench, which
-   * loads its own scene and must not overwrite a person's work.
+   * Brings back what was open when the tab closed, and starts
+   * autosaving; with nothing saved, opens `first` — a program for the
+   * computer — running. Sent once, at start, by an application that
+   * wants it — not by the bench, which loads its own scene and must not
+   * overwrite a person's work.
+   * @hidden
    */
-  /** Brings back what was open when the tab closed; with nothing saved, opens `first` — a program for the computer — running. */
   restore(first?: { readonly name: string; readonly source: string; readonly rate: number }): void;
   /** Makes the selected components into a chip, named `name` or the next free `chip N`. */
   makeChip(ids: readonly string[], name?: string): void;
   /** Opens a chip on the current level, to show its insides live. */
   openChip(id: string): void;
-  /** Steps back out to `depth` levels from the top: 0 is the top. */
+  /**
+   * Steps back out to `depth` levels from the top: 0 is the top.
+   * @idempotent
+   */
   closeChip(depth: number): void;
   /**
    * Goes to the level these chips open, from the top, in one step: as
    * far as the path still leads. Nothing happens when that level is
    * the one on the canvas.
+   * @idempotent
    */
   openPath(ids: readonly string[]): void;
   /** Renames a chip definition, and every instance of it. */
@@ -380,9 +445,13 @@ export interface CircuitCommands {
    * Opens the analyser on a window of `span` cycles from `start`, drawn
    * in `columns` pixels; a null start follows the newest cycle. Zero
    * columns closes it.
+   * @hidden
    */
   setAnalyserView(start: number | null, span: number, columns: number): void;
-  /** Pauses the circuit on the cycle `trace` becomes `value`; a null trace disarms it. */
+  /**
+   * Pauses the circuit on the cycle `trace` becomes `value`; a null trace disarms it.
+   * @idempotent
+   */
   setTrigger(trace: string | null, value: number): void;
   /**
    * Traces these pins of the level on the canvas in the analyser, at
@@ -396,6 +465,7 @@ export interface CircuitCommands {
    * Shows the circuit as it was at the end of a cycle, from history:
    * signals are that cycle's until `null`, running, stepping or an input
    * brings back now. Only while paused, and only a cycle history holds.
+   * @idempotent
    */
   showCycle(cycle: number | null): void;
   /**
@@ -404,11 +474,17 @@ export interface CircuitCommands {
    * stays paused, for an input to be given or a step taken from there.
    */
   resumeFromHere(): void;
-  /** Keeps history, or stops and lets it go. On unless turned off. */
+  /**
+   * Keeps history, or stops and lets it go. On unless turned off.
+   * @idempotent
+   */
   setKeepHistory(keep: boolean): void;
   /** Makes a link that opens the document, traced pins and all: published as `share`. */
   share(): void;
-  /** Replaces the tests of the level on the canvas; blank text takes them away. One edit while typing, for undo. */
+  /**
+   * Replaces the tests of the level on the canvas; blank text takes them away. One edit while typing, for undo.
+   * @idempotent
+   */
   setTests(text: string): void;
   /** Writes tests for the level on the canvas from what it does now, replacing any it had. */
   fillTests(): void;
@@ -418,37 +494,91 @@ export interface CircuitCommands {
    * run again after every edit until `stopTests`.
    */
   runTests(all: boolean, follow: boolean): void;
-  /** Stops running the level's tests after every edit. */
+  /**
+   * Stops running the level's tests after every edit.
+   * @hidden
+   */
   stopTests(): void;
-  /** Brings back an earlier version, by its id in `versions`, keeping a copy of the document as it is first. */
+  /**
+   * Brings back an earlier version, by its id in `versions`, keeping a copy of the document as it is first.
+   * @destructive
+   * @confirm
+   */
   restoreVersion(id: number): void;
-  /** Writes what the analyser holds as a VCD file, published as `exported`. */
+  /**
+   * Writes what the analyser holds as a VCD file, published as `exported`.
+   * @hidden
+   */
   exportWaveforms(): void;
-  /** Opens a link's circuit, the text after its `#`, as a new document that is not saved anywhere yet. */
+  /**
+   * Opens a link's circuit, the text after its `#`, as a new document that is not saved anywhere yet.
+   * @destructive
+   * @confirm
+   */
   openShared(fragment: string): void;
-  /** Finds parts by name at every depth: published as `found`. Blank text finds nothing. */
+  /**
+   * Finds parts by name at every depth: published as `found`. Blank text finds nothing.
+   * @idempotent
+   */
   find(query: string): void;
-  /** Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`. */
+  /**
+   * Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`.
+   * @hidden
+   */
   copy(ids: readonly string[]): void;
   /** Copies these parts in place, moved by (dx, dy), under the new ids `rename` gives, by old id, for parts and the wires between them. */
   duplicate(ids: readonly string[], rename: Readonly<Record<string, string>>, dx: number, dy: number): void;
 }
 
 export interface CircuitView {
+  /** The document: its name, whether it compiles, the level shown, its chips and the library's parts. */
   readonly document: DocumentSummary;
+  /**
+   * Where everything on the level is, for the canvas; an agent reads
+   * `level` instead.
+   * @hidden
+   */
   readonly geometry: Geometry;
+  /**
+   * Net values packed for the canvas; an agent reads `readings` instead.
+   * @hidden
+   */
   readonly signals: Signals;
+  /** Running or paused, the clock rate, the cycle, and what will not settle. */
   readonly status: Status;
+  /** The truth table `tabulate` asked for. */
   readonly table: TableView;
+  /**
+   * A file on its way to the save picker.
+   * @hidden
+   */
   readonly saving: SaveRequest;
+  /**
+   * Text on its way to the clipboard.
+   * @hidden
+   */
   readonly clipboard: ClipRequest;
+  /** The logic analyser, while its panel is open. */
   readonly analyser: AnalyserView;
+  /** The program editor's ROM, while it is open. */
   readonly program: ProgramView;
+  /** The parts `find` found. */
   readonly found: FoundView;
+  /** The link `share` made. */
   readonly share: ShareView;
+  /**
+   * A waveform file on its way to the save picker.
+   * @hidden
+   */
   readonly exported: ExportView;
+  /** How the tests `runTests` ran went. */
   readonly tested: TestsView;
+  /** The earlier versions `restoreVersion` can bring back. */
   readonly versions: VersionsView;
+  /** The level on the canvas: its parts, their pins, and the wires between them. */
+  readonly level: LevelView;
+  /** What the level's switches, LEDs, probes and displays show now. */
+  readonly readings: Readings;
 }
 
 /**
@@ -512,6 +642,40 @@ export interface VersionsView {
   }[];
 }
 
+/**
+ * The level on the canvas, as an agent reads it: each part with its
+ * pins, and each wire as the two pins it joins, `part.pin`. A pin of a
+ * bus is one name for all its bits. Grid units: a gate is 4 × 4, and
+ * pins sit on its left and right edges.
+ */
+export interface LevelView {
+  /** Which level: “the top level”, or the chips opened to reach it, `cpu › ALU`. */
+  readonly path: string;
+  readonly parts: readonly {
+    readonly id: string;
+    readonly kind: Kind;
+    readonly x: number;
+    readonly y: number;
+    readonly label?: string;
+    /** A chip's definition name. */
+    readonly chip?: string;
+    /** Bits wide, when more than one. */
+    readonly width?: number;
+    readonly rotation?: Rotation;
+    /** The pins a wire may end on, and the ones that drive one. */
+    readonly inputs: readonly string[];
+    readonly outputs: readonly string[];
+  }[];
+  readonly wires: readonly { readonly id: string; readonly from: string; readonly to: string; readonly bent?: true }[];
+}
+
+/**
+ * What the level's switches, buttons, clocks, constants, LEDs, probes
+ * and hex displays show now, by id: a number, a bus's least significant
+ * bit first, or null while it does not compile.
+ */
+export type Readings = Readonly<Record<string, number | null>>;
+
 /** What `find` found: the query it answers, so a stale answer can be told from the latest, and the parts. */
 export interface FoundView {
   readonly query: string;
@@ -562,6 +726,7 @@ export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [],
 export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
 export const NO_SHARE: ShareView = { serial: 0, fragment: '', error: null };
 export const NO_VERSIONS: VersionsView = { entries: [] };
+export const EMPTY_LEVEL: LevelView = { path: 'the top level', parts: [], wires: [] };
 export const NO_TESTS: TestsView = { serial: 0, all: false, results: [] };
 export const NO_EXPORT: ExportView = { serial: 0, name: '', text: '', mediaType: '', error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [], history: null, past: null };
@@ -580,7 +745,9 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   share: NO_SHARE,
   exported: NO_EXPORT,
   tested: NO_TESTS,
-  versions: NO_VERSIONS
+  versions: NO_VERSIONS,
+  level: EMPTY_LEVEL,
+  readings: {}
 });
 
 /**

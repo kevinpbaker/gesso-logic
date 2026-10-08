@@ -27,7 +27,9 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         share: service.shared,
         exported: service.exported,
         tested: service.tested,
-        versions: service.versionsView
+        versions: service.versionsView,
+        level: service.levelView,
+        readings: service.readings
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
