@@ -24,7 +24,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         analyser: service.analyserView,
         program: service.program,
         found: service.found,
-        share: service.shared
+        share: service.shared,
+        exported: service.exported
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -68,6 +69,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         unwatch: id => service.unwatch(id),
         find: query => service.find(query),
         share: () => service.share(),
+        exportWaveforms: () => service.exportWaveforms(),
         openShared: fragment => service.openShared(fragment),
         showCycle: cycle => service.showCycle(cycle),
         resumeFromHere: () => service.resumeFromHere(),

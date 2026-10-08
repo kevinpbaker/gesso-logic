@@ -33,7 +33,16 @@ export interface FileActions {
   /** The files the shell remembers, most recent first; refreshed by `refreshRecent`. */
   readonly recent: BehaviorSubject<readonly ShellRecentFile[]>;
   refreshRecent(): void;
+  /** Saves a file made to keep — a picture, waveforms — returning what to say about it, or null when it was cancelled. */
+  keep(name: string, data: { readonly text: string } | { readonly bytes: Uint8Array<ArrayBuffer> }, mediaType: string): Promise<string | null>;
 }
+
+/** What a picker calls each kind of file exported, by extension. */
+const EXPORT_KINDS: Readonly<Record<string, string>> = {
+  '.svg': 'SVG picture',
+  '.png': 'PNG picture',
+  '.vcd': 'Value change dump (waveforms)'
+};
 
 export function fileActions(ctx: ComponentContext): FileActions {
   const circuit = ctx.channel(Circuit);
@@ -82,7 +91,36 @@ export function fileActions(ctx: ComponentContext): FileActions {
       });
   });
 
+  // A file made to keep — waveforms — to wherever the picker says.
+  let exported = circuit.view.exported.value.serial;
+  ctx.effect(circuit.view.exported, made => {
+    if (made.serial === exported) return;
+    exported = made.serial;
+    if (made.error !== null) {
+      circuit.send.finishSave(null, `Couldn't export: ${made.error}`);
+      return;
+    }
+    void keep(made.name, { text: made.text }, made.mediaType).then(message => {
+      if (message !== null) circuit.send.finishSave(null, message);
+    });
+  });
+
+  /** Saves a file to keep, not to open again; what to say about it, or null when it was cancelled. */
+  const keep = async (name: string, data: { readonly text: string } | { readonly bytes: Uint8Array<ArrayBuffer> }, mediaType: string): Promise<string | null> => {
+    const extension = name.slice(name.lastIndexOf('.'));
+    const result = await shell.saveFile({
+      name,
+      ...data,
+      mediaType,
+      accept: [{ description: EXPORT_KINDS[extension] ?? 'file', mediaType, extensions: [extension] }]
+    });
+    if (result.outcome === 'cancelled') return null;
+    if (result.outcome !== 'ok' || result.saved === null) return `Couldn't export: ${result.error ?? result.outcome}`;
+    return `${result.saved.via === 'download' ? 'Downloaded' : 'Exported'} ${result.saved.name}`;
+  };
+
   return {
+    keep,
     open: () => void shell.openFiles({ accept: [FILE_TYPE] }).then(result => opened(result, 'the file')),
     save: asNew => circuit.send.requestSave(asNew),
     insertChip: () =>

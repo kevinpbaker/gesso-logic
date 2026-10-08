@@ -499,6 +499,11 @@ export function workbench(ctx: ComponentContext) {
         return openDialog(showFind);
       case 'share':
         return circuit.send.share();
+      case 'exportVcd':
+        return circuit.send.exportWaveforms();
+      case 'exportSvg':
+      case 'exportPng':
+        return exportPicture(id === 'exportSvg' ? 'svg' : 'png');
       case 'analyser':
         return analyser.toggle();
       case 'trace':
@@ -552,6 +557,25 @@ export function workbench(ctx: ComponentContext) {
       default:
         return;
     }
+  }
+
+  /**
+   * A picture of the level, or of the selection, saved where the picker
+   * says. Named after the document, and the chip shown when inside one.
+   */
+  function exportPicture(format: 'svg' | 'png'): void {
+    const d = document.value;
+    const base = (d.name ?? 'circuit').replace(/(\.gessologic)?\.json$/i, '') || 'circuit';
+    const inside = d.path.at(-1)?.chip;
+    const name = `${base}${inside === undefined ? '' : `-${inside.replace(/[^\w.-]+/g, '-')}`}.${format}`;
+    const theme = dark ? darkTheme : lightTheme;
+    const made = format === 'svg' ? canvas.picture('svg', theme).then(text => ({ text })) : canvas.picture('png', theme).then(bytes => ({ bytes }));
+    void made
+      .then(data => files.keep(name, data, format === 'svg' ? 'image/svg+xml' : 'image/png'))
+      .then(message => {
+        if (message !== null) notify(message, /^Couldn't/.test(message));
+      })
+      .catch((error: unknown) => notify(`Couldn't export the picture: ${error instanceof Error ? error.message : String(error)}`, true));
   }
 
   /**
@@ -630,6 +654,9 @@ export function workbench(ctx: ComponentContext) {
         return stepBackTarget() !== null;
       case 'resumeHere':
         return status.value.past !== null && !status.value.running;
+      case 'exportSvg':
+      case 'exportPng':
+        return d.components > 0 || d.path.length > 0;
       default:
         return true;
     }
@@ -646,6 +673,10 @@ export function workbench(ctx: ComponentContext) {
     if (id === 'analyser') return analyserOpen ? 'Hide the logic analyser' : 'Show the logic analyser';
     if (id === 'theme') return dark ? 'Light mode' : 'Dark mode';
     if (id === 'keepHistory') return `${keepHistory.value.value ? '✓' : '  '}  Keep history, to look back`;
+    if (id === 'exportSvg' || id === 'exportPng') {
+      const s = canvas.selection();
+      return `Export ${s.parts > 0 ? 'the selection' : 'a picture'} as ${id === 'exportSvg' ? 'SVG' : 'PNG'}…`;
+    }
     if (id === 'thread') return mainThread ? 'Run the simulator in its worker again' : 'Run the simulator on the main thread';
     return commandLabel(id);
   }

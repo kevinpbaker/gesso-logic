@@ -16,6 +16,7 @@ import {
   type UiPasteEvent,
   type UiPointerEvent,
   type UiNode,
+  type UiTheme,
   type UiWheelEvent
 } from 'gesso-core';
 import { each, FocusService, FrameService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
@@ -28,6 +29,7 @@ import { Editor, type Hit } from './Editor';
 import type { Kind } from '../sim/Primitives';
 import type { FileActions } from './Files';
 import { paintLive, paintOver, paintUnder } from './Painters';
+import { pictureArea, picturePng, pictureScene, pictureSvg } from './Picture';
 import { CELL, SceneIndex } from './SceneIndex';
 
 /**
@@ -142,6 +144,12 @@ export interface CanvasHandle {
   reveal(where: TraceWhere): void;
   /** Puts the view back as it was on a level, once that level is on the canvas: the caller asks for the level. */
   restoreView(path: readonly string[], view: Camera): void;
+  /**
+   * A picture of the level, or of the parts selected when there are any,
+   * with every wire's value: SVG text, or PNG bytes. See `Picture.ts`.
+   */
+  picture(format: 'svg', theme: UiTheme): Promise<string>;
+  picture(format: 'png', theme: UiTheme): Promise<Uint8Array<ArrayBuffer>>;
 }
 
 /** Where a traced pin is: the chips that open its level, from the top, and the pin there. */
@@ -257,10 +265,39 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     distinctUntilChanged((a, b) => a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom)
   );
   let visibleNets: number[] = [];
+  let viewport: Box | null = null;
   ctx.effect(worldView, v => {
+    viewport = v;
     circuit.send.setViewport(v.left, v.top, v.right, v.bottom);
     visibleNets = scene.netsIn(v);
   });
+
+  /**
+   * Every value a picture of `drawn` needs. What is off screen was never
+   * published, so the application worker is asked for the whole of it
+   * as though it were the view, until it answers or a second passes, and
+   * then for the view again.
+   */
+  const valuesFor = async (drawn: SceneIndex): Promise<Readonly<Record<string, string>>> => {
+    const area = pictureArea(drawn);
+    const missing = () => drawn.netsIn(area).some(net => signalOf(chunks, net) === -1);
+    if (!missing()) return chunks;
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(done, 1000);
+      const subscription = circuit.view.signals.subscribe(() => {
+        if (!missing()) done();
+      });
+      function done(): void {
+        clearTimeout(timer);
+        subscription.unsubscribe();
+        resolve();
+      }
+      circuit.send.setViewport(area.left, area.top, area.right, area.bottom);
+    });
+    const v = viewport;
+    if (v !== null) circuit.send.setViewport(v.left, v.top, v.right, v.bottom);
+    return chunks;
+  };
 
   // ---------------------------------------------------------------------
   // Tiles
@@ -946,6 +983,12 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     restoreView: (path, view) => {
       revealing = { path, pin: { component: '', pin: '' }, view };
       tryReveal();
-    }
+    },
+    picture: (async (format: 'svg' | 'png', theme: UiTheme) => {
+      const ids = new Set([...editor.selection].filter(id => scene.indexOf.has(id)));
+      const drawn = pictureScene(circuit.view.geometry.value, ids.size === 0 ? null : ids);
+      const values = await valuesFor(drawn);
+      return format === 'svg' ? pictureSvg(drawn, values, theme) : picturePng(drawn, values, theme);
+    }) as CanvasHandle['picture']
   };
 }

@@ -398,6 +398,8 @@ export interface CircuitCommands {
   setKeepHistory(keep: boolean): void;
   /** Makes a link that opens the document, traced pins and all: published as `share`. */
   share(): void;
+  /** Writes what the analyser holds as a VCD file, published as `exported`. */
+  exportWaveforms(): void;
   /** Opens a link's circuit, the text after its `#`, as a new document that is not saved anywhere yet. */
   openShared(fragment: string): void;
   /** Finds parts by name at every depth: published as `found`. Blank text finds nothing. */
@@ -420,6 +422,7 @@ export interface CircuitView {
   readonly program: ProgramView;
   readonly found: FoundView;
   readonly share: ShareView;
+  readonly exported: ExportView;
 }
 
 /**
@@ -430,6 +433,20 @@ export interface CircuitView {
 export interface ShareView {
   readonly serial: number;
   readonly fragment: string;
+  readonly error: string | null;
+}
+
+/**
+ * A file made for the person to keep rather than to open again — the
+ * analyser's waveforms as VCD — for the render worker to hand to the
+ * shell's save picker, as a save is. `serial` counts requests; 0 is none.
+ */
+export interface ExportView {
+  readonly serial: number;
+  readonly name: string;
+  readonly text: string;
+  readonly mediaType: string;
+  /** Why there is no file, or null when there is one. */
   readonly error: string | null;
 }
 
@@ -480,6 +497,7 @@ export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
 export const NO_SHARE: ShareView = { serial: 0, fragment: '', error: null };
+export const NO_EXPORT: ExportView = { serial: 0, name: '', text: '', mediaType: '', error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [], history: null, past: null };
 
 export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
@@ -493,7 +511,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   analyser: CLOSED_ANALYSER,
   program: NO_PROGRAM,
   found: NOTHING_FOUND,
-  share: NO_SHARE
+  share: NO_SHARE,
+  exported: NO_EXPORT
 });
 
 /**

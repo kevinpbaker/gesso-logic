@@ -37,6 +37,9 @@ export type CommandId =
   | 'save'
   | 'saveAs'
   | 'share'
+  | 'exportSvg'
+  | 'exportPng'
+  | 'exportVcd'
   | 'importChip'
   | 'undo'
   | 'redo'
@@ -100,6 +103,9 @@ const FIXED: Readonly<Record<string, Command>> = {
   saveAs: { label: 'Save as…', keys: `${MOD}+Shift+S`, group: 'File' },
   importChip: { label: 'Import a file as a chip…', group: 'File' },
   share: { label: 'Share a link to this circuit…', group: 'File' },
+  exportSvg: { label: 'Export a picture as SVG…', group: 'File' },
+  exportPng: { label: 'Export a picture as PNG…', group: 'File' },
+  exportVcd: { label: 'Export the waveforms as VCD…', group: 'File' },
   undo: { label: 'Undo', keys: `${MOD}+Z`, group: 'Edit' },
   redo: { label: 'Redo', keys: `${MOD}+Y`, group: 'Edit' },
   cut: { label: 'Cut', keys: `${MOD}+X`, group: 'Edit' },
@@ -184,7 +190,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'File',
     mnemonic: 'f',
-    entries: ['new', 'open', 'openRecent', MENU_SEPARATOR, 'save', 'saveAs', 'share', MENU_SEPARATOR, 'importChip']
+    entries: ['new', 'open', 'openRecent', MENU_SEPARATOR, 'save', 'saveAs', 'share', MENU_SEPARATOR, 'exportSvg', 'exportPng', 'exportVcd', MENU_SEPARATOR, 'importChip']
   },
   {
     label: 'Edit',

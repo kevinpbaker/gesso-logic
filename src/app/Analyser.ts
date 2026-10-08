@@ -1,3 +1,5 @@
+import type { VcdSource } from './Vcd';
+
 /**
  * The logic analyser's memory: the value of every traced signal at the
  * end of each of the last `capacity` clock cycles.
@@ -184,6 +186,19 @@ export class Analyser {
     const i = this.traces.findIndex(t => t.id === trace);
     if (i < 0 || cycle < Math.max(this.first, this.since[i]!) || cycle > this.last) return null;
     return this.values[i]![(this.startSlot + (cycle - this.oldest)) % this.capacity]!;
+  }
+
+  /** What is held, for writing out as a waveform file: see `Vcd.ts`. */
+  dump(): VcdSource {
+    return {
+      traces: this.traces.map(t => ({ name: t.title ?? t.name, width: t.width })),
+      first: this.first,
+      last: this.last,
+      valueAt: (i, cycle) => {
+        if (cycle < Math.max(this.first, this.since[i]!) || cycle > this.last) return null;
+        return this.values[i]![(this.startSlot + (cycle - this.oldest)) % this.capacity]!;
+      }
+    };
   }
 
   /** The window a panel of `columns` pixels asks for: `span` cycles from `start`. */

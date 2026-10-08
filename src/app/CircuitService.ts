@@ -16,17 +16,19 @@ import type {
   ClipRequest,
   FoundView,
   ShareView,
+  ExportView,
   ProgramView,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_SAVE, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
 import { History } from './History';
 import { circuitOfLink, linkOf } from './ShareLink';
 import { Analyser } from './Analyser';
+import { writeVcd } from './Vcd';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
 import {
@@ -166,6 +168,7 @@ export class CircuitService {
   readonly table: Observable<TableView>;
   readonly found: Observable<FoundView>;
   readonly shared: Observable<ShareView>;
+  readonly exported: Observable<ExportView>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
   readonly analyserView: Observable<AnalyserView>;
@@ -179,6 +182,8 @@ export class CircuitService {
   private readonly foundSubject = new BehaviorSubject<FoundView>(NOTHING_FOUND);
   private readonly shareSubject = new BehaviorSubject<ShareView>(NO_SHARE);
   private shareSerial = 0;
+  private readonly exportSubject = new BehaviorSubject<ExportView>(NO_EXPORT);
+  private exportSerial = 0;
   private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
   private readonly clipboardSubject = new BehaviorSubject<ClipRequest>(NO_CLIP);
   private readonly analyserSubject = new BehaviorSubject<AnalyserView>(CLOSED_ANALYSER);
@@ -287,6 +292,7 @@ export class CircuitService {
     this.table = this.tableSubject;
     this.found = this.foundSubject;
     this.shared = this.shareSubject;
+    this.exported = this.exportSubject;
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
     this.analyserView = this.analyserSubject;
@@ -347,6 +353,32 @@ export class CircuitService {
     } catch (error) {
       this.shareSubject.next({ serial, fragment: '', error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  exportWaveforms(): void {
+    const dump = this.analyser.dump();
+    const serial = ++this.exportSerial;
+    if (dump.traces.length === 0 || dump.last < dump.first) {
+      this.exportSubject.next({
+        ...NO_EXPORT,
+        serial,
+        error: dump.traces.length === 0 ? 'nothing is traced in the analyser' : 'the analyser has not recorded a cycle yet: run or step the circuit first'
+      });
+      return;
+    }
+    const base = this.baseName();
+    this.exportSubject.next({
+      serial,
+      name: `${base}.vcd`,
+      text: writeVcd(dump, { date: new Date().toUTCString(), scope: base }),
+      mediaType: 'text/plain',
+      error: null
+    });
+  }
+
+  /** The document's name without its extensions, for naming what is made from it. */
+  private baseName(): string {
+    return (this.name ?? 'circuit').replace(/(\.gessologic)?\.json$/i, '') || 'circuit';
   }
 
   async openShared(fragment: string): Promise<void> {

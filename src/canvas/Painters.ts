@@ -379,7 +379,7 @@ function drawDisplays(
   }
 }
 
-export function paintOver(surface: PaintSurface, scene: SceneIndex, area: Box, scale: number): void {
+export function paintOver(surface: PaintSurface, scene: SceneIndex, area: Box, scale: number, grid = true): void {
   // Only full detail draws over the live layer: wires there run under
   // gate symbols, and cross the bodies of gates between their ends.
   if (detailAt(scale) !== 'full') {
@@ -389,7 +389,7 @@ export function paintOver(surface: PaintSurface, scene: SceneIndex, area: Box, s
   // The grid first. It belongs under the wires, but a layer of its own
   // under them would be a whole tile composited every frame for a
   // scatter of dots, and a 1.2 px dot over a wire does not show.
-  drawGrid(surface, area, scale);
+  if (grid) drawGrid(surface, area, scale);
   drawSymbols(surface, scene, area, scale);
   const buses: number[] = [];
   scene.forEach(area, null, w => {

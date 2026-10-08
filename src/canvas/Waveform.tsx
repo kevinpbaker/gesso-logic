@@ -375,6 +375,7 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
           fontSize={11}
           color="textMuted"
         />
+        {button('Export VCD…', () => circuit.send.exportWaveforms())}
         {button('Close', () => (open.value = false))}
       </row>
       <box
