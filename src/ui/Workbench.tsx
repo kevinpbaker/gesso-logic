@@ -848,14 +848,16 @@ export function workbench(ctx: ComponentContext) {
     </row>
   );
 
-  // The tour opens by itself when a first visit lands on Pong.
+  // The tour opens by itself when a first visit lands on Pong: not when
+  // it came by a shared link, whose circuit replaces Pong at once and is
+  // not what the tour is about.
   ctx.effect(
     document.pipe(
       map(d => d.welcome),
       distinctUntilChanged()
     ),
     welcome => {
-      if (welcome) tourOpen.value = true;
+      if (welcome && !isOpeningLink()) tourOpen.value = true;
     }
   );
   const tourCard = tour(
