@@ -203,9 +203,11 @@ export function turn(p: Point, width: number, height: number, rotation: Rotation
  * gate do not run on top of each other. Backward — feedback, a latch —
  * it leaves right, drops below both pins, runs back and climbs in. Real
  * routing, around other components, is Phase 4's; this only has to be
- * the same in both workers and readable.
+ * the same in both workers and readable. A wire a person has bent
+ * goes through its `via` corners instead: see `routeVia`.
  */
-export function route(from: Point, to: Point, slot = 0): Point[] {
+export function route(from: Point, to: Point, slot = 0, via?: readonly Point[] | null): Point[] {
+  if (via !== undefined && via !== null && via.length > 0) return routeVia(from, to, via);
   if (to.x >= from.x + 1) {
     const channel = Math.max(from.x + 0.5, to.x - 1 - slot * 0.5);
     if (from.y === to.y) {
@@ -217,6 +219,75 @@ export function route(from: Point, to: Point, slot = 0): Point[] {
   const out = from.x + 1 + slot * 0.5;
   const back = to.x - 1 - slot * 0.5;
   return [from, { x: out, y: from.y }, { x: out, y: below }, { x: back, y: below }, { x: back, y: to.y }, to];
+}
+
+/**
+ * A route through the corners a person bent a wire to: from the driver
+ * through each, to the reader, square at every turn. Where two points do
+ * not line up — a part moved since the wire was bent — an elbow joins
+ * them, across then down out of the driver and along the way, down then
+ * across into the reader, so the wire still leaves and enters its pins
+ * as they face. Points that turn nothing are left out.
+ */
+export function routeVia(from: Point, to: Point, via: readonly Point[]): Point[] {
+  const points = [from, ...via, to];
+  const out: Point[] = [from];
+  for (let i = 1; i < points.length; i++) {
+    const a = out[out.length - 1]!;
+    const b = points[i]!;
+    if (a.x !== b.x && a.y !== b.y) out.push(i === points.length - 1 ? { x: a.x, y: b.y } : { x: b.x, y: a.y });
+    out.push(b);
+  }
+  return simplify(out);
+}
+
+/** A route with repeated points and points along a straight run taken out; the ends always stay. */
+export function simplify(points: readonly Point[]): Point[] {
+  const out: Point[] = [];
+  for (const p of points) {
+    const last = out[out.length - 1];
+    if (last !== undefined && last.x === p.x && last.y === p.y) continue;
+    const before = out[out.length - 2];
+    if (before !== undefined && last !== undefined && ((before.x === last.x && last.x === p.x) || (before.y === last.y && last.y === p.y))) out.pop();
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * A route with one segment moved across itself by `offset` grid units:
+ * a horizontal one up or down, a vertical one left or right. The ends
+ * are pins and stay; a segment that starts or ends at one keeps a short
+ * stub there and jogs, so the wire still leaves the pin as it did.
+ * Returns the whole route, simplified.
+ */
+export function bend(points: readonly Point[], segment: number, offset: number): Point[] {
+  const pts = points.map(p => ({ x: p.x, y: p.y }));
+  const n = pts.length - 1;
+  if (segment < 0 || segment >= n || offset === 0) return simplify(pts);
+  const horizontal = pts[segment]!.y === pts[segment + 1]!.y;
+  const along = (a: Point, b: Point) => (horizontal ? b.x - a.x : b.y - a.y);
+  const step = (p: Point, by: number): Point => (horizontal ? { x: p.x + by, y: p.y } : { x: p.x, y: p.y + by });
+  let a = segment;
+  let b = segment + 1;
+  if (b === n) {
+    // Into the reader: a stub kept before it, a unit long at most.
+    const length = along(pts[n - 1]!, pts[n]!);
+    const stub = step(pts[n]!, -Math.sign(length) * Math.min(1, Math.abs(length) / 2));
+    pts.splice(n, 0, { ...stub }, { ...stub });
+  }
+  if (a === 0) {
+    const length = along(pts[0]!, pts[1]!);
+    const stub = step(pts[0]!, Math.sign(length) * Math.min(1, Math.abs(length) / 2));
+    pts.splice(1, 0, { ...stub }, { ...stub });
+    a += 2;
+    b += 2;
+  }
+  for (const i of [a, b]) {
+    const p = pts[i]!;
+    pts[i] = horizontal ? { x: p.x, y: p.y + offset } : { x: p.x + offset, y: p.y };
+  }
+  return simplify(pts);
 }
 
 /** Which vertical channel a reader pin's wire runs in; see `route`. */

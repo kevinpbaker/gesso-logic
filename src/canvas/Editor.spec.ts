@@ -66,7 +66,8 @@ function setup(button = 'push', wire?: (b: CircuitBuilder) => void, deps: Partia
       openProgram: record('openProgram'),
       copy: record('copy'),
       duplicate: record('duplicate'),
-      watch: record('watch')
+      watch: record('watch'),
+      setVia: record('setVia')
     },
     chipShape: () => undefined,
     panBy: record('panBy'),
@@ -165,6 +166,32 @@ describe('the editor', () => {
     editor.pointerDown(at(12, 12), 1, false);
     editor.pointerUp(at(12, 12));
     expect(editor.keyDown('Tab', false, false)).toBe(false);
+  });
+
+  it('moves a wire’s segment dragged across it, keeping a stub at each pin, as one gesture', () => {
+    const { editor, sent, at } = setup('push', b => b.connect({ component: 'a', pin: 'out' }, { component: 'g', pin: 'a' }));
+    // The wire runs straight from the switch, (2, 1), to the gate, (6, 1).
+    editor.pointerDown(at(4, 1), 1, false);
+    editor.pointerMove(at(4, 2.2));
+    editor.pointerMove(at(4, 4.1));
+    editor.pointerUp(at(4, 4.1));
+    const bends = sent.filter(([name]) => name === 'setVia');
+    expect(bends.map(b => b[2])).toEqual([
+      [
+        { x: 3, y: 1 },
+        { x: 3, y: 2 },
+        { x: 5, y: 2 },
+        { x: 5, y: 1 }
+      ],
+      [
+        { x: 3, y: 1 },
+        { x: 3, y: 4 },
+        { x: 5, y: 4 },
+        { x: 5, y: 1 }
+      ]
+    ]);
+    expect(new Set(bends.map(b => b[3])).size).toBe(1);
+    expect([...editor.selection]).toEqual([bends[0]![1]]);
   });
 
   it('draws no wire let go on the part it started from', () => {

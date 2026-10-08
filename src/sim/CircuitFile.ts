@@ -46,6 +46,9 @@ export const FILE_FORMAT = 'gessologic';
 export const FILE_TYPE = { description: 'gessologic circuit', mediaType: 'application/json', extensions: ['.json'] } as const;
 export const DEFAULT_FILE_NAME = 'circuit.gessologic.json';
 
+/** The most corners a wire may be bent to: far past any drawn by hand. */
+export const MAX_VIA = 256;
+
 export class CircuitFileError extends Error {
   constructor(message: string) {
     super(message);
@@ -74,7 +77,8 @@ export function writeCircuit(circuit: Circuit): string {
     JSON.stringify({
       id: w.id,
       from: { component: w.from.component, pin: w.from.pin },
-      to: { component: w.to.component, pin: w.to.pin }
+      to: { component: w.to.component, pin: w.to.pin },
+      ...(w.via !== undefined && w.via.length > 0 ? { via: w.via.map(p => [p.x, p.y]) } : {})
     });
   const list = (items: string[], indent: string) =>
     items.length === 0 ? '[]' : `[\n${indent}  ${items.join(`,\n${indent}  `)}\n${indent}]`;
@@ -263,7 +267,16 @@ function levelFrom(data: unknown, prefix: string, chipNames: ReadonlySet<string>
       }
       return { component: ref['component'], pin: ref['pin'] };
     };
-    wires.push({ id, from: end('from'), to: end('to') });
+    const rawVia = raw['via'];
+    let via: { x: number; y: number }[] | undefined;
+    if (rawVia !== undefined) {
+      const point = (p: unknown) => Array.isArray(p) && p.length === 2 && p.every(v => typeof v === 'number' && Number.isFinite(v));
+      if (!Array.isArray(rawVia) || rawVia.length > MAX_VIA || !rawVia.every(point)) {
+        throw new CircuitFileError(`${here}.via: not a list of at most ${MAX_VIA} [x, y] points`);
+      }
+      via = (rawVia as [number, number][]).map(([x, y]) => ({ x, y }));
+    }
+    wires.push({ id, from: end('from'), to: end('to'), ...(via === undefined || via.length === 0 ? {} : { via }) });
   }
   const tests = data['tests'];
   if (tests !== undefined && typeof tests !== 'string') throw new CircuitFileError(`${at('tests')}: not text`);

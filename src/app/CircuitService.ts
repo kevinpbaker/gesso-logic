@@ -54,6 +54,8 @@ import {
   setProgram,
   setLabel,
   setNote,
+  setVia,
+  straighten,
   setWidth,
   sameConnectivity,
   type Fragment
@@ -873,6 +875,14 @@ export class CircuitService {
 
   moveBy(ids: readonly string[], dx: number, dy: number, gesture?: string): void {
     this.editLevel(level => moveBy(level, ids, dx, dy), gesture);
+  }
+
+  setVia(id: string, via: readonly { readonly x: number; readonly y: number }[] | null, gesture?: string): void {
+    this.editLevel(level => setVia(level, id, via), gesture);
+  }
+
+  straighten(ids: readonly string[]): void {
+    this.editLevel(level => straighten(level, ids));
   }
 
   rotate(ids: readonly string[]): void {
@@ -1752,7 +1762,7 @@ export class CircuitService {
       const width = from === undefined ? 1 : widthOf(shapes.pins(from), wire.from.pin);
       const first = netOf(wire.from.component, width === 1 ? wire.from.pin : `${wire.from.pin}[0]`);
       const bits = width === 1 ? [] : Array.from({ length: width }, (_, i) => netOf(wire.from.component, `${wire.from.pin}[${i}]`));
-      return { from: wire.from, to: wire.to, net: first, width, bits };
+      return { from: wire.from, to: wire.to, net: first, width, bits, via: wire.via ?? null };
     };
 
     const cache = this.geometryCache;
@@ -1903,7 +1913,12 @@ export class CircuitService {
         // ten thousand wires cost ten thousand box tests.
         const a = pinAt(shapes.shape(from), from.x, from.y, wire.from.pin, from.rotation);
         const b = pinAt(shapes.shape(to), to.x, to.y, wire.to.pin, to.rotation);
-        const reach = { left: Math.min(a.x, b.x) - 1.5, top: Math.min(a.y, b.y), right: Math.max(a.x, b.x) + 1.5, bottom: Math.max(a.y, b.y) + 3.5 };
+        let reach = { left: Math.min(a.x, b.x) - 1.5, top: Math.min(a.y, b.y), right: Math.max(a.x, b.x) + 1.5, bottom: Math.max(a.y, b.y) + 3.5 };
+        // A bent wire goes where its corners are, which may be anywhere.
+        if (wire.via !== undefined) {
+          const corners = boundsOf(wire.via);
+          reach = { left: Math.min(reach.left, corners.left), top: Math.min(reach.top, corners.top), right: Math.max(reach.right, corners.right), bottom: Math.max(reach.bottom, corners.bottom) };
+        }
         if (intersects(reach, viewport)) {
           for (const bit of bitPins(wire.from.pin, widthOf(shapes.pins(from), wire.from.pin))) add(wire.from.component, bit);
         }

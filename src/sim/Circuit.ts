@@ -114,6 +114,13 @@ export interface Wire {
   readonly id: string;
   readonly from: PinRef;
   readonly to: PinRef;
+  /**
+   * The corners a person bent the wire to, in grid units, between its
+   * ends; absent for a wire routed automatically. Drawing only: which
+   * pins are joined is the same either way. See `route` in
+   * `src/app/Layout.ts`.
+   */
+  readonly via?: readonly { readonly x: number; readonly y: number }[];
 }
 
 /** A pin as people read it: `label.pin`. */

@@ -67,9 +67,9 @@ export class SceneIndex {
   readonly indexOf: ReadonlyMap<string, number>;
   /** Quarter turns clockwise, 0–3. */
   readonly turns: Uint8Array;
-  /** Each wire's id and its two ends. */
+  /** Each wire's id, and its geometry: its two ends, and the corners it was bent to. */
   readonly wireIds: readonly string[];
-  readonly wireEnds: readonly { readonly from: PinRef; readonly to: PinRef }[];
+  readonly wireEnds: readonly WireGeometry[];
 
   readonly wireCount: number;
   /** Each wire's route, flattened: points `wireStart[w] .. wireStart[w + 1]`, x then y. */
@@ -191,7 +191,8 @@ export class SceneIndex {
           const path = route(
             pinAt(from.shape ?? from.kind, from.x, from.y, wire.from.pin, from.rotation),
             pinAt(to.shape ?? to.kind, to.x, to.y, wire.to.pin, to.rotation),
-            slotOf(wire.to.pin)
+            slotOf(wire.to.pin),
+            wire.via
           );
           routed = { id: item.id, from: placed[fromIndex]!, to: placed[toIndex]!, points: path.flatMap(p => [p.x, p.y]), box: boundsOf(path), born: build, used: 0 };
           item.route = routed;

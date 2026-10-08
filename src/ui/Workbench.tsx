@@ -237,7 +237,11 @@ export function workbench(ctx: ComponentContext) {
         return items;
       }
       case 'wire':
-        return [{ value: 'trace-hit', label: 'Trace this wire in the analyser' }, item('delete', 'Delete the wire')];
+        return [
+          { value: 'trace-hit', label: 'Trace this wire in the analyser' },
+          ...(canvas.bent(hit.id) ? [{ value: `straighten:${hit.id}`, label: 'Straighten the wire' }] : []),
+          item('delete', 'Delete the wire')
+        ];
       case 'component': {
         const one = s.one;
         const items: MenuItem[] = [];
@@ -314,6 +318,8 @@ export function workbench(ctx: ComponentContext) {
       renameText.value = one.ownLabel ?? '';
       renameWhat.value = `What to call ${one.label ?? one.id}. Blank goes back to its id, ${one.id}.`;
       openDialog(showRename);
+    } else if (choice.startsWith('straighten:')) {
+      circuit.send.straighten([choice.slice(11)]);
     } else if (choice.startsWith('open:')) {
       circuit.send.openChip(choice.slice(5));
     } else if (choice.startsWith('program:')) {
@@ -493,6 +499,9 @@ export function workbench(ctx: ComponentContext) {
         return editor.rotateSelection();
       case 'makeChip':
         return editor.makeChip();
+      case 'straighten':
+        // The selection's wires, and every wire to or from a part selected; or, with nothing selected, every wire here.
+        return circuit.send.straighten([...editor.selection]);
       case 'resetChip': {
         const chip = resetTarget();
         if (chip !== null) circuit.send.resetChip(chip);
@@ -666,6 +675,8 @@ export function workbench(ctx: ComponentContext) {
         return s.parts > 0;
       case 'resetChip':
         return resetTarget() !== null;
+      case 'straighten':
+        return canvas.bent();
       case 'deselect':
         return s.parts + s.wires > 0;
       case 'openChip':
@@ -703,6 +714,7 @@ export function workbench(ctx: ComponentContext) {
     if (id === 'runPause') return status.value.running ? 'Pause' : 'Run';
     if (id === 'analyser') return analyserOpen ? 'Hide the logic analyser' : 'Show the logic analyser';
     if (id === 'theme') return dark ? 'Light mode' : 'Dark mode';
+    if (id === 'straighten') return canvas.selection().parts + canvas.selection().wires > 0 ? 'Straighten the selected wires' : 'Straighten every wire here';
     if (id === 'minimap') return `${showMinimap.value.value ? '✓' : '  '}  Minimap`;
     if (id === 'keepHistory') return `${keepHistory.value.value ? '✓' : '  '}  Keep history, to look back`;
     if (id === 'exportSvg' || id === 'exportPng') {

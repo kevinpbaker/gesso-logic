@@ -68,7 +68,56 @@ export function moveBy(circuit: Circuit, ids: readonly string[], dx: number, dy:
     changed = true;
     return { ...c, x: c.x + dx, y: c.y + dy };
   });
-  return changed ? { ...circuit, components } : circuit;
+  if (!changed) return circuit;
+  // A bent wire whose ends both move goes with them; one with an end
+  // left behind keeps its corners, and stretches to the end that moved.
+  const carried = circuit.wires.some(w => w.via !== undefined && moving.has(w.from.component) && moving.has(w.to.component));
+  const wires = carried
+    ? circuit.wires.map(w => (w.via !== undefined && moving.has(w.from.component) && moving.has(w.to.component) ? shiftVia(w, dx, dy) : w))
+    : circuit.wires;
+  return { ...circuit, components, wires };
+}
+
+/** A wire with its corners moved by an offset; the wire itself when it has none. */
+function shiftVia<W extends Wire>(wire: W, dx: number, dy: number): W {
+  return wire.via === undefined || (dx === 0 && dy === 0) ? wire : { ...wire, via: wire.via.map(p => ({ x: p.x + dx, y: p.y + dy })) };
+}
+
+/**
+ * Bends a wire through corners, or with none straightens it back to
+ * routing itself. The circuit as it was when there is no such wire or
+ * nothing would change.
+ */
+export function setVia(circuit: Circuit, id: string, via: readonly { readonly x: number; readonly y: number }[] | null): Circuit {
+  const index = circuit.wires.findIndex(w => w.id === id);
+  const wire = circuit.wires[index];
+  if (wire === undefined) return circuit;
+  const next = via === null || via.length === 0 ? null : via.map(p => ({ x: p.x, y: p.y }));
+  if (next === null && wire.via === undefined) return circuit;
+  if (next !== null && wire.via !== undefined && next.length === wire.via.length && next.every((p, i) => p.x === wire.via![i]!.x && p.y === wire.via![i]!.y)) return circuit;
+  const { via: _, ...rest } = wire;
+  const wires = [...circuit.wires];
+  wires[index] = next === null ? rest : { ...rest, via: next };
+  return { ...circuit, wires };
+}
+
+/**
+ * Straightens wires back to routing themselves: the wires listed, and
+ * every wire to or from a part listed; every wire, when the list is
+ * empty. The circuit as it was when none was bent.
+ */
+export function straighten(circuit: Circuit, ids: readonly string[]): Circuit {
+  const chosen = new Set(ids);
+  const touched = (w: Wire) => chosen.size === 0 || chosen.has(w.id) || chosen.has(w.from.component) || chosen.has(w.to.component);
+  if (!circuit.wires.some(w => w.via !== undefined && touched(w))) return circuit;
+  return {
+    ...circuit,
+    wires: circuit.wires.map(w => {
+      if (w.via === undefined || !touched(w)) return w;
+      const { via: _, ...rest } = w;
+      return rest;
+    })
+  };
 }
 
 /** Turns every listed component a quarter turn clockwise, each about its own box. */
@@ -358,7 +407,7 @@ export function relabel(fragment: Fragment, dx: number, dy: number, fresh: (pref
     const from = renamed.get(w.from.component);
     const to = renamed.get(w.to.component);
     if (from === undefined || to === undefined) return [];
-    return [{ id: fresh('w', w.id), from: { ...w.from, component: from }, to: { ...w.to, component: to } }];
+    return [shiftVia({ ...w, id: fresh('w', w.id), from: { ...w.from, component: from }, to: { ...w.to, component: to } }, dx, dy)];
   });
   return fragment.chips === undefined ? { components, wires } : { components, wires, chips: fragment.chips };
 }
@@ -391,7 +440,12 @@ export function sameConnectivity(a: Circuit, b: Circuit): boolean {
     if (x.id !== y.id || x.kind !== y.kind || x.value !== y.value || x.chip !== y.chip || x.rom !== y.rom) return false;
   }
   for (let i = 0; i < a.wires.length; i++) {
-    if (a.wires[i] !== b.wires[i]) return false;
+    const x = a.wires[i]!;
+    const y = b.wires[i]!;
+    // A wire bent is a wire moved: the same pins, joined the same way.
+    if (x !== y && (x.id !== y.id || x.from.component !== y.from.component || x.from.pin !== y.from.pin || x.to.component !== y.to.component || x.to.pin !== y.to.pin)) {
+      return false;
+    }
   }
   return true;
 }
@@ -493,7 +547,7 @@ export function makeChip(circuit: Circuit, selected: readonly string[], name: st
     }
   };
   const definitionComponents: Component[] = inside.map(c => ({ ...c, x: c.x - left, y: c.y - top }));
-  const definitionWires: Wire[] = circuit.wires.filter(w => chosen.has(w.from.component) && chosen.has(w.to.component));
+  const definitionWires: Wire[] = circuit.wires.filter(w => chosen.has(w.from.component) && chosen.has(w.to.component)).map(w => shiftVia(w, -left, -top));
   const outerWires: Wire[] = [];
   const rootIds = ids(circuit);
   rootIds.add(chipId);

@@ -35,6 +35,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         move: (id, x, y) => service.move(id, x, y),
         moveBy: (ids, dx, dy, gesture) => service.moveBy(ids, dx, dy, gesture),
         rotate: ids => service.rotate(ids),
+        setVia: (id, via, gesture) => service.setVia(id, via, gesture),
+        straighten: ids => service.straighten(ids),
         remove: ids => service.remove(ids),
         insert: fragment => service.insert(fragment),
         undo: () => service.undo(),

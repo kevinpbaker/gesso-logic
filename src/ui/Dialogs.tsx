@@ -53,7 +53,7 @@ export function confirmDiscard(pending: Observable<Discard | null>, close: () =>
               map(p =>
                 p === null
                   ? ''
-                  : `This circuit has changes that are not saved. ${p.what} replaces it, and Undo cannot bring it back.`
+                  : `This circuit has changes that are not saved. ${p.what} replaces it, and Undo cannot bring it back; File › Restore an earlier version can.`
               )
             )}
             fontSize={12}

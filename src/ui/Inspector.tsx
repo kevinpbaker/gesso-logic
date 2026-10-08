@@ -27,6 +27,7 @@ const CARD_WIDTH = 292;
 const same = (a: SelectionSummary, b: SelectionSummary) =>
   a.parts === b.parts &&
   a.wires === b.wires &&
+  a.bent === b.bent &&
   a.one?.id === b.one?.id &&
   a.one?.width === b.one?.width &&
   a.one?.chip === b.one?.chip &&
@@ -46,7 +47,7 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
   const valueText = internalState('');
   const noteText = internalState('');
   const labelText = internalState('');
-  let current: SelectionSummary = { parts: 0, wires: 0, one: null };
+  let current: SelectionSummary = { parts: 0, wires: 0, bent: false, one: null };
   ctx.effect(selection, s => {
     current = s;
     chipName.value = s.one?.chip ?? '';
@@ -166,6 +167,7 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
       if (s.parts > 1) {
         actions.push(small('Make chip  M', act(() => editor.makeChip()), 'chip'));
       }
+      if (s.bent) actions.push(small('Straighten', act(() => circuit.send.straighten([...editor.selection])), 'straighten'));
       if (s.parts > 0) actions.push(small('Truth table  T', act(() => editor.tabulate()), 'table'));
       actions.push(small('Delete', act(() => editor.deleteSelection()), 'delete'));
       rows.push(

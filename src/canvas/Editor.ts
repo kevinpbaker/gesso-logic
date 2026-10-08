@@ -3,7 +3,7 @@ import type { PaintSurface } from 'gesso-core';
 import type { CircuitCommands } from '../app/CircuitContract';
 import { kindName, primitivePinNote } from '../app/Describe';
 import { relabel, type Fragment } from '../app/DocumentEdits';
-import { pinAt, route, sizeOf, slotOf, type Box, type KindLayout, type Point, type Shape } from '../app/Layout';
+import { bend, pinAt, route, sizeOf, slotOf, type Box, type KindLayout, type Point, type Shape } from '../app/Layout';
 import type { PinRef } from '../sim/Circuit';
 import { PINS, type Kind } from '../sim/Primitives';
 import type { SceneIndex } from './SceneIndex';
@@ -49,6 +49,7 @@ export interface EditorDeps {
     | 'copy'
     | 'duplicate'
     | 'watch'
+    | 'setVia'
   >;
   /** A chip definition's body, by name, for placing one from the palette; undefined for a name the document lacks. */
   chipShape(name: string): KindLayout | undefined;
@@ -106,6 +107,20 @@ type Mode =
   | { readonly kind: 'moving'; readonly gesture: string; last: Point }
   | { readonly kind: 'wiring'; readonly from: PinRef; readonly fromAt: Point }
   | { readonly kind: 'marquee'; readonly from: Point; readonly additive: boolean }
+  /**
+   * A wire's segment dragged across itself: the route as the drag found
+   * it, the segment, and how far it has moved so far, in whole units.
+   */
+  | {
+      readonly kind: 'bending';
+      readonly id: string;
+      readonly gesture: string;
+      readonly points: readonly Point[];
+      readonly segment: number;
+      readonly horizontal: boolean;
+      readonly from: Point;
+      offset: number;
+    }
   | { readonly kind: 'panning'; last: Point };
 
 /** Two clicks on one chip within this many milliseconds open it. */
@@ -221,6 +236,8 @@ export class Editor {
         return 'Arrow keys nudge a selection · Shift+arrows nudge by 4';
       case 'marquee':
         return 'Shift adds to the selection';
+      case 'bending':
+        return 'Moving the wire’s segment · undo puts it back · Straighten wires lets it route itself';
       default:
         break;
     }
@@ -233,7 +250,7 @@ export class Editor {
       const what = ends === null ? '' : `: ${this.pinTitle(ends.from)} → ${this.pinTitle(ends.to)}`;
       return `Wire ${cycle.at + 1} of ${cycle.ids.length} here${what} · click again or Tab for the next · Del deletes it`;
     }
-    if (ids.length === 0 && this.selection.size > 0) return 'Wire selected · Shift+W traces it · Del deletes it';
+    if (ids.length === 0 && this.selection.size > 0) return 'Wire selected · drag a segment to move it · Shift+W traces it · Del deletes it';
     if (ids.length === 0) {
       return scene.componentCount === 0
         ? 'Pick a part on the left, or press its key · Drag from a pin to wire · ? shows every shortcut'
@@ -326,12 +343,24 @@ export class Editor {
           this.mode = { kind: 'moving', gesture: `drag-${++this.gestures}`, last: snap(this.deps.toWorld(mode.screen)) };
           this.pointerMove(screen);
           return;
+        } else if (hit.kind === 'wire' && !mode.additive && this.startBending(hit.id, this.deps.toWorld(mode.screen))) {
+          this.pointerMove(screen);
+          return;
         } else {
           this.mode = { kind: 'marquee', from: this.deps.toWorld(mode.screen), additive: mode.additive };
         }
         break;
       }
-      case 'moving': {
+      case 'bending': {
+        const offset = Math.round(mode.horizontal ? world.y - mode.from.y : world.x - mode.from.x);
+        if (offset !== mode.offset) {
+          mode.offset = offset;
+          const bent = bend(mode.points, mode.segment, offset);
+          this.deps.send.setVia(mode.id, bent.slice(1, -1), mode.gesture);
+        }
+        break;
+      }
+            case 'moving': {
         const at = snap(world);
         const dx = at.x - mode.last.x;
         const dy = at.y - mode.last.y;
@@ -349,6 +378,36 @@ export class Editor {
     }
     this.hover = this.hitAt(world);
     this.deps.changed();
+  }
+
+  /**
+   * Starts moving the segment of a wire nearest a point, selecting the
+   * wire; false for a wire not in the scene, or one with no segment to
+   * move.
+   */
+  private startBending(id: string, at: Point): boolean {
+    const scene = this.deps.scene();
+    const w = scene.wireIds.indexOf(id);
+    if (w < 0) return false;
+    const points: Point[] = [];
+    for (let i = scene.wireStart[w]!; i < scene.wireStart[w + 1]!; i += 2) points.push({ x: scene.wirePoints[i]!, y: scene.wirePoints[i + 1]! });
+    let segment = -1;
+    let nearest = Infinity;
+    for (let i = 0; i + 1 < points.length; i++) {
+      const d = distanceToSegment(at, points[i]!, points[i + 1]!);
+      if (d < nearest) {
+        nearest = d;
+        segment = i;
+      }
+    }
+    if (segment < 0) return false;
+    const a = points[segment]!;
+    const b = points[segment + 1]!;
+    if (a.x === b.x && a.y === b.y) return false;
+    this.selection.clear();
+    this.selection.add(id);
+    this.mode = { kind: 'bending', id, gesture: `bend-${++this.gestures}`, points, segment, horizontal: a.y === b.y, from: at, offset: 0 };
+    return true;
   }
 
   /**
@@ -1311,6 +1370,15 @@ function wrap(text: string, chars: number): string[] {
   }
   if (line !== '') lines.push(line);
   return lines;
+}
+
+/** How far a point is from a segment, in grid units. */
+function distanceToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = dx * dx + dy * dy;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
 function snap(p: Point): Point {

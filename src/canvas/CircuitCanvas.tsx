@@ -74,6 +74,8 @@ export type ZoomPreset = 'all' | 'mid' | 'close';
 export interface SelectionSummary {
   readonly parts: number;
   readonly wires: number;
+  /** Whether a wire selected was bent by hand. */
+  readonly bent: boolean;
   readonly one: {
     readonly id: string;
     readonly kind: Kind;
@@ -151,6 +153,8 @@ export interface CanvasHandle {
    */
   picture(format: 'svg', theme: UiTheme): Promise<string>;
   picture(format: 'png', theme: UiTheme): Promise<Uint8Array<ArrayBuffer>>;
+  /** Whether a wire on this level has been bent by hand; with no id, whether any has. */
+  bent(id?: string): boolean;
   /** What the minimap draws from and moves: see `Minimap.tsx`. */
   readonly minimapSource: MinimapSource;
 }
@@ -932,15 +936,22 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     selection: () => {
       let parts = 0;
       let wires = 0;
+      let bent = false;
       // An id in neither is one just handed out, not yet come back.
       for (const id of editor.selection) {
         if (scene.indexOf.has(id)) parts++;
-        else if (scene.wireIds.includes(id)) wires++;
+        else {
+          const w = scene.wireIds.indexOf(id);
+          if (w < 0) continue;
+          wires++;
+          if (scene.wireEnds[w]!.via !== null) bent = true;
+        }
       }
       const only = parts === 1 && wires === 0 ? scene.indexOf.get([...editor.selection][0]!) : undefined;
       return {
         parts,
         wires,
+        bent,
         one:
           only === undefined
             ? null
@@ -986,6 +997,11 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     restoreView: (path, view) => {
       revealing = { path, pin: { component: '', pin: '' }, view };
       tryReveal();
+    },
+    bent: (id?: string) => {
+      if (id === undefined) return scene.wireEnds.some(w => w.via !== null);
+      const w = scene.wireIds.indexOf(id);
+      return w >= 0 && scene.wireEnds[w]!.via !== null;
     },
     minimapSource: {
       scene: () => scene,

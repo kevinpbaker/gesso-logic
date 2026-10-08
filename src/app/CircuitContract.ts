@@ -135,6 +135,8 @@ export interface WireGeometry {
   readonly width: number;
   /** A bus's nets, least significant bit first; empty for a one-bit wire. */
   readonly bits: readonly number[];
+  /** The corners it was bent to, or null for a wire that routes itself: see `route`. */
+  readonly via: readonly { readonly x: number; readonly y: number }[] | null;
 }
 
 /**
@@ -294,6 +296,10 @@ export interface CircuitCommands {
   move(id: string, x: number, y: number): void;
   /** Moves components by an offset: a selection dragged. */
   moveBy(ids: readonly string[], dx: number, dy: number, gesture?: string): void;
+  /** Bends a wire through these corners, or with null lets it route itself again. Moves of one drag share `gesture`. */
+  setVia(id: string, via: readonly { readonly x: number; readonly y: number }[] | null, gesture?: string): void;
+  /** Lets wires route themselves again: these wires and every wire to or from these parts, or every wire on the level for none. */
+  straighten(ids: readonly string[]): void;
   /** Turns components a quarter turn clockwise. */
   rotate(ids: readonly string[]): void;
   /** Removes components and wires; wires left with an end on nothing go too. */

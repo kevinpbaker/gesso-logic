@@ -54,6 +54,7 @@ export type CommandId =
   | 'deselect'
   | 'rotate'
   | 'makeChip'
+  | 'straighten'
   | 'resetChip'
   | 'openChip'
   | 'fit'
@@ -123,6 +124,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   deselect: { label: 'Select nothing', keys: 'Esc', group: 'Edit' },
   rotate: { label: 'Rotate', keys: 'R', group: 'Edit' },
   makeChip: { label: 'Make a chip of the selection', keys: 'M', group: 'Edit' },
+  straighten: { label: 'Straighten wires', group: 'Edit' },
   resetChip: { label: 'Reset the chip to how it was opened', group: 'Edit' },
   openChip: { label: 'Look inside the chip', keys: 'Double-click', group: 'View' },
   fit: { label: 'Fit the circuit', keys: '0', group: 'View' },
@@ -218,6 +220,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       'find',
       MENU_SEPARATOR,
       'rotate',
+      'straighten',
       'makeChip',
       'resetChip'
     ]
@@ -263,6 +266,7 @@ export function shortcutSections(): readonly { readonly title: string; readonly 
       title: 'On the canvas',
       lines: [
         ['Draw a wire', 'Drag from a pin'],
+        ['Move a wire’s segment', 'Drag the wire'],
         ['Select several', 'Drag across empty space'],
         ['Add to the selection', 'Shift+click'],
         ['Flip a switch', 'Click it once selected'],
