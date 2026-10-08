@@ -665,7 +665,14 @@ export class Editor {
     const scene = this.deps.scene();
     const px = 1 / this.deps.scale();
 
-    if (this.highlight !== null) this.drawHighlight(surface, this.highlight, px);
+    if (this.highlight !== null) {
+      this.drawHighlight(surface, this.highlight, px);
+    } else if (this.mode.kind === 'idle') {
+      // The net under the pointer, every wire of it, so one can be followed
+      // across the crossings of a dense level by eye.
+      const net = this.hoveredNet();
+      if (net >= 0) this.drawNet(surface, net, 3 * px);
+    }
 
     if (this.selection.size > 0) {
       surface.beginPath();
@@ -802,25 +809,43 @@ export class Editor {
     }
     const c = scene.indexOf.get(highlight.pin.component);
     if (c === undefined) return;
-    const nets = scene.entries[c]!.nets;
-    const net = nets[highlight.pin.pin] ?? nets[`${highlight.pin.pin}[0]`] ?? -1;
-    if (net >= 0) {
-      const p = scene.wirePoints;
-      surface.beginPath();
-      for (let w = 0; w < scene.wireCount; w++) {
-        if (scene.wireNet[w] !== net) continue;
-        surface.moveTo(p[scene.wireStart[w]!]!, p[scene.wireStart[w]! + 1]!);
-        for (let i = scene.wireStart[w]! + 2; i < scene.wireStart[w + 1]!; i += 2) surface.lineTo(p[i]!, p[i + 1]!);
-      }
-      surface.strokeColor('secondary');
-      surface.lineWidth(5 * px);
-      surface.stroke();
-    }
+    this.drawNet(surface, netOfPin(scene, c, highlight.pin.pin), 5 * px);
     const at = pinOf(scene, highlight.pin);
     surface.beginPath();
     surface.arc(at.x, at.y, 8 * px, 0, Math.PI * 2);
     surface.strokeColor('secondary');
     surface.lineWidth(3 * px);
+    surface.stroke();
+  }
+
+  /** The net of the pin or wire under the pointer; -1 for none. */
+  private hoveredNet(): number {
+    const scene = this.deps.scene();
+    const hover = this.hover;
+    if (hover.kind === 'wire') {
+      const w = scene.wireIds.indexOf(hover.id);
+      return w < 0 ? -1 : scene.wireNet[w]!;
+    }
+    if (hover.kind === 'pin') {
+      const c = scene.indexOf.get(hover.pin.component);
+      return c === undefined ? -1 : netOfPin(scene, c, hover.pin.pin);
+    }
+    return -1;
+  }
+
+  /** Every wire on a net drawn over, `width` wide, in the secondary colour. */
+  private drawNet(surface: PaintSurface, net: number, width: number): void {
+    if (net < 0) return;
+    const scene = this.deps.scene();
+    const p = scene.wirePoints;
+    surface.beginPath();
+    for (let w = 0; w < scene.wireCount; w++) {
+      if (scene.wireNet[w] !== net) continue;
+      surface.moveTo(p[scene.wireStart[w]!]!, p[scene.wireStart[w]! + 1]!);
+      for (let i = scene.wireStart[w]! + 2; i < scene.wireStart[w + 1]!; i += 2) surface.lineTo(p[i]!, p[i + 1]!);
+    }
+    surface.strokeColor('secondary');
+    surface.lineWidth(width);
     surface.stroke();
   }
 
@@ -1255,6 +1280,12 @@ function snap(p: Point): Point {
 
 function rect(a: Point, b: Point): Box {
   return { left: Math.min(a.x, b.x), top: Math.min(a.y, b.y), right: Math.max(a.x, b.x), bottom: Math.max(a.y, b.y) };
+}
+
+/** The net a pin is on: a bus pin's first bit's, as a bus wire's is; -1 for none. */
+function netOfPin(scene: SceneIndex, c: number, pin: string): number {
+  const nets = scene.entries[c]!.nets;
+  return nets[pin] ?? nets[`${pin}[0]`] ?? -1;
 }
 
 function pinOf(scene: SceneIndex, ref: PinRef): Point {
