@@ -282,9 +282,10 @@ pnpm pong            # ↑/↓ or w/s, q to quit
 
 Said plainly, so nobody finds out the hard way:
 
-- **Not deployed.** `vercel.json` is ready. The public url, and
-  `pnpm proof` gating the deploy, are Phase 22 of the
-  [roadmap](ROADMAP.md) and aren't done.
+- **Deployed, but not gated.** It is live at
+  [gesso-logic.vercel.app](https://gesso-logic.vercel.app/), built from
+  `main`. `pnpm proof` gating that deploy is Phase 22 of the
+  [roadmap](ROADMAP.md), and isn't done.
 - **Two-state logic only.** No X, no Z, no tri-state buses, and no
   propagation-delay timing. Every gate takes one tick. The CPU is built
   with muxes, so it doesn't need them.
@@ -296,7 +297,9 @@ Said plainly, so nobody finds out the hard way:
   RAM bits, the read tree, the datapath) are written by generators in
   `src/app/Generators.ts` into that same format. There's no second
   language and no second code path to trust.
-- **Not collaborative**, and a circuit can't be shared by link yet.
+- **Not collaborative.** A circuit can be shared by link (File › Share
+  a link), and whoever opens it gets their own copy: there is no
+  editing together.
 
 ## Under the hood
 

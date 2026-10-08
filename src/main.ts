@@ -21,9 +21,9 @@
  *   });
  */
 import { proofPanel } from 'gesso-devtools';
-import { createApp, type PortHost } from 'gesso-framework';
+import { createApp, OpfsStorage, type PortHost } from 'gesso-framework';
 
-import { isProofPath } from './route';
+import { INCOMING_LINK, isProofPath, LINK_STORE } from './route';
 
 const host = document.querySelector<HTMLElement>('#app');
 if (host === null) {
@@ -58,30 +58,52 @@ if (mainThread) {
     serveCircuit(hostPort);
   });
 }
-const workerName = params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : proof ? 'proof' : undefined;
+const plainName = params.has('bench') ? `bench${params.has('only') ? `:${params.get('only')}` : ''}` : proof ? 'proof' : undefined;
 
-const app = createApp({
-  ...(panel?.options ?? {}),
-  // The render worker is told the mode in its name, as it is `/proof`'s.
-  workerName: mainThread && !params.has('bench') ? (workerName === undefined ? 'main' : `${workerName}+main`) : workerName,
-  ...(appLogic === undefined ? {} : { appLogicWorker: appLogic }),
-  // The toggle asks for this page with `?main` added or taken away; that
-  // is navigated here, in place. Any other url opens in a new tab.
-  onOpenUrl: url => {
-    const target = new URL(url, location.href);
-    if (target.origin === location.origin && target.pathname === location.pathname) {
-      location.assign(`${target.pathname}${target.search === '?' ? '' : target.search}${target.hash}`);
-    }
-    else window.open(target.href, '_blank', 'noopener,noreferrer');
-  },
-  // Save, Open and Duplicate are the circuit's, not the page's, and so
-  // is F10, which goes to the menu bar. The shell has to say so before
-  // the render worker has heard of the key, or Chrome's "Save page as"
-  // opens over the canvas, and Ctrl+D bookmarks the page.
-  interceptKey: event =>
-    event.key === 'F10' ||
-    ((event.ctrlKey || event.metaKey) && !event.altKey && ['s', 'o', 'd'].includes(event.key.toLowerCase()))
+// A shared link, `#c=…`: the circuit is in the part of the url after
+// `#`, which the shell does not pass on, and is far too long for a
+// worker's name. It is put where the render worker can read it, the
+// origin's private storage, before the worker starts; the name says
+// only that one is waiting. It leaves the address bar, so a reload
+// does not open it again over what has been done with it since.
+const shared = !params.has('bench') && !proof && location.hash.startsWith('#c=') ? location.hash.slice(1) : null;
+const workerName = shared !== null ? 'link' : plainName;
+if (shared !== null) history.replaceState(null, '', `${location.pathname}${location.search}`);
+// A link pasted into a tab already on the app differs from it only after
+// `#`, which a browser follows without loading the page again: load it
+// again, so the link is read as one opened afresh is.
+window.addEventListener('hashchange', () => {
+  if (location.hash.startsWith('#c=')) location.reload();
 });
-panel?.attach(app);
+const start = (): void => {
+  const app = createApp({
+    ...(panel?.options ?? {}),
+    // The render worker is told the mode in its name, as it is `/proof`'s.
+    workerName: mainThread && !params.has('bench') ? (workerName === undefined ? 'main' : `${workerName}+main`) : workerName,
+    ...(appLogic === undefined ? {} : { appLogicWorker: appLogic }),
+    // The toggle asks for this page with `?main` added or taken away; that
+    // is navigated here, in place. Any other url opens in a new tab.
+    onOpenUrl: url => {
+      const target = new URL(url, location.href);
+      if (target.origin === location.origin && target.pathname === location.pathname) {
+        location.assign(`${target.pathname}${target.search === '?' ? '' : target.search}${target.hash}`);
+      }
+      else window.open(target.href, '_blank', 'noopener,noreferrer');
+    },
+    // Save, Open and Duplicate are the circuit's, not the page's, and so
+    // is F10, which goes to the menu bar. The shell has to say so before
+    // the render worker has heard of the key, or Chrome's "Save page as"
+    // opens over the canvas, and Ctrl+D bookmarks the page.
+    interceptKey: event =>
+      event.key === 'F10' ||
+      ((event.ctrlKey || event.metaKey) && !event.altKey && ['s', 'o', 'd'].includes(event.key.toLowerCase()))
+  });
+  panel?.attach(app);
 
-app.mount(host);
+  app.mount(host);
+};
+
+// The app starts once the link is stored, or at once without one: a
+// link that could not be stored is a page that opens as if there were
+// none, which is better than one that does not open.
+void (shared === null ? Promise.resolve() : new OpfsStorage({ directory: LINK_STORE }).write(INCOMING_LINK, shared)).then(start, start);

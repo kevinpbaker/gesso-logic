@@ -1,3 +1,4 @@
+import { openingLink } from '../route';
 import type { ZoomPreset } from './CircuitCanvas';
 
 /**
@@ -220,6 +221,11 @@ export function isBench(): boolean {
 /** `/proof`: Phase 7's page, measured by `pnpm proof` (see `scripts/proof.ts`). */
 export function isProof(): boolean {
   return workerName() === 'proof' || workerName() === 'proof+main';
+}
+
+/** A shared link, `#c=…`, is waiting to be opened (see `main.ts`). */
+export function isOpeningLink(): boolean {
+  return openingLink(workerName());
 }
 
 /** `?main`: the simulator runs on the page's thread, not in its worker (see `main.ts`). */

@@ -23,7 +23,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         clipboard: service.clipboard,
         analyser: service.analyserView,
         program: service.program,
-        found: service.found
+        found: service.found,
+        share: service.shared
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -66,6 +67,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         watch: pins => service.watch(pins),
         unwatch: id => service.unwatch(id),
         find: query => service.find(query),
+        share: () => service.share(),
+        openShared: fragment => service.openShared(fragment),
         showCycle: cycle => service.showCycle(cycle),
         resumeFromHere: () => service.resumeFromHere(),
         setKeepHistory: keep => service.setKeepHistory(keep),

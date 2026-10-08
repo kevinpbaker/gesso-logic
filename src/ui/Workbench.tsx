@@ -5,14 +5,15 @@ import { Menu, MENU_SEPARATOR, MenuBar, Select, type MenuItem } from 'gesso-comp
 import { createComponent, FocusService, internalState, OpfsStorage, persisted, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type ClockRate, type SceneName } from '../app/CircuitContract';
-import { isMainThread } from '../canvas/Bench';
+import { isMainThread, isOpeningLink } from '../canvas/Bench';
+import { INCOMING_LINK, LINK_STORE } from '../route';
 import { circuitCanvas, type Camera, type CanvasKeys, type TraceWhere } from '../canvas/CircuitCanvas';
 import type { Hit } from '../canvas/Editor';
 import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { clockRate, confirmDiscard, findDialog, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, type Discard, type FindItem } from './Dialogs';
+import { clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, type Discard, type FindItem } from './Dialogs';
 import { kindName } from '../app/Describe';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
@@ -90,6 +91,8 @@ export function workbench(ctx: ComponentContext) {
   const showRate = internalState(false);
   const showRename = internalState(false);
   const showFind = internalState(false);
+  const showShare = internalState(false);
+  const shareUrl = internalState('');
   const findText = internalState('');
   const findActive = internalState(0);
   const renameText = internalState('');
@@ -333,6 +336,35 @@ export function workbench(ctx: ComponentContext) {
   // already playing.
   const pong = GAMES.find(g => g.name === 'pong.asm');
   circuit.send.restore(pong === undefined ? undefined : { name: pong.name, source: pong.source, rate: pong.rate });
+  // A shared link, left by `main.ts`: opened once what was open before
+  // has come back, through the same question as any other open when
+  // that has changes not saved.
+  const waitingLink = internalState<string | null>(null);
+  if (isOpeningLink()) {
+    const store = new OpfsStorage({ directory: LINK_STORE });
+    void store.read(INCOMING_LINK).then(read => {
+      void store.remove(INCOMING_LINK);
+      if (read.value === null) notify('The shared link could not be read from this browser’s storage.', true);
+      else waitingLink.value = read.value;
+    });
+  }
+  ctx.effect(
+    combineLatest([waitingLink, document]).pipe(
+      filter(([fragment, d]) => fragment !== null && d.opened > 0),
+      take(1)
+    ),
+    ([fragment]) => guard('Opening the shared circuit', () => circuit.send.openShared(fragment!))
+  );
+  // A link made: copied at once, and shown with what it is.
+  let sharedSerial = circuit.view.share.value.serial;
+  ctx.effect(circuit.view.share, made => {
+    if (made.serial === sharedSerial) return;
+    sharedSerial = made.serial;
+    if (made.error !== null) return notify(`Couldn't make a link: ${made.error}`, true);
+    shareUrl.value = `${self.location.origin}/#${made.fragment}`;
+    void shell.copyText(shareUrl.value);
+    openDialog(showShare);
+  });
   files.refreshRecent();
   // The keyboard starts on the canvas, once it is on screen, so the part
   // keys work before anything has been clicked.
@@ -465,6 +497,8 @@ export function workbench(ctx: ComponentContext) {
       case 'find':
         findText.value = '';
         return openDialog(showFind);
+      case 'share':
+        return circuit.send.share();
       case 'analyser':
         return analyser.toggle();
       case 'trace':
@@ -1132,6 +1166,7 @@ export function workbench(ctx: ComponentContext) {
         },
         closeDialog(showRate)
       )}
+      {shareLink(showShare, shareUrl, () => void shell.copyText(shareUrl.value), closeDialog(showShare))}
       {findDialog(showFind, findText, findItems, findActive, chooseFound, closeDialog(showFind))}
       {renamePart(
         showRename,

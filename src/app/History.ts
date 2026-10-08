@@ -42,10 +42,13 @@ export class History {
   private newest = -1;
   private nextKeyframe = 0;
 
-  constructor(
-    private readonly budget = HISTORY_BUDGET,
-    private readonly every = KEYFRAME_EVERY
-  ) {}
+  private readonly budget: number;
+  private readonly every: number;
+
+  constructor(budget = HISTORY_BUDGET, every = KEYFRAME_EVERY) {
+    this.budget = budget;
+    this.every = every;
+  }
 
   /** The oldest cycle that can be had again, and the newest; `first` is -1 when there is none. */
   get first(): number {

@@ -15,15 +15,17 @@ import type {
   Camera,
   ClipRequest,
   FoundView,
+  ShareView,
   ProgramView,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_SAVE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_SAVE, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
 import { History } from './History';
+import { circuitOfLink, linkOf } from './ShareLink';
 import { Analyser } from './Analyser';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
@@ -163,6 +165,7 @@ export class CircuitService {
   readonly status: Observable<Status>;
   readonly table: Observable<TableView>;
   readonly found: Observable<FoundView>;
+  readonly shared: Observable<ShareView>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
   readonly analyserView: Observable<AnalyserView>;
@@ -174,6 +177,8 @@ export class CircuitService {
   private readonly statusSubject: BehaviorSubject<Status>;
   private readonly tableSubject = new BehaviorSubject<TableView>(NO_TABLE);
   private readonly foundSubject = new BehaviorSubject<FoundView>(NOTHING_FOUND);
+  private readonly shareSubject = new BehaviorSubject<ShareView>(NO_SHARE);
+  private shareSerial = 0;
   private readonly savingSubject = new BehaviorSubject<SaveRequest>(NO_SAVE);
   private readonly clipboardSubject = new BehaviorSubject<ClipRequest>(NO_CLIP);
   private readonly analyserSubject = new BehaviorSubject<AnalyserView>(CLOSED_ANALYSER);
@@ -281,6 +286,7 @@ export class CircuitService {
     this.status = this.statusSubject;
     this.table = this.tableSubject;
     this.found = this.foundSubject;
+    this.shared = this.shareSubject;
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
     this.analyserView = this.analyserSubject;
@@ -332,6 +338,31 @@ export class CircuitService {
     // dirty when it was put away.
     this.savedRevision = file.dirty === true ? -1 : this.revision + 1;
     this.apply(circuit);
+  }
+
+  async share(): Promise<void> {
+    const serial = ++this.shareSerial;
+    try {
+      this.shareSubject.next({ serial, fragment: await linkOf(this.withTraces()), error: null });
+    } catch (error) {
+      this.shareSubject.next({ serial, fragment: '', error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async openShared(fragment: string): Promise<void> {
+    let circuit: Circuit;
+    try {
+      circuit = await circuitOfLink(fragment);
+    } catch (error) {
+      if (!(error instanceof CircuitFileError)) throw error;
+      this.message = `Couldn't open the shared link: ${error.message}`;
+      this.documentSubject.next(this.summary());
+      return;
+    }
+    // Not saved anywhere yet: the person who opened it decides whether to keep it.
+    this.load(circuit, { name: null, handle: null, dirty: true });
+    this.message = 'Opened a shared circuit. It is not saved anywhere yet: Save keeps a copy.';
+    this.documentSubject.next(this.summary());
   }
 
   open(text: string, name: string, handle: number | null): void {

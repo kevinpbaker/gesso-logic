@@ -396,6 +396,10 @@ export interface CircuitCommands {
   resumeFromHere(): void;
   /** Keeps history, or stops and lets it go. On unless turned off. */
   setKeepHistory(keep: boolean): void;
+  /** Makes a link that opens the document, traced pins and all: published as `share`. */
+  share(): void;
+  /** Opens a link's circuit, the text after its `#`, as a new document that is not saved anywhere yet. */
+  openShared(fragment: string): void;
   /** Finds parts by name at every depth: published as `found`. Blank text finds nothing. */
   find(query: string): void;
   /** Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`. */
@@ -415,6 +419,18 @@ export interface CircuitView {
   readonly analyser: AnalyserView;
   readonly program: ProgramView;
   readonly found: FoundView;
+  readonly share: ShareView;
+}
+
+/**
+ * A link `share` made: the text after `#` that opens the document, or
+ * why there is none. `serial` counts requests, so the same link asked
+ * for twice is two answers; 0 is none.
+ */
+export interface ShareView {
+  readonly serial: number;
+  readonly fragment: string;
+  readonly error: string | null;
 }
 
 /** What `find` found: the query it answers, so a stale answer can be told from the latest, and the parts. */
@@ -463,6 +479,7 @@ export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {}, level: '', 
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
+export const NO_SHARE: ShareView = { serial: 0, fragment: '', error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [], history: null, past: null };
 
 export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
@@ -475,7 +492,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   clipboard: NO_CLIP,
   analyser: CLOSED_ANALYSER,
   program: NO_PROGRAM,
-  found: NOTHING_FOUND
+  found: NOTHING_FOUND,
+  share: NO_SHARE
 });
 
 /**

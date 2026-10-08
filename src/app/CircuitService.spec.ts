@@ -538,3 +538,25 @@ describe('looking back', () => {
     expect(h.status.history?.first).toBe(-1);
   });
 });
+
+describe('sharing by link', () => {
+  it('makes a link to the document, and opens one as an unsaved copy, saying so', async () => {
+    const h = new Harness();
+    const service = h.service;
+    let fragment = '';
+    let summary!: import('./CircuitContract').DocumentSummary;
+    service.shared.subscribe(s => (fragment = s.fragment));
+    service.document.subscribe(d => (summary = d));
+    service.load(counter());
+    await service.share();
+    expect(fragment.startsWith('c=')).toBe(true);
+
+    service.load(new CircuitBuilder().build());
+    await service.openShared(fragment);
+    expect(summary).toMatchObject({ dirty: true, name: null, components: counter().components.length });
+    expect(summary.message).toMatch(/^Opened a shared circuit/);
+
+    await service.openShared('c=not-a-link');
+    expect(summary.message).toMatch(/^Couldn't open the shared link: the link is damaged/);
+  }, 60_000);
+});

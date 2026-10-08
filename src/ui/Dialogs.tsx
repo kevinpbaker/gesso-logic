@@ -443,3 +443,61 @@ export function findDialog(
     />
   );
 }
+
+/**
+ * A link that opens the circuit, already copied: what it is, that
+ * nothing was uploaded, and a warning where it is long enough for a
+ * chat app to cut it.
+ */
+export function shareLink(open: Observable<boolean>, link: Observable<string>, copy: () => void, close: () => void): UiChild {
+  const WIDTH = 460;
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Share a link"
+      width={WIDTH}
+      content={
+        <column gap={10} width={inner(WIDTH)}>
+          <text
+            width={inner(WIDTH)}
+            text="The link is copied. Anyone who opens it gets their own copy of this circuit, with what you traced in the analyser. Nothing was uploaded: the circuit is in the link itself."
+            fontSize={12}
+            color="text"
+            textWrap="word"
+          />
+          <text
+            width={inner(WIDTH)}
+            text={link}
+            fontSize={11}
+            fontFamily="monospace"
+            color="textMuted"
+            textWrap="none"
+            textOverflow="ellipsis"
+            selectable
+          />
+          <text
+            width={inner(WIDTH)}
+            text={link.pipe(
+              map(l =>
+                l.length > LONG_LINK
+                  ? `It is ${l.length.toLocaleString('en')} characters long, and some chat and email apps cut links that long. If it does not open, save the circuit and send the file instead.`
+                  : `${l.length.toLocaleString('en')} characters.`
+              )
+            )}
+            fontSize={11}
+            color={link.pipe(map(l => (l.length > LONG_LINK ? 'danger' : 'textMuted')))}
+            textWrap="word"
+          />
+          <row gap={8} x="end" width={inner(WIDTH)}>
+            {action('Copy again', copy)}
+            {action('Done', close, 'accent')}
+          </row>
+        </column>
+      }
+    />
+  );
+}
+
+/** Past this many characters a link may be cut by a chat or email app. */
+const LONG_LINK = 8_000;

@@ -13,3 +13,16 @@ export const PROOF_PATH = '/proof';
 export function isProofPath(path: string): boolean {
   return path === PROOF_PATH || path === `${PROOF_PATH}/`;
 }
+
+/**
+ * Where `main.ts` leaves a shared link's circuit for the render worker:
+ * a folder of the origin's private storage, and the record in it. The
+ * worker's name is `link`, or `link+main`, while one is waiting.
+ */
+export const LINK_STORE = 'gessologic-link';
+export const INCOMING_LINK = 'incoming';
+
+/** Whether the render worker was started to open a shared link, from its name. */
+export function openingLink(workerName: string): boolean {
+  return workerName === 'link' || workerName.startsWith('link+');
+}
