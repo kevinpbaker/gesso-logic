@@ -1,4 +1,4 @@
-import { combineLatest, Subject, type Observable } from 'rxjs';
+import { BehaviorSubject, combineLatest, Subject, type Observable } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 
 import {
@@ -11,6 +11,7 @@ import {
   type UiTextChangeEvent,
   type UiWheelEvent
 } from 'gesso-core';
+import { Menu, type MenuItem } from 'gesso-components';
 import { internalState, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type AnalyserView } from '../app/CircuitContract';
@@ -36,7 +37,10 @@ import type { TraceWhere } from './CircuitCanvas';
  *   - a pin or wire Alt+clicked on the canvas, at any depth, is a row of
  *     its own: hovering its name says where it is, and its × takes it away;
  *   - hovering a row lights what it traces on the canvas, and a click on
- *     its name takes the canvas there.
+ *     its name takes the canvas there; dragging its name moves the row;
+ *   - right-clicking a row shows a bus in hex, decimal, signed or binary,
+ *     pauses the circuit when the row becomes its value at the cursor,
+ *     moves it, goes to it, or stops tracing it.
  *
  * One-bit rows are square waves. A bus is a staircase — its height is its
  * value — with the value in hex where a step is wide enough to read, so a
@@ -51,6 +55,24 @@ const HEADER = 30;
 const MIN_SPAN = 8;
 /** The × that takes a traced pin away: this wide, at the gutter's right. */
 const REMOVE = 16;
+
+/** How a bus's value is written: hex, decimal, two's complement, or bits. */
+export type Radix = 'hex' | 'dec' | 'signed' | 'bin';
+const RADIX_LABELS: Readonly<Record<Radix, string>> = { hex: 'hex', dec: 'decimal', signed: 'signed decimal', bin: 'binary' };
+
+/** A value `width` bits wide, written in a radix. */
+export function written(value: number, width: number, radix: Radix): string {
+  switch (radix) {
+    case 'dec':
+      return String(value);
+    case 'signed':
+      return String(value >= 2 ** (width - 1) ? value - 2 ** width : value);
+    case 'bin':
+      return value.toString(2).padStart(width, '0');
+    default:
+      return value.toString(16).toUpperCase();
+  }
+}
 
 export interface WaveformPanel {
   readonly element: unknown;
@@ -76,7 +98,27 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   const overRow = internalState<number | null>(null);
   const picked = new Subject<TraceWhere>();
   const triggerText = internalState('');
-  const view = circuit.view.analyser;
+  /** The rows' order, by trace id — a trace not in it goes after, as published — and how each bus is written. */
+  const order = internalState<readonly string[]>([]);
+  const radix = internalState<Readonly<Record<string, Radix>>>({});
+  /** The view as published, its traces in the rows' order: what is drawn, and what a row number means. */
+  const view = new BehaviorSubject<AnalyserView>(circuit.view.analyser.value);
+  ctx.effect(combineLatest([circuit.view.analyser, order]), ([v, ids]) => {
+    const rank = (id: string, i: number) => {
+      const at = ids.indexOf(id);
+      return at < 0 ? ids.length + i : at;
+    };
+    const ranked = v.traces.map((t, i) => ({ t, r: rank(t.id, i) })).sort((a, b) => a.r - b.r);
+    view.next({ ...v, traces: ranked.map(x => x.t) });
+  });
+  /** Moves a row to another place in the list. */
+  const moveRow = (from: number, to: number) => {
+    const ids = view.value.traces.map(t => t.id);
+    if (from < 0 || from >= ids.length || to < 0 || to >= ids.length || from === to) return;
+    const [id] = ids.splice(from, 1);
+    ids.splice(to, 0, id!);
+    order.value = ids;
+  };
   let columns = 0;
 
   // Asks for the window whenever what it shows, or how wide it is, moves.
@@ -101,16 +143,28 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   const xOf = (event: { x: number }) => event.x - waves.value.x;
   const rowOf = (event: { y: number }) => Math.floor((event.y - waves.value.y) / ROW);
 
-  let drag: { x: number; start: number; moved: boolean } | null = null;
+  // A press on the waves scrubs; on a row's name, drags the row.
+  let drag: { x: number; y: number; start: number; row: number; moved: boolean } | null = null;
   const pointerDown = (event: UiPointerEvent) => {
+    // A right press asks for the row's menu, and never reports its release.
+    if ((event.buttons & 1) === 0) return;
     const v = view.value;
-    drag = { x: xOf(event), start: firstShown(v), moved: false };
+    drag = { x: xOf(event), y: event.y, start: firstShown(v), row: xOf(event) < GUTTER ? rowOf(event) : -1, moved: false };
   };
   const pointerMove = (event: UiPointerEvent) => {
     const row = xOf(event) < GUTTER ? rowOf(event) : null;
     if (named.value !== row) named.value = row;
     if (overRow.value !== rowOf(event)) overRow.value = rowOf(event);
     if (drag === null) return;
+    if (drag.row >= 0) {
+      if (Math.abs(event.y - drag.y) >= 4) drag.moved = true;
+      const to = Math.max(0, Math.min(view.value.traces.length - 1, rowOf(event)));
+      if (drag.moved && to !== drag.row) {
+        moveRow(drag.row, to);
+        drag.row = to;
+      }
+      return;
+    }
     const dx = xOf(event) - drag.x;
     if (Math.abs(dx) >= 3) drag.moved = true;
     if (drag.moved) start.value = Math.round(drag.start - dx * cyclesPerPixel());
@@ -159,8 +213,71 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     circuit.send.setTrigger(trace.id, value);
   };
 
-  const paint = combineLatest([view, cursor, named]).pipe(
-    map(([v, c, row]): UiPaint => ({ draw: (surface, box) => drawWaves(surface, box, v, c, row), inputs: [v, c, row] }))
+  // A row's menu: right-click.
+  const menuOpen = internalState(false);
+  const menuAt = internalState({ x: 0, y: 0 });
+  const menuItems = internalState<readonly MenuItem[]>([]);
+  let menuRow = -1;
+  /** A row's value at the cursor's column, or null where there is none or it changed within the column. */
+  const valueAtCursor = (v: AnalyserView, row: number): number | null => {
+    const trace = v.traces[row];
+    if (trace === undefined || cursor.value === null) return null;
+    const i = Math.floor((cursor.value - v.start) / v.step);
+    const entries = trace.width === 1 ? [...(v.data[trace.id] ?? '')] : (v.data[trace.id] ?? '').split(',');
+    const entry = entries[i];
+    return entry === undefined || entry === '.' || entry === '*' || entry === '' ? null : Number.parseInt(entry, 16);
+  };
+  const contextMenu = (event: UiPointerEvent) => {
+    const v = view.value;
+    const row = rowOf(event);
+    const trace = v.traces[row];
+    if (trace === undefined) return;
+    menuRow = row;
+    const shownAs = radix.value[trace.id] ?? 'hex';
+    const at = valueAtCursor(v, row);
+    const items: MenuItem[] = [];
+    if (trace.width > 1) {
+      for (const r of ['hex', 'dec', 'signed', 'bin'] as const) items.push({ value: `radix:${r}`, label: `${r === shownAs ? '✓ ' : ''}Show in ${RADIX_LABELS[r]}` });
+    }
+    items.push({
+      value: 'trigger',
+      label: at === null ? 'Pause when it becomes… (place the cursor first)' : `Pause when it becomes ${written(at, trace.width, shownAs)}`,
+      disabled: at === null
+    });
+    if (v.trigger !== null) items.push({ value: 'untrigger', label: 'Stop pausing on the trigger' });
+    items.push({ value: 'up', label: 'Move up', disabled: row === 0 });
+    items.push({ value: 'down', label: 'Move down', disabled: row === v.traces.length - 1 });
+    items.push({ value: 'goto', label: 'Go to it on the canvas' });
+    if (trace.watched) items.push({ value: 'remove', label: 'Stop tracing it' });
+    menuItems.value = items;
+    menuAt.value = { x: event.x, y: event.y };
+    menuOpen.value = true;
+  };
+  const chooseFromMenu = (choice: string) => {
+    const v = view.value;
+    const trace = v.traces[menuRow];
+    if (trace === undefined) return;
+    if (choice.startsWith('radix:')) {
+      radix.value = { ...radix.value, [trace.id]: choice.slice(6) as Radix };
+    } else if (choice === 'trigger') {
+      const at = valueAtCursor(v, menuRow);
+      if (at === null) return;
+      circuit.send.setTrigger(trace.id, at);
+      triggerText.value = `${trace.name} = ${trace.width > 1 ? `0x${at.toString(16).toUpperCase()}` : at}`;
+    } else if (choice === 'untrigger') {
+      circuit.send.setTrigger(null, 0);
+      triggerText.value = '';
+    } else if (choice === 'up' || choice === 'down') {
+      moveRow(menuRow, menuRow + (choice === 'up' ? -1 : 1));
+    } else if (choice === 'goto') {
+      picked.next({ path: trace.path, pin: trace.pin });
+    } else if (choice === 'remove') {
+      circuit.send.unwatch(trace.id);
+    }
+  };
+
+  const paint = combineLatest([view, cursor, named, radix]).pipe(
+    map(([v, c, row, r]): UiPaint => ({ draw: (surface, box) => drawWaves(surface, box, v, c, row, r), inputs: [v, c, row, r] }))
   );
   const height = view.pipe(map(v => HEADER + Math.max(1, v.traces.length) * ROW + 8));
   const range = view.pipe(
@@ -244,6 +361,7 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
+        onContextMenu={contextMenu}
         onPointerLeave={() => {
           named.value = null;
           overRow.value = null;
@@ -252,6 +370,14 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
         overscrollBehavior="contain">
         <paint width={percent(100)} height={percent(100)} paint={paint} />
       </box>
+      <Menu
+        open={menuOpen}
+        at={menuAt}
+        label="Analyser row"
+        items={menuItems}
+        onSelect={chooseFromMenu}
+        onOpenChange={(isOpen: boolean) => (menuOpen.value = isOpen)}
+      />
     </column>
   );
 
@@ -281,7 +407,14 @@ function fit(name: string, chars: number, front: boolean): string {
  * each row's value at it; a traced pin's row has a × to take it away,
  * and the row whose name is hovered says where its pin is.
  */
-function drawWaves(surface: PaintSurface, box: PaintBox, v: AnalyserView, cursor: number | null, named: number | null): void {
+function drawWaves(
+  surface: PaintSurface,
+  box: PaintBox,
+  v: AnalyserView,
+  cursor: number | null,
+  named: number | null,
+  radix: Readonly<Record<string, Radix>>
+): void {
   const width = box.width - GUTTER;
   if (width <= 0 || v.count === 0) {
     surface.fillColor('textMuted');
@@ -339,8 +472,9 @@ function drawWaves(surface: PaintSurface, box: PaintBox, v: AnalyserView, cursor
         if (i < entries.length && entries[i] === entries[runStart]) continue;
         const entry = entries[runStart]!;
         const runWidth = (i - runStart) * column;
-        if (entry !== '*' && entry !== '.' && runWidth >= 8 * entry.length + 6) {
-          surface.text(entry, at(runStart) + 3, top + 11, { fontSize: 10, fontFamily: 'monospace' });
+        const text = entry === '*' || entry === '.' || entry === '' ? '' : written(Number.parseInt(entry, 16), trace.width, radix[trace.id] ?? 'hex');
+        if (text !== '' && runWidth >= 6.5 * text.length + 6) {
+          surface.text(text, at(runStart) + 3, top + 11, { fontSize: 10, fontFamily: 'monospace' });
         }
         runStart = i;
       }
@@ -371,7 +505,9 @@ function drawWaves(surface: PaintSurface, box: PaintBox, v: AnalyserView, cursor
       v.traces.forEach((trace, row) => {
         const entries = trace.width === 1 ? [...(v.data[trace.id] ?? '')] : (v.data[trace.id] ?? '').split(',');
         const entry = entries[i] ?? '.';
-        const text = entry === '.' ? '' : entry === '*' ? '~' : trace.width === 1 ? entry : `0x${entry}`;
+        const shownAs = radix[trace.id] ?? 'hex';
+        const text =
+          entry === '.' ? '' : entry === '*' ? '~' : trace.width === 1 ? entry : shownAs === 'hex' ? `0x${entry}` : written(Number.parseInt(entry, 16), trace.width, shownAs);
         surface.text(text, 6, row * ROW + 26, { fontSize: 10, fontFamily: 'monospace' });
       });
     }
