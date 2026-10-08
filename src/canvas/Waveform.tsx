@@ -280,11 +280,11 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     map(([v, c, row, r]): UiPaint => ({ draw: (surface, box) => drawWaves(surface, box, v, c, row, r), inputs: [v, c, row, r] }))
   );
   const height = view.pipe(map(v => HEADER + Math.max(1, v.traces.length) * ROW + 8));
-  const range = view.pipe(
-    map(v =>
+  const range = combineLatest([view, cursor]).pipe(
+    map(([v, c]) =>
       v.last < v.first
         ? 'nothing recorded yet: run or step the circuit'
-        : `cycles ${v.start.toLocaleString('en')}–${(v.start + v.step * v.count - 1).toLocaleString('en')} of ${v.first.toLocaleString('en')}–${v.last.toLocaleString('en')}${v.step > 1 ? ` · ${v.step} a pixel` : ''}`
+        : `${c === null ? '' : `cursor at cycle ${c.toLocaleString('en')} · `}cycles ${v.start.toLocaleString('en')}–${(v.start + v.step * v.count - 1).toLocaleString('en')} of ${v.first.toLocaleString('en')}–${v.last.toLocaleString('en')}${v.step > 1 ? ` · ${v.step} a pixel` : ''}`
     )
   );
 
@@ -489,7 +489,10 @@ function drawWaves(
     surface.stroke();
   });
 
-  // The cursor, and each row's value at it.
+  // The cursor, and each row's value at it: a pill beside the line in
+  // the row, right of it or, near the right edge, left of it. Beside the
+  // line rather than under the row's name, which a value written there
+  // ran into, and where the eye already is. Its cycle is in the header.
   if (cursor !== null) {
     const i = Math.floor((cursor - v.start) / v.step);
     if (i >= 0 && i < v.count) {
@@ -500,15 +503,27 @@ function drawWaves(
       surface.strokeColor('text');
       surface.lineWidth(1);
       surface.stroke();
-      surface.fillColor('text');
-      surface.text(`cycle ${cursor.toLocaleString('en')}`, x + 4, box.height - 4, { fontSize: 10 });
+      const pill = (text: string, middle: number, size: number) => {
+        // Monospace runs near 0.61 of its size a character.
+        const width = text.length * size * 0.61 + 8;
+        const left = x + 5 + width > box.width ? x - 5 - width : x + 5;
+        surface.beginPath();
+        surface.roundRect(left, middle - size / 2 - 2, width, size + 4, 3);
+        surface.fillColor('surface');
+        surface.fill();
+        surface.strokeColor('border');
+        surface.lineWidth(1);
+        surface.stroke();
+        surface.fillColor('text');
+        surface.text(text, left + 4, middle + size * 0.36, { fontSize: size, fontFamily: 'monospace' });
+      };
       v.traces.forEach((trace, row) => {
         const entries = trace.width === 1 ? [...(v.data[trace.id] ?? '')] : (v.data[trace.id] ?? '').split(',');
         const entry = entries[i] ?? '.';
         const shownAs = radix[trace.id] ?? 'hex';
         const text =
           entry === '.' ? '' : entry === '*' ? '~' : trace.width === 1 ? entry : shownAs === 'hex' ? `0x${entry}` : written(Number.parseInt(entry, 16), trace.width, shownAs);
-        surface.text(text, 6, row * ROW + 26, { fontSize: 10, fontFamily: 'monospace' });
+        if (text !== '') pill(text, row * ROW + 14, 10);
       });
     }
   }
