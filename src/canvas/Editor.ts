@@ -48,6 +48,7 @@ export interface EditorDeps {
     | 'openProgram'
     | 'copy'
     | 'duplicate'
+    | 'watch'
   >;
   /** A chip definition's body, by name, for placing one from the palette; undefined for a name the document lacks. */
   chipShape(name: string): KindLayout | undefined;
@@ -62,7 +63,12 @@ export interface EditorDeps {
   pinNote?(chip: string, pin: string): string | null;
   /** The canvas's size in screen pixels, so a tooltip near an edge can open away from it. */
   viewSize?(): { readonly width: number; readonly height: number };
+  /** Something was just sent to the analyser to trace: the page opens it. */
+  traced?(): void;
 }
+
+/** What Alt is called on the keyboard in hand: Option, on a Mac. */
+const ALT = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌥' : 'Alt';
 
 /**
  * What the pointer is over, in words: a pin's name, what part it is on
@@ -217,11 +223,11 @@ export class Editor {
       const what = ends === null ? '' : `: ${this.pinTitle(ends.from)} → ${this.pinTitle(ends.to)}`;
       return `Wire ${cycle.at + 1} of ${cycle.ids.length} here${what} · click again or Tab for the next · Del deletes it`;
     }
-    if (ids.length === 0 && this.selection.size > 0) return 'Wire selected · Del deletes it';
+    if (ids.length === 0 && this.selection.size > 0) return 'Wire selected · Shift+W traces it · Del deletes it';
     if (ids.length === 0) {
       return scene.componentCount === 0
         ? 'Pick a part on the left, or press its key · Drag from a pin to wire · ? shows every shortcut'
-        : 'Drag from a pin to wire · Drag empty space to select · Space+drag or right-drag pans · Ctrl+wheel zooms · ? for shortcuts';
+        : `Drag from a pin to wire · ${ALT}+click a pin or wire to trace it · Drag empty space to select · Space+drag or right-drag pans · Ctrl+wheel zooms · ? for shortcuts`;
     }
     if (ids.length === 1) {
       const c = scene.indexOf.get(ids[0]!);
@@ -237,7 +243,7 @@ export class Editor {
   // Pointer
   // -------------------------------------------------------------------------
 
-  pointerDown(screen: Point, buttons: number, shift: boolean): void {
+  pointerDown(screen: Point, buttons: number, shift: boolean, alt = false): void {
     this.pointer = this.deps.toWorld(screen);
     if ((buttons & 6) !== 0 || this.spaceHeld) {
       this.mode = { kind: 'panning', last: screen };
@@ -257,6 +263,12 @@ export class Editor {
     // a touch, or a pointer that jumps, would leave the tooltip of
     // wherever it was last drawn at the press.
     this.hover = hit;
+    // Alt and a pin or a wire: trace it in the analyser, and nothing else.
+    if (alt && (hit.kind === 'pin' || hit.kind === 'wire')) {
+      const pin = hit.kind === 'pin' ? hit.pin : this.driverOf(hit.id);
+      if (pin !== null) this.trace([pin]);
+      return;
+    }
     // A selected push button is held down for as long as the press lasts.
     const scene = this.deps.scene();
     const c = hit.kind === 'component' ? scene.indexOf.get(hit.id) : undefined;
@@ -488,6 +500,38 @@ export class Editor {
     this.wireCycle = null;
     this.lastClick = null;
     this.deps.changed();
+  }
+
+  /**
+   * Traces the selection in the analyser: each wire selected, by the pin
+   * that drives it, and every output of each part selected. Nothing
+   * selected traces nothing.
+   */
+  traceSelection(): void {
+    const scene = this.deps.scene();
+    const pins: PinRef[] = [];
+    for (const id of this.selection) {
+      const c = scene.indexOf.get(id);
+      if (c === undefined) {
+        const pin = this.driverOf(id);
+        if (pin !== null) pins.push(pin);
+        continue;
+      }
+      for (const { pin } of scene.pins(c)) if (scene.drives(c, pin)) pins.push({ component: id, pin });
+    }
+    if (pins.length > 0) this.trace(pins);
+  }
+
+  private trace(pins: readonly PinRef[]): void {
+    this.deps.send.watch(pins);
+    this.deps.traced?.();
+  }
+
+  /** The pin driving a wire, by the wire's id: the end it is drawn from. */
+  private driverOf(wire: string): PinRef | null {
+    const scene = this.deps.scene();
+    const w = scene.wireIds.indexOf(wire);
+    return w < 0 ? null : scene.wireEnds[w]!.from;
   }
 
   /** Stops whatever is under way and lets go of the selection. */
@@ -792,6 +836,7 @@ export class Editor {
     if (card.about !== null) lines.push({ text: card.about, size: 11, weight: 400, mono: false, color: 'textMuted', em: 0.56 });
     if (card.note !== null) for (const text of wrap(card.note, NOTE_CHARS)) lines.push({ text, size: 12, weight: 400, mono: false, color: 'text', em: 0.56 });
     lines.push({ text: card.value, size: 13, weight: 600, mono: true, color: 'text', em: 0.62 });
+    lines.push({ text: `${ALT}+click to trace in the analyser`, size: 10, weight: 400, mono: false, color: 'textMuted', em: 0.55 });
     const lineHeight = (size: number) => size + 5;
     const width = Math.max(...lines.map(l => l.text.length * l.em * l.size)) + PAD * 2;
     const height = lines.reduce((h, l) => h + lineHeight(l.size), 0) + PAD * 2 - 4;

@@ -56,6 +56,7 @@ export type CommandId =
   | 'upLevel'
   | 'topLevel'
   | 'analyser'
+  | 'trace'
   | 'truthTable'
   | 'runPause'
   | 'step'
@@ -109,6 +110,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   upLevel: { label: 'Up one level', keys: 'U', group: 'View' },
   topLevel: { label: 'Back to the top', group: 'View' },
   analyser: { label: 'Logic analyser', keys: 'W', group: 'View' },
+  trace: { label: 'Trace the selection in the analyser', keys: 'Shift+W', group: 'View' },
   truthTable: { label: 'Truth table of the selection', keys: 'T', group: 'View' },
   runPause: { label: 'Run', keys: `${MOD}+Enter`, group: 'Simulate' },
   step: { label: 'Step one clock cycle', keys: '.', group: 'Simulate' },
@@ -194,7 +196,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'View',
     mnemonic: 'v',
-    entries: ['fit', 'zoomIn', 'zoomOut', MENU_SEPARATOR, 'openChip', 'upLevel', 'topLevel', MENU_SEPARATOR, 'analyser', 'truthTable', MENU_SEPARATOR, 'theme']
+    entries: ['fit', 'zoomIn', 'zoomOut', MENU_SEPARATOR, 'openChip', 'upLevel', 'topLevel', MENU_SEPARATOR, 'analyser', 'trace', 'truthTable', MENU_SEPARATOR, 'theme']
   },
   {
     label: 'Simulate',

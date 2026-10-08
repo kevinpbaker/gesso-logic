@@ -217,7 +217,18 @@ export interface ClipRequest {
  */
 export interface AnalyserView {
   readonly open: boolean;
-  readonly traces: readonly { readonly id: string; readonly name: string; readonly width: number }[];
+  /**
+   * Probes and LEDs on the top level, then the pins and wires traced from
+   * the canvas at any depth: those are `watched`, can be taken away, and
+   * have a `title` saying where they are, `cpu › datapath › alu.Y`.
+   */
+  readonly traces: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly width: number;
+    readonly watched: boolean;
+    readonly title: string;
+  }[];
   /** The oldest cycle held and the newest; `last` is `first - 1` when none is. */
   readonly first: number;
   readonly last: number;
@@ -344,6 +355,14 @@ export interface CircuitCommands {
   setAnalyserView(start: number | null, span: number, columns: number): void;
   /** Pauses the circuit on the cycle `trace` becomes `value`; a null trace disarms it. */
   setTrigger(trace: string | null, value: number): void;
+  /**
+   * Traces these pins of the level on the canvas in the analyser, at
+   * whatever depth it is, without changing the circuit. A pin already
+   * traced this way, or on the same nets as one, is left as it is.
+   */
+  watch(pins: readonly PinRef[]): void;
+  /** Stops tracing a pin traced with `watch`, by its trace's id. */
+  unwatch(id: string): void;
   /** Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`. */
   copy(ids: readonly string[]): void;
   /** Copies these parts in place, moved by (dx, dy), under the new ids `rename` gives, by old id, for parts and the wires between them. */

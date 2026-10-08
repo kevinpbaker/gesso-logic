@@ -31,7 +31,9 @@ import { Circuit, type AnalyserView } from '../app/CircuitContract';
  *   - a click places the cursor, and each row says its value there;
  *   - Live goes back to following the newest cycle;
  *   - the trigger field, `name = value`, pauses the circuit on the cycle
- *     that becomes true.
+ *     that becomes true;
+ *   - a pin or wire Alt+clicked on the canvas, at any depth, is a row of
+ *     its own: hovering its name says where it is, and its × takes it away.
  *
  * One-bit rows are square waves. A bus is a staircase — its height is its
  * value — with the value in hex where a step is wide enough to read, so a
@@ -44,6 +46,8 @@ const ROW = 30;
 const GUTTER = 96;
 const HEADER = 30;
 const MIN_SPAN = 8;
+/** The × that takes a traced pin away: this wide, at the gutter's right. */
+const REMOVE = 16;
 
 export interface WaveformPanel {
   readonly element: unknown;
@@ -60,6 +64,8 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   const span = internalState(256);
   const start = internalState<number | null>(null);
   const cursor = internalState<number | null>(null);
+  /** The row whose name the pointer is over, to say where its pin is. */
+  const named = internalState<number | null>(null);
   const triggerText = internalState('');
   const view = circuit.view.analyser;
   let columns = 0;
@@ -84,6 +90,7 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   /** The wave area's box: pointer positions are the page's, and the panel is not at its left edge. */
   const waves = ctx.bounds('waves');
   const xOf = (event: { x: number }) => event.x - waves.value.x;
+  const rowOf = (event: { y: number }) => Math.floor((event.y - waves.value.y) / ROW);
 
   let drag: { x: number; start: number; moved: boolean } | null = null;
   const pointerDown = (event: UiPointerEvent) => {
@@ -91,13 +98,19 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     drag = { x: xOf(event), start: firstShown(v), moved: false };
   };
   const pointerMove = (event: UiPointerEvent) => {
+    const row = xOf(event) < GUTTER ? rowOf(event) : null;
+    if (named.value !== row) named.value = row;
     if (drag === null) return;
     const dx = xOf(event) - drag.x;
     if (Math.abs(dx) >= 3) drag.moved = true;
     if (drag.moved) start.value = Math.round(drag.start - dx * cyclesPerPixel());
   };
   const pointerUp = (event: UiPointerEvent) => {
-    if (drag !== null && !drag.moved && xOf(event) >= GUTTER) cursor.value = cycleAt(xOf(event), view.value);
+    const x = xOf(event);
+    if (drag !== null && !drag.moved && x >= GUTTER) cursor.value = cycleAt(x, view.value);
+    // A traced pin's ×.
+    const trace = view.value.traces[rowOf(event)];
+    if (drag !== null && !drag.moved && x >= GUTTER - REMOVE && x < GUTTER && trace?.watched === true) circuit.send.unwatch(trace.id);
     drag = null;
   };
   const wheel = (event: UiWheelEvent) => {
@@ -133,8 +146,8 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     circuit.send.setTrigger(trace.id, value);
   };
 
-  const paint = combineLatest([view, cursor]).pipe(
-    map(([v, c]): UiPaint => ({ draw: (surface, box) => drawWaves(surface, box, v, c), inputs: [v, c] }))
+  const paint = combineLatest([view, cursor, named]).pipe(
+    map(([v, c, row]): UiPaint => ({ draw: (surface, box) => drawWaves(surface, box, v, c, row), inputs: [v, c, row] }))
   );
   const height = view.pipe(map(v => HEADER + Math.max(1, v.traces.length) * ROW + 8));
   const range = view.pipe(
@@ -218,6 +231,7 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
+        onPointerLeave={() => (named.value = null)}
         onWheel={wheel}
         overscrollBehavior="contain">
         <paint width={percent(100)} height={percent(100)} paint={paint} />
@@ -228,12 +242,26 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   return { element, open, height, toggle: () => (open.value = !open.value) };
 }
 
-/** The waves: names in the gutter, a row a trace, and the cursor with each row's value at it. */
-function drawWaves(surface: PaintSurface, box: PaintBox, v: AnalyserView, cursor: number | null): void {
+/**
+ * A name cut to `chars`, with an ellipsis where it was cut: at the
+ * front for a traced pin, whose name ends in the pin — `…path.ADDR` —
+ * and at the end for a probe's or LED's label.
+ */
+function fit(name: string, chars: number, front: boolean): string {
+  if (name.length <= chars) return name;
+  return front ? `…${name.slice(name.length - chars + 1)}` : `${name.slice(0, chars - 1)}…`;
+}
+
+/**
+ * The waves: names in the gutter, a row a trace, and the cursor with
+ * each row's value at it; a traced pin's row has a × to take it away,
+ * and the row whose name is hovered says where its pin is.
+ */
+function drawWaves(surface: PaintSurface, box: PaintBox, v: AnalyserView, cursor: number | null, named: number | null): void {
   const width = box.width - GUTTER;
   if (width <= 0 || v.count === 0) {
     surface.fillColor('textMuted');
-    surface.text(v.traces.length === 0 ? 'Nothing to trace: add a probe or an LED.' : '', 8, 18, { fontSize: 12 });
+    surface.text(v.traces.length === 0 ? 'Nothing to trace: add a probe or an LED, or Alt+click a pin or wire.' : '', 8, 18, { fontSize: 12 });
     return;
   }
   const column = width / v.count;
@@ -243,7 +271,12 @@ function drawWaves(surface: PaintSurface, box: PaintBox, v: AnalyserView, cursor
     const top = row * ROW + 4;
     const bottom = top + ROW - 10;
     surface.fillColor('text');
-    surface.text(trace.name, 6, top + 15, { fontSize: 11, fontWeight: 600 });
+    // 11px bold runs near 6.6 pixels a character.
+    surface.text(fit(trace.name, Math.floor((GUTTER - 10 - (trace.watched ? REMOVE : 0)) / 6.6), trace.watched), 6, top + 15, { fontSize: 11, fontWeight: 600 });
+    if (trace.watched) {
+      surface.fillColor('textMuted');
+      surface.text('×', GUTTER - REMOVE / 2 - 2, top + 15, { fontSize: 13, align: 'center' });
+    }
     const entries = trace.width === 1 ? [...(v.data[trace.id] ?? '')] : (v.data[trace.id] ?? '').split(',');
     const max = 2 ** trace.width - 1;
 
@@ -318,5 +351,23 @@ function drawWaves(surface: PaintSurface, box: PaintBox, v: AnalyserView, cursor
         surface.text(text, 6, row * ROW + 26, { fontSize: 10, fontFamily: 'monospace' });
       });
     }
+  }
+
+  // Where the hovered row's pin is, over the start of its waves.
+  const hovered = named === null ? undefined : v.traces[named];
+  // Shown for a traced pin, and for a name the gutter had to cut.
+  if (hovered !== undefined && (hovered.title !== hovered.name || hovered.name.length > Math.floor((GUTTER - 10) / 6.6))) {
+    const text = hovered.title;
+    const top = named! * ROW + 4;
+    const pill = text.length * 6.2 + 12;
+    surface.beginPath();
+    surface.roundRect(GUTTER + 4, top + 1, pill, 18, 4);
+    surface.fillColor('surface');
+    surface.fill();
+    surface.strokeColor('border');
+    surface.lineWidth(1);
+    surface.stroke();
+    surface.fillColor('text');
+    surface.text(text, GUTTER + 10, top + 14, { fontSize: 11 });
   }
 }

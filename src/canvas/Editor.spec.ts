@@ -65,7 +65,8 @@ function setup(button = 'push', wire?: (b: CircuitBuilder) => void, deps: Partia
       openChip: record('openChip'),
       openProgram: record('openProgram'),
       copy: record('copy'),
-      duplicate: record('duplicate')
+      duplicate: record('duplicate'),
+      watch: record('watch')
     },
     chipShape: () => undefined,
     panBy: record('panBy'),
@@ -368,6 +369,44 @@ describe('another level', () => {
     editor.pointerUp(at(14, 2));
     editor.keyDown('Delete', false, false);
     expect(sent.filter(([name]) => name === 'connect' || name === 'remove')).toEqual([]);
+  });
+});
+
+describe('tracing in the analyser', () => {
+  it('traces a pin alt-clicked, and a wire by the pin driving it, selecting nothing', () => {
+    let traced = 0;
+    const { editor, sent, at } = setup(
+      'push',
+      b => b.connect({ component: 'g', pin: 'out' }, { component: 'led', pin: 'in' }),
+      { traced: () => traced++ }
+    );
+    editor.pointerDown(at(6, 3), 1, false, true);
+    editor.pointerUp(at(6, 3));
+    // The wire from the gate to the LED, alt-clicked partway along.
+    editor.pointerDown(at(12, 2), 1, false, true);
+    editor.pointerUp(at(12, 2));
+    expect(sent).toEqual([
+      ['watch', [{ component: 'g', pin: 'b' }]],
+      ['watch', [{ component: 'g', pin: 'out' }]]
+    ]);
+    expect(traced).toBe(2);
+    expect(editor.selection.size).toBe(0);
+  });
+
+  it('traces a part alt-clicked on its body not at all: it is a click', () => {
+    const { editor, sent, at } = setup();
+    editor.pointerDown(at(7, 2), 1, false, true);
+    editor.pointerUp(at(7, 2));
+    expect(sent.filter(([name]) => name === 'watch')).toEqual([]);
+    expect([...editor.selection]).toEqual(['g']);
+  });
+
+  it('traces the selection: every output of a part, and a wire by its driver', () => {
+    const { editor, sent, at } = setup('push', b => b.connect({ component: 'a', pin: 'out' }, { component: 'g', pin: 'a' }));
+    editor.pointerDown(at(7, 2), 1, false);
+    editor.pointerUp(at(7, 2));
+    editor.traceSelection();
+    expect(sent.at(-1)).toEqual(['watch', [{ component: 'g', pin: 'out' }]]);
   });
 });
 

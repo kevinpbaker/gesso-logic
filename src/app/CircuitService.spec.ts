@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CircuitBuilder } from '../sim/CircuitBuilder';
 import { dFlipFlop } from '../sim/Parts';
-import type { Signals, Status } from './CircuitContract';
+import type { AnalyserView, Signals, Status } from './CircuitContract';
 import { CircuitService, type Schedule } from './CircuitService';
 import { signalOf } from './SignalPacking';
 import { entryOf } from './CircuitContract';
@@ -336,5 +336,60 @@ describe('pin notes', () => {
     expect(note).toBe('The bit to keep');
     service.setNote('d', '');
     expect(note).toBeNull();
+  });
+});
+
+describe('pins traced from the canvas', () => {
+  /** A switch into an inverter chip into an LED: the inverter's gate is `n`, inside instance `c`. */
+  function inverter() {
+    const inside = new CircuitBuilder();
+    inside.output('y', inside.not(inside.input('a'), 'n'));
+    const b = new CircuitBuilder();
+    const c = b.chip('inv', 'inverter');
+    b.connect(b.input('x'), { component: c, pin: 'a' });
+    b.output('led', { component: c, pin: 'y' });
+    return { ...b.build(), chips: { inverter: inside.build() } };
+  }
+
+  it('traces a pin at any depth, live, once, through a change of level, until it is taken away', () => {
+    const service = new Harness().service;
+    let view!: AnalyserView;
+    service.analyserView.subscribe(v => (view = v));
+    service.load(inverter());
+    service.setAnalyserView(null, 4, 100);
+    service.openChip('inv');
+    service.watch([{ component: 'n', pin: 'out' }]);
+    const traced = view.traces.find(t => t.watched)!;
+    expect(traced).toMatchObject({ name: 'n.out', title: 'inv › n.out', width: 1 });
+
+    // The inverter's output: the opposite of the switch, a cycle a column.
+    service.setInput('x', 0);
+    service.step();
+    service.setInput('x', 1);
+    service.step();
+    expect(view.data[traced.id]!.slice(-2)).toBe('10');
+
+    // Again, or the LED inside on the same net: still one trace.
+    service.watch([{ component: 'n', pin: 'out' }, { component: 'y', pin: 'in' }]);
+    expect(view.traces.filter(t => t.watched)).toHaveLength(1);
+
+    // Back at the top, it is traced still; taken away, it is gone.
+    service.closeChip(0);
+    service.step();
+    expect(view.traces.map(t => t.id)).toContain(traced.id);
+    service.unwatch(traced.id);
+    expect(view.traces.some(t => t.watched)).toBe(false);
+  });
+
+  it('forgets what was traced when another document is opened', () => {
+    const service = new Harness().service;
+    let view!: AnalyserView;
+    service.analyserView.subscribe(v => (view = v));
+    service.load(inverter());
+    service.setAnalyserView(null, 4, 100);
+    service.watch([{ component: 'x', pin: 'out' }]);
+    expect(view.traces.filter(t => t.watched).map(t => t.name)).toEqual(['x.out']);
+    service.load(inverter());
+    expect(view.traces.some(t => t.watched)).toBe(false);
   });
 });

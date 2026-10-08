@@ -199,6 +199,14 @@ export class CircuitService {
   private handle: number | null = null;
   /** The chip instances opened from the top, each on the level before; empty at the top. */
   private readonly path: string[] = [];
+  /**
+   * Pins traced from the canvas: the level each is on, as the path that
+   * opens it, and the pin there. Found again after every compile, so a
+   * trace follows its pin through edits, and lapses while an edit or an
+   * undo has taken it away.
+   */
+  private watches: { readonly id: string; readonly path: readonly string[]; readonly pin: PinRef }[] = [];
+  private watchCount = 0;
   /** Last published geometry, for `geometryNow` to patch: what it was built from, and indexes into that. */
   private geometryCache: {
     level: string;
@@ -280,6 +288,7 @@ export class CircuitService {
     } = { name: null, handle: null }
   ): void {
     this.opened++;
+    this.watches = [];
     this.originals = { ...circuit.chips, ...file.originals };
     this.changedCache = new WeakMap();
     this.path.length = 0;
@@ -1106,6 +1115,66 @@ export class CircuitService {
     if (this.analyserAsk.columns > 0) this.analyserSubject.next(this.analyserNow());
   }
 
+  watch(pins: readonly PinRef[]): void {
+    // Against the other pins traced, not the probes and LEDs: a pin asked
+    // for is shown, under its own name, though an LED is on its net.
+    const traced = new Set(this.analyser.traced.filter(t => t.watched === true).map(t => t.nets.join(',')));
+    let added = false;
+    for (const pin of pins) {
+      const watch = { id: `watch:${++this.watchCount}`, path: [...this.path], pin: { component: pin.component, pin: pin.pin } };
+      const found = this.resolveWatch(watch);
+      if (found === null || traced.has(found.nets.join(','))) continue;
+      traced.add(found.nets.join(','));
+      this.watches.push(watch);
+      added = true;
+    }
+    if (!added) return;
+    this.traceNow();
+    if (this.analyserAsk.columns > 0) this.analyserSubject.next(this.analyserNow());
+  }
+
+  unwatch(id: string): void {
+    const before = this.watches.length;
+    this.watches = this.watches.filter(w => w.id !== id);
+    if (this.watches.length === before) return;
+    this.traceNow();
+    if (this.analyserAsk.columns > 0) this.analyserSubject.next(this.analyserNow());
+  }
+
+  /**
+   * A watched pin's nets, width and names, or null while the path to it
+   * or the pin itself is not in the document, or nothing compiles.
+   */
+  private resolveWatch(watch: { readonly path: readonly string[]; readonly pin: PinRef }): {
+    nets: number[];
+    width: number;
+    name: string;
+    parent: string;
+    title: string;
+  } | null {
+    const netlist = this.netlist;
+    if (netlist === null) return null;
+    let circuit = this.circuit;
+    let prefix = '';
+    const chips: string[] = [];
+    for (const id of watch.path) {
+      const chip = circuit.components.find(c => c.id === id && c.kind === 'chip');
+      const definition = chip?.chip === undefined ? undefined : this.circuit.chips?.[chip.chip];
+      if (definition === undefined) return null;
+      chips.push(chip!.label ?? id);
+      circuit = definition;
+      prefix += `${id}/`;
+    }
+    const part = circuit.components.find(c => c.id === watch.pin.component);
+    if (part === undefined) return null;
+    const spec = pinsOf(part, this.circuit.chips);
+    if (!spec.inputs.includes(watch.pin.pin) && !spec.outputs.includes(watch.pin.pin)) return null;
+    const width = widthOf(spec, watch.pin.pin);
+    const nets = bitPins(watch.pin.pin, width).map(bit => netlist.netOfPin(prefix + part.id, bit) ?? -1);
+    const name = `${part.label ?? part.id}.${watch.pin.pin}`;
+    return { nets, width, name, parent: chips.at(-1) ?? 'top', title: [...chips, name].join(' › ') };
+  }
+
   private analyserNow(): AnalyserView {
     const { start, span, columns } = this.analyserAsk;
     // A window scrubbed back past the oldest cycle held slides forward
@@ -1114,7 +1183,7 @@ export class CircuitService {
     const window = this.analyser.window(from, span, columns);
     return {
       open: true,
-      traces: this.analyser.traced.map(({ id, name, width }) => ({ id, name, width })),
+      traces: this.analyser.traced.map(({ id, name, width, watched, title }) => ({ id, name, width, watched: watched === true, title: title ?? name })),
       first: this.analyser.first,
       last: this.analyser.last,
       following: start === null,
@@ -1125,7 +1194,9 @@ export class CircuitService {
 
   /**
    * What the analyser traces: every probe and LED on the top level, by
-   * label, top to bottom as drawn; a wide one a bus.
+   * label, top to bottom as drawn, a wide one a bus; then every pin
+   * watched from the canvas that is still there, in the order watched,
+   * named `part.pin` — or `chip/part.pin` where two would share a name.
    */
   private traceNow(): void {
     const netlist = this.netlist;
@@ -1145,7 +1216,23 @@ export class CircuitService {
           nets: bitPins('in', width).map(bit => netlist.netOfPin(c.id, bit) ?? -1)
         };
       });
-    this.analyser.configure(traces);
+    const watched = this.watches.flatMap(w => {
+      const found = this.resolveWatch(w);
+      return found === null ? [] : [{ id: w.id, ...found }];
+    });
+    const names = new Map<string, number>();
+    for (const n of [...traces.map(t => t.name), ...watched.map(w => w.name)]) names.set(n, (names.get(n) ?? 0) + 1);
+    this.analyser.configure([
+      ...traces,
+      ...watched.map(w => ({
+        id: w.id,
+        name: names.get(w.name)! > 1 ? `${w.parent}/${w.name}` : w.name,
+        width: w.width,
+        nets: w.nets,
+        watched: true,
+        title: w.title
+      }))
+    ]);
   }
 
   private summary(): DocumentSummary {

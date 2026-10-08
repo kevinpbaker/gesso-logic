@@ -23,6 +23,9 @@ export interface Trace {
   readonly width: number;
   /** The nets it reads, least significant bit first. */
   readonly nets: readonly number[];
+  /** Traced from the canvas rather than a probe or LED, and where: see `AnalyserView`. */
+  readonly watched?: boolean;
+  readonly title?: string;
 }
 
 export interface AnalyserWindow {
@@ -57,6 +60,8 @@ export const DEFAULT_CAPACITY = 65536;
 export class Analyser {
   private traces: readonly Trace[] = [];
   private values: Uint32Array[] = [];
+  /** The first cycle each trace has a value for: a trace added mid-run has none from before it was. */
+  private since: number[] = [];
   /** The cycle held in slot `(start + i) % capacity`, for the i-th oldest of `size`. */
   private oldest = 0;
   private size = 0;
@@ -70,29 +75,28 @@ export class Analyser {
   }
 
   /**
-   * Says what to trace. The same traces on the same nets keep their
-   * history; anything else starts afresh, because an old cycle's values
-   * say nothing about a net that is now something else.
+   * Says what to trace. A trace on the same nets as before keeps its
+   * history; a new one, or one whose nets are now something else, has
+   * none — an old cycle's values say nothing about it — and is recorded
+   * from the next cycle on, beside the others' history.
    */
   configure(traces: readonly Trace[]): void {
     // Matched by id and nets, not by order: a moved LED is drawn in a new
     // place in the list, and is the same trace.
     const key = (t: Trace) => `${t.id}|${t.width}|${t.nets.join(',')}`;
-    const was = new Map(this.traces.map((t, i) => [key(t), this.values[i]!]));
-    const same = traces.length === this.traces.length && traces.every(t => was.has(key(t)));
+    const was = new Map(this.traces.map((t, i) => [key(t), { values: this.values[i]!, since: this.since[i]! }]));
     this.traces = traces;
-    if (same) {
-      this.values = traces.map(t => was.get(key(t))!);
-    } else {
-      this.values = traces.map(() => new Uint32Array(this.capacity));
-      this.clear();
-    }
+    const kept = traces.map(t => was.get(key(t)));
+    this.values = kept.map(k => k?.values ?? new Uint32Array(this.capacity));
+    this.since = kept.map(k => k?.since ?? (this.size === 0 ? -Infinity : this.last + 1));
     if (this.trigger !== null && !traces.some(t => t.id === this.trigger!.trace)) {
       this.trigger = null;
     }
   }
 
   clear(): void {
+    // What is recorded next is every trace's from its first cycle.
+    this.since = this.since.map(() => -Infinity);
     this.size = 0;
     this.startSlot = 0;
     this.oldest = 0;
@@ -151,7 +155,7 @@ export class Analyser {
       value >>>= 0;
       const column = this.values[i]!;
       if (this.trigger?.trace === trace.id && value === this.trigger.value) {
-        const before = this.size > 1 ? column[(slot + this.capacity - 1) % this.capacity] : undefined;
+        const before = this.size > 1 && cycle - 1 >= this.since[i]! ? column[(slot + this.capacity - 1) % this.capacity] : undefined;
         if (before !== value) fired = true;
       }
       column[slot] = value;
@@ -162,7 +166,7 @@ export class Analyser {
   /** A trace's value at the end of a cycle, or null when that cycle is not held. */
   valueAt(trace: string, cycle: number): number | null {
     const i = this.traces.findIndex(t => t.id === trace);
-    if (i < 0 || cycle < this.first || cycle > this.last) return null;
+    if (i < 0 || cycle < Math.max(this.first, this.since[i]!) || cycle > this.last) return null;
     return this.values[i]![(this.startSlot + (cycle - this.oldest)) % this.capacity]!;
   }
 
@@ -174,9 +178,10 @@ export class Analyser {
     const data: Record<string, string> = {};
     this.traces.forEach((trace, i) => {
       const column = this.values[i]!;
+      const held = Math.max(this.first, this.since[i]!);
       const entries: string[] = [];
       for (let c = 0; c < count; c++) {
-        const from = Math.max(start + c * step, this.first);
+        const from = Math.max(start + c * step, held);
         const to = Math.min(start + (c + 1) * step - 1, this.last);
         if (from > to) {
           entries.push('.');

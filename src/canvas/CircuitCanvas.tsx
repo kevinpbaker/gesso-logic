@@ -1,4 +1,4 @@
-import { BehaviorSubject, combineLatest, type Observable } from 'rxjs';
+import { BehaviorSubject, combineLatest, Subject, type Observable } from 'rxjs';
 import { debounceTime, distinctUntilChanged, map, skip } from 'rxjs/operators';
 
 import {
@@ -121,6 +121,8 @@ export interface CanvasHandle {
   readonly editor: Editor;
   /** Bumped whenever the editor has something new to show. */
   readonly editorChanged: BehaviorSubject<number>;
+  /** Something was just sent to the analyser to trace, for the page to open it. */
+  readonly traced: Observable<void>;
 }
 
 const TILE = 256;
@@ -512,6 +514,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
   // ---------------------------------------------------------------------
 
   const editorChanged = new BehaviorSubject(0);
+  const traced = new Subject<void>();
   const shell = ctx.inject(ShellService);
   const editor = new Editor({
     scene: () => scene,
@@ -529,7 +532,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       return (document.chips.find(chip => chip.name === name) ?? document.library.find(part => part.name === name))?.shape;
     },
     pinNote: (chip, pin) => circuit.view.document.value.chips.find(c => c.name === chip)?.notes[pin] ?? null,
-    viewSize: () => size.current
+    viewSize: () => size.current,
+    traced: () => traced.next()
   });
   // Another level or document: the selection was the last one's.
   ctx.effect(
@@ -718,7 +722,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
         }
       }}
       focusable
-      onPointerDown={(event: UiPointerEvent) => editor.pointerDown(local(event), event.buttons, event.modifiers.shift)}
+      onPointerDown={(event: UiPointerEvent) => editor.pointerDown(local(event), event.buttons, event.modifiers.shift, event.modifiers.alt)}
       onPointerMove={(event: UiPointerEvent) => editor.pointerMove(local(event), event.buttons)}
       onPointerUp={(event: UiPointerEvent) => editor.pointerUp(local(event))}
       onPointerLeave={() => editor.pointerLeave()}
@@ -816,6 +820,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       return c === undefined ? null : scene.chipNames[c] ?? null;
     },
     editor,
-    editorChanged
+    editorChanged,
+    traced
   };
 }

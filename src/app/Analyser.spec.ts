@@ -52,18 +52,51 @@ describe('the logic analyser', () => {
     expect(a.armed).toBeNull();
   });
 
-  it('keeps its history through the same traces, and starts afresh on others or a skipped cycle', () => {
-    const a = counting(64);
+  it('keeps each trace’s history through a change of traces, gives a new one none, and starts afresh on a skipped cycle', () => {
+    const a = new Analyser(64);
+    a.configure([{ id: 'count', name: 'count', width: 4, nets: [0, 1, 2, 3] }]);
     for (let cycle = 0; cycle < 10; cycle++) a.record(cycle, nets(cycle));
+    // A trace added mid-run: the count keeps its history, and bit 0 is
+    // recorded from the next cycle on.
     a.configure([
       { id: 'count', name: 'count', width: 4, nets: [0, 1, 2, 3] },
       { id: 'bit0', name: 'bit0', width: 1, nets: [4] }
     ]);
-    expect(a.last).toBe(9);
+    expect([a.first, a.last]).toEqual([0, 9]);
+    expect(a.valueAt('count', 7)).toBe(7);
+    expect(a.valueAt('bit0', 7)).toBeNull();
+    a.record(10, nets(10));
+    a.record(11, nets(11));
+    expect(a.valueAt('bit0', 11)).toBe(1);
+    expect(a.window(8, 4, 100).data).toEqual({ count: '8,9,A,B', bit0: '..01' });
+
+    // A trace whose nets changed is a new one.
+    a.configure([
+      { id: 'count', name: 'count', width: 4, nets: [3, 2, 1, 0] },
+      { id: 'bit0', name: 'bit0', width: 1, nets: [4] }
+    ]);
+    expect(a.valueAt('count', 11)).toBeNull();
+    expect(a.valueAt('bit0', 11)).toBe(1);
+
+    // A skipped cycle starts every trace afresh, from that cycle.
     a.record(20, nets(20));
     expect([a.first, a.last]).toEqual([20, 20]);
-    a.configure([{ id: 'count', name: 'count', width: 4, nets: [3, 2, 1, 0] }]);
-    expect(a.last).toBe(a.first - 1);
+    expect(a.valueAt('count', 20)).toBe(2);
+    expect(a.valueAt('bit0', 20)).toBe(0);
+  });
+
+  it('fires on the first cycle of a trace added mid-run as on a fresh analyser’s, not by its slot from before it was traced', () => {
+    const a = new Analyser(64);
+    a.configure([{ id: 'count', name: 'count', width: 4, nets: [0, 1, 2, 3] }]);
+    a.record(0, nets(1));
+    a.configure([
+      { id: 'count', name: 'count', width: 4, nets: [0, 1, 2, 3] },
+      { id: 'bit0', name: 'bit0', width: 1, nets: [4] }
+    ]);
+    // Its slot from before it was traced reads 0; that is no value it had.
+    a.setTrigger({ trace: 'bit0', value: 0 });
+    expect(a.record(1, nets(2))).toBe(true);
+    expect(a.record(2, nets(4))).toBe(false);
   });
 });
 

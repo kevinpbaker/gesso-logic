@@ -60,6 +60,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         importChip: (text, fileName) => service.importChip(text, fileName),
         setAnalyserView: (start, span, columns) => service.setAnalyserView(start, span, columns),
         setTrigger: (trace, value) => service.setTrigger(trace, value),
+        watch: pins => service.watch(pins),
+        unwatch: id => service.unwatch(id),
         copy: ids => service.copy(ids),
         duplicate: (ids, rename, dx, dy) => service.duplicate(ids, rename, dx, dy)
       }

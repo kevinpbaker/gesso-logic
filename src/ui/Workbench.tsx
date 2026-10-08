@@ -137,6 +137,10 @@ export function workbench(ctx: ComponentContext) {
       run('theme');
       return true;
     }
+    if (shift && key.toLowerCase() === 'w') {
+      run('trace');
+      return true;
+    }
     const bound: Readonly<Record<string, CommandId>> = {
       '?': 'shortcuts',
       '.': 'step',
@@ -160,6 +164,10 @@ export function workbench(ctx: ComponentContext) {
   const analyser = waveformPanel(ctx, canvas.size.changes.pipe(map(s => s.width)));
   let analyserOpen = false;
   ctx.effect(analyser.open, open => (analyserOpen = open));
+  // A pin or wire traced from the canvas opens the analyser on it.
+  ctx.effect(canvas.traced, () => {
+    if (!analyserOpen) analyser.toggle();
+  });
 
   // Whatever was open when the tab closed, brought back by the
   // application worker from its autosave — or, the first time, Pong,
@@ -295,6 +303,8 @@ export function workbench(ctx: ComponentContext) {
         return;
       case 'analyser':
         return analyser.toggle();
+      case 'trace':
+        return editor.traceSelection();
       case 'truthTable':
         return editor.tabulate();
       case 'runPause':
@@ -368,6 +378,8 @@ export function workbench(ctx: ComponentContext) {
         return s.one?.kind === 'chip';
       case 'truthTable':
         return s.parts > 0;
+      case 'trace':
+        return s.parts + s.wires > 0;
       case 'upLevel':
       case 'topLevel':
         return d.path.length > 0;
