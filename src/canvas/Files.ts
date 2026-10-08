@@ -112,7 +112,9 @@ export function fileActions(ctx: ComponentContext): FileActions {
       name,
       ...data,
       mediaType,
-      accept: [{ description: EXPORT_KINDS[extension] ?? 'file', mediaType, extensions: [extension] }]
+      accept: [{ description: EXPORT_KINDS[extension] ?? 'file', mediaType, extensions: [extension] }],
+      // Made to keep, not to open again: not one of the recent files.
+      remember: false
     });
     if (result.outcome === 'cancelled') return null;
     if (result.outcome !== 'ok' || result.saved === null) return `Couldn't export: ${result.error ?? result.outcome}`;
