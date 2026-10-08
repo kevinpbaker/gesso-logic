@@ -921,6 +921,22 @@ export class CircuitService {
     this.publish(true);
   }
 
+  resumeFromHere(): void {
+    const simulator = this.simulator;
+    const past = this.past;
+    if (simulator === null || past === null || this.running) return;
+    const dropped = simulator.cycles - past.cycle;
+    simulator.restore(past.values, past.cycle);
+    this.history?.truncate(past.cycle);
+    this.analyser.truncate(past.cycle);
+    this.past = null;
+    this.restartPacing();
+    this.message = `Resumed from cycle ${past.cycle.toLocaleString('en')}: the ${dropped.toLocaleString('en')} ${dropped === 1 ? 'cycle' : 'cycles'} after it are gone.`;
+    this.documentSubject.next(this.summary());
+    this.publish(true);
+    this.autosave();
+  }
+
   setKeepHistory(keep: boolean): void {
     if (keep === (this.history !== null)) return;
     this.history = keep ? new History() : null;

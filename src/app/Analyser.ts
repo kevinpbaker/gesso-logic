@@ -104,6 +104,20 @@ export class Analyser {
     this.oldest = 0;
   }
 
+  /**
+   * Forgets every cycle after `cycle`: the circuit has gone back to it,
+   * and what came after will come again differently. The ones before it
+   * stay, so the next cycle recorded follows on from them.
+   */
+  truncate(cycle: number): void {
+    if (this.size === 0 || cycle >= this.last) return;
+    if (cycle < this.first) {
+      this.clear();
+      return;
+    }
+    this.size = cycle - this.oldest + 1;
+  }
+
   get traced(): readonly Trace[] {
     return this.traces;
   }

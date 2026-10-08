@@ -40,6 +40,23 @@ describe('history', () => {
     expect([history.first, history.last]).toEqual([30, 30]);
   });
 
+  it('forgets what came after a cycle gone back to, and records on from it', () => {
+    const history = new History(1_000, 4);
+    for (let cycle = 1; cycle <= 12; cycle++) {
+      history.record(cycle, new Uint8Array(4).fill(cycle));
+      history.input(cycle, 'up', cycle % 2);
+    }
+    history.truncate(6);
+    expect([history.first, history.last]).toEqual([1, 6]);
+    expect(history.plan(6)?.inputs.map(i => i.cycle)).toEqual([5]);
+    expect(history.plan(7)).toBeNull();
+    // On from 6: 7 follows, and the next keyframe is 4 after the one at 5.
+    for (let cycle = 7; cycle <= 9; cycle++) history.record(cycle, new Uint8Array(4));
+    expect([history.first, history.last]).toEqual([1, 9]);
+    expect(history.plan(8)?.from.cycle).toBe(5);
+    expect(history.plan(9)?.from.cycle).toBe(9);
+  });
+
   it('has any cycle of Pong on gates again exactly, with the paddle moved on the way', () => {
     const pong = assemble(readFileSync(join(games, 'pong.asm'), 'utf8'));
     const netlist = compile(computerScene(Array.from(pong.rom)));

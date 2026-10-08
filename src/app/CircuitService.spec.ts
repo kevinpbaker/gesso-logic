@@ -496,6 +496,24 @@ describe('looking back', () => {
     expect(h.signals.at(-1)!.cycle).toBe(now + 1);
   });
 
+  it('resumes from a cycle shown: it is now, and what came after is gone and comes again', () => {
+    const { h, count, held } = counting();
+    let view!: AnalyserView;
+    h.service.analyserView.subscribe(v => (view = v));
+    h.service.setAnalyserView(null, 64, 100);
+    const first = view.first;
+    h.service.showCycle(10);
+    h.service.resumeFromHere();
+    expect(h.status).toMatchObject({ cycles: 10, past: null, history: { first: 1, last: 10 } });
+    expect(count()).toBe(held.get(10));
+    expect([view.first, view.last]).toEqual([first, 10]);
+    // Nothing given differently, so the same future comes again.
+    h.service.step();
+    expect(count()).toBe(held.get(11));
+    expect([view.first, view.last]).toEqual([first, 11]);
+    expect(h.status.history?.last).toBe(11);
+  });
+
   it('shows nothing it does not hold, nothing while running, and nothing once history is off', () => {
     const { h } = counting();
     h.service.showCycle(1_000);

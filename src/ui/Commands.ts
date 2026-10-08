@@ -63,6 +63,7 @@ export type CommandId =
   | 'runPause'
   | 'step'
   | 'stepBack'
+  | 'resumeHere'
   | 'keepHistory'
   | 'customRate'
   | `rate:${string}`
@@ -123,6 +124,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   runPause: { label: 'Run', keys: `${MOD}+Enter`, group: 'Simulate' },
   step: { label: 'Step one clock cycle', keys: '.', group: 'Simulate' },
   stepBack: { label: 'Step back one cycle, from history', keys: ',', group: 'Simulate' },
+  resumeHere: { label: 'Resume from the cycle shown, forgetting the cycles after it', group: 'Simulate' },
   keepHistory: { label: 'Keep history, to look back', group: 'Simulate' },
   customRate: { label: 'Clock: another rate…', group: 'Simulate' },
   thread: { label: 'Run the simulator on the main thread', group: 'Simulate' },
@@ -212,7 +214,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'Simulate',
     mnemonic: 's',
-    entries: ['runPause', 'step', 'stepBack', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), 'customRate', MENU_SEPARATOR, 'keepHistory', 'thread']
+    entries: ['runPause', 'step', 'stepBack', 'resumeHere', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), 'customRate', MENU_SEPARATOR, 'keepHistory', 'thread']
   },
   {
     label: 'Examples',

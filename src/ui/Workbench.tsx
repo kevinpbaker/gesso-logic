@@ -477,16 +477,18 @@ export function workbench(ctx: ComponentContext) {
         // Looking back, a step is a cycle forward through history, and
         // past its newest cycle, back to now.
         const s = status.value;
-        if (s.past === null) return circuit.send.step();
-        return circuit.send.showCycle(s.history !== null && s.past + 1 <= s.history.last ? s.past + 1 : null);
+        if (shownCycle === null) return circuit.send.step();
+        return show(s.history !== null && shownCycle + 1 <= s.history.last ? shownCycle + 1 : null);
       }
       case 'stepBack': {
         const target = stepBackTarget();
-        if (target !== null) circuit.send.showCycle(target);
+        if (target !== null) show(target);
         return;
       }
       case 'keepHistory':
         return keepHistory.set(!keepHistory.value.value);
+      case 'resumeHere':
+        return circuit.send.resumeFromHere();
       case 'shortcuts':
         return openDialog(showShortcuts);
       case 'gettingStarted':
@@ -518,11 +520,30 @@ export function workbench(ctx: ComponentContext) {
     }
   }
 
+  /**
+   * The cycle shown from history, as last asked for: ahead of the status
+   * saying so, so `,` pressed faster than the round trip steps back from
+   * where the last press went, not from where the status still is. The
+   * status sets it whenever it says otherwise — back to now, a run.
+   */
+  let shownCycle: number | null = null;
+  ctx.effect(
+    status.pipe(
+      map(s => s.past),
+      distinctUntilChanged()
+    ),
+    past => (shownCycle = past)
+  );
+  function show(cycle: number | null): void {
+    shownCycle = cycle;
+    circuit.send.showCycle(cycle);
+  }
+
   /** The cycle a step back shows: the one before the cycle shown, or before now; null where history does not reach. */
   function stepBackTarget(): number | null {
     const s = status.value;
     if (s.running || s.history === null || s.history.first < 0) return null;
-    const target = (s.past ?? s.cycles) - 1;
+    const target = (shownCycle ?? s.cycles) - 1;
     return target >= s.history.first ? target : null;
   }
 
@@ -573,6 +594,8 @@ export function workbench(ctx: ComponentContext) {
         return !status.value.running;
       case 'stepBack':
         return stepBackTarget() !== null;
+      case 'resumeHere':
+        return status.value.past !== null && !status.value.running;
       default:
         return true;
     }
@@ -914,6 +937,7 @@ export function workbench(ctx: ComponentContext) {
                   />
                   {small('◀', act(() => run('stepBack')), 'back')}
                   {small('▶', act(() => run('step')), 'forward')}
+                  {small('Resume from here', act(() => run('resumeHere')), 'resume')}
                   {small('Back to now', act(() => circuit.send.showCycle(null)), 'now')}
                 </row>
               ]

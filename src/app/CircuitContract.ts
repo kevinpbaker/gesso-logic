@@ -388,6 +388,12 @@ export interface CircuitCommands {
    * brings back now. Only while paused, and only a cycle history holds.
    */
   showCycle(cycle: number | null): void;
+  /**
+   * Makes the cycle shown from history now: the circuit goes back to it,
+   * and the cycles after it, in history and the analyser, are gone. It
+   * stays paused, for an input to be given or a step taken from there.
+   */
+  resumeFromHere(): void;
   /** Keeps history, or stops and lets it go. On unless turned off. */
   setKeepHistory(keep: boolean): void;
   /** Finds parts by name at every depth: published as `found`. Blank text finds nothing. */

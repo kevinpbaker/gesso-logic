@@ -152,3 +152,18 @@ describe('a scrubbed window, as the history moves on', () => {
     expect(view.data['bit0']!.includes('.')).toBe(false);
   });
 });
+
+describe('the analyser, gone back', () => {
+  it('forgets the cycles after one gone back to, and records on from it', () => {
+    const a = counting(64);
+    for (let cycle = 0; cycle < 20; cycle++) a.record(cycle, nets(cycle));
+    a.truncate(9);
+    expect([a.first, a.last]).toEqual([0, 9]);
+    expect(a.valueAt('count', 9)).toBe(9);
+    a.record(10, nets(3));
+    expect([a.first, a.last]).toEqual([0, 10]);
+    expect(a.valueAt('count', 10)).toBe(3);
+    a.truncate(-5);
+    expect(a.last).toBe(a.first - 1);
+  });
+});
