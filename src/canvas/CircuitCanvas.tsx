@@ -30,6 +30,7 @@ import type { Kind } from '../sim/Primitives';
 import type { FileActions } from './Files';
 import { paintLive, paintOver, paintUnder } from './Painters';
 import { pictureArea, picturePng, pictureScene, pictureSvg } from './Picture';
+import type { MinimapSource } from './Minimap';
 import { CELL, SceneIndex } from './SceneIndex';
 
 /**
@@ -150,6 +151,8 @@ export interface CanvasHandle {
    */
   picture(format: 'svg', theme: UiTheme): Promise<string>;
   picture(format: 'png', theme: UiTheme): Promise<Uint8Array<ArrayBuffer>>;
+  /** What the minimap draws from and moves: see `Minimap.tsx`. */
+  readonly minimapSource: MinimapSource;
 }
 
 /** Where a traced pin is: the chips that open its level, from the top, and the pin there. */
@@ -983,6 +986,13 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     restoreView: (path, view) => {
       revealing = { path, pin: { component: '', pin: '' }, view };
       tryReveal();
+    },
+    minimapSource: {
+      scene: () => scene,
+      revision,
+      camera,
+      setCamera: (next: Camera) => (camera.value = next),
+      size: size.changes
     },
     picture: (async (format: 'svg' | 'png', theme: UiTheme) => {
       const ids = new Set([...editor.selection].filter(id => scene.indexOf.has(id)));

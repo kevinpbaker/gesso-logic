@@ -11,6 +11,7 @@ import { circuitCanvas, type Camera, type CanvasKeys, type TraceWhere } from '..
 import type { Hit } from '../canvas/Editor';
 import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
+import { minimap } from '../canvas/Minimap';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
 import { clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, versionHistory, type Discard, type FindItem } from './Dialogs';
@@ -71,6 +72,12 @@ export function workbench(ctx: ComponentContext) {
     label: 'keep history'
   });
   ctx.effect(keepHistory.value, keep => circuit.send.setKeepHistory(keep));
+  // The minimap, on unless turned off.
+  const showMinimap = persisted<boolean>(new OpfsStorage({ directory: 'gessologic-settings' }), 'minimap', {
+    initial: true,
+    revive: raw => (typeof raw === 'boolean' ? raw : null),
+    label: 'minimap'
+  });
   const scheme = combineLatest([appearance.value, shell.colorScheme]).pipe(
     map(([chosen, system]) => (chosen === 'system' ? system : chosen)),
     distinctUntilChanged()
@@ -548,6 +555,8 @@ export function workbench(ctx: ComponentContext) {
       }
       case 'keepHistory':
         return keepHistory.set(!keepHistory.value.value);
+      case 'minimap':
+        return showMinimap.set(!showMinimap.value.value);
       case 'resumeHere':
         return circuit.send.resumeFromHere();
       case 'shortcuts':
@@ -694,6 +703,7 @@ export function workbench(ctx: ComponentContext) {
     if (id === 'runPause') return status.value.running ? 'Pause' : 'Run';
     if (id === 'analyser') return analyserOpen ? 'Hide the logic analyser' : 'Show the logic analyser';
     if (id === 'theme') return dark ? 'Light mode' : 'Dark mode';
+    if (id === 'minimap') return `${showMinimap.value.value ? '✓' : '  '}  Minimap`;
     if (id === 'keepHistory') return `${keepHistory.value.value ? '✓' : '  '}  Keep history, to look back`;
     if (id === 'exportSvg' || id === 'exportPng') {
       const s = canvas.selection();
@@ -1191,6 +1201,12 @@ export function workbench(ctx: ComponentContext) {
           {breadcrumb}
           {tourCard}
           {inspector(ctx, canvas, inside)}
+          {minimap(
+            ctx,
+            canvas.minimapSource,
+            showMinimap.value,
+            combineLatest([analyser.open, analyser.height]).pipe(map(([open, height]) => (open ? height + 24 : 12)))
+          )}
           {analyser.element as never}
           {lookingBack}
           {toast}

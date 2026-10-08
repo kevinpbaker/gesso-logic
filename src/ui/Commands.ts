@@ -83,6 +83,7 @@ export type CommandId =
   | 'tour'
   | 'thread'
   | 'theme'
+  | 'minimap'
   | 'menuBar';
 
 /** ⌘ on a Mac, Ctrl everywhere else; a worker has a navigator too. */
@@ -143,6 +144,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   customRate: { label: 'Clock: another rate…', group: 'Simulate' },
   thread: { label: 'Run the simulator on the main thread', group: 'Simulate' },
   theme: { label: 'Dark mode', keys: 'Shift+D', group: 'View' },
+  minimap: { label: 'Minimap', group: 'View' },
   shortcuts: { label: 'Keyboard shortcuts', keys: '?', group: 'Help' },
   gettingStarted: { label: 'Getting started', group: 'Help' },
   instructionSet: { label: 'The CPU’s instruction set', group: 'Help' },
@@ -223,7 +225,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'View',
     mnemonic: 'v',
-    entries: ['fit', 'zoomIn', 'zoomOut', MENU_SEPARATOR, 'openChip', 'upLevel', 'topLevel', 'back', MENU_SEPARATOR, 'analyser', 'trace', 'truthTable', MENU_SEPARATOR, 'theme']
+    entries: ['fit', 'zoomIn', 'zoomOut', MENU_SEPARATOR, 'openChip', 'upLevel', 'topLevel', 'back', MENU_SEPARATOR, 'analyser', 'trace', 'truthTable', MENU_SEPARATOR, 'minimap', 'theme']
   },
   {
     label: 'Simulate',
