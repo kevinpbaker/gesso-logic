@@ -163,6 +163,22 @@ export class Simulator {
     this.everything = true;
   }
 
+  /**
+   * Puts the simulator where it was at the end of a cycle, from every
+   * net's value then: the clock low, as `cycle` leaves it, and nothing
+   * pending, as a settled cycle leaves it. A cycle's end is the whole of
+   * a circuit's state — latches and RAM are gates, a ROM is read-only —
+   * so running on from here runs as the original did, given the same
+   * inputs: what `History` replays.
+   */
+  restore(values: Uint8Array, cycles: number): void {
+    this.value.set(values);
+    this.clockLevel = 0;
+    this.cycles = cycles;
+    this.changedCount = 0;
+    this.everything = false;
+  }
+
   /** Whether a tick would do anything: a net changed and its readers have not seen it yet. */
   get pending(): boolean {
     return this.everything || this.changedCount > 0;

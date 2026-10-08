@@ -61,6 +61,14 @@ export function workbench(ctx: ComponentContext) {
     revive: raw => (raw === 'system' || raw === 'light' || raw === 'dark' ? raw : null),
     label: 'appearance'
   });
+  // History, to look back through: kept unless turned off, and the
+  // choice remembered with the appearance.
+  const keepHistory = persisted<boolean>(new OpfsStorage({ directory: 'gessologic-settings' }), 'keep-history', {
+    initial: true,
+    revive: raw => (typeof raw === 'boolean' ? raw : null),
+    label: 'keep history'
+  });
+  ctx.effect(keepHistory.value, keep => circuit.send.setKeepHistory(keep));
   const scheme = combineLatest([appearance.value, shell.colorScheme]).pipe(
     map(([chosen, system]) => (chosen === 'system' ? system : chosen)),
     distinctUntilChanged()
@@ -167,6 +175,7 @@ export function workbench(ctx: ComponentContext) {
       '-': 'zoomOut',
       _: 'zoomOut',
       u: 'upLevel',
+      ',': 'stepBack',
       w: 'analyser',
       F10: 'menuBar',
       F1: 'shortcuts'
@@ -464,8 +473,20 @@ export function workbench(ctx: ComponentContext) {
         return editor.tabulate();
       case 'runPause':
         return status.value.running ? circuit.send.pause() : circuit.send.run();
-      case 'step':
-        return circuit.send.step();
+      case 'step': {
+        // Looking back, a step is a cycle forward through history, and
+        // past its newest cycle, back to now.
+        const s = status.value;
+        if (s.past === null) return circuit.send.step();
+        return circuit.send.showCycle(s.history !== null && s.past + 1 <= s.history.last ? s.past + 1 : null);
+      }
+      case 'stepBack': {
+        const target = stepBackTarget();
+        if (target !== null) circuit.send.showCycle(target);
+        return;
+      }
+      case 'keepHistory':
+        return keepHistory.set(!keepHistory.value.value);
       case 'shortcuts':
         return openDialog(showShortcuts);
       case 'gettingStarted':
@@ -495,6 +516,14 @@ export function workbench(ctx: ComponentContext) {
       default:
         return;
     }
+  }
+
+  /** The cycle a step back shows: the one before the cycle shown, or before now; null where history does not reach. */
+  function stepBackTarget(): number | null {
+    const s = status.value;
+    if (s.running || s.history === null || s.history.first < 0) return null;
+    const target = (s.past ?? s.cycles) - 1;
+    return target >= s.history.first ? target : null;
   }
 
   /**
@@ -542,6 +571,8 @@ export function workbench(ctx: ComponentContext) {
         return visits.value.length > 0;
       case 'step':
         return !status.value.running;
+      case 'stepBack':
+        return stepBackTarget() !== null;
       default:
         return true;
     }
@@ -557,6 +588,7 @@ export function workbench(ctx: ComponentContext) {
     if (id === 'runPause') return status.value.running ? 'Pause' : 'Run';
     if (id === 'analyser') return analyserOpen ? 'Hide the logic analyser' : 'Show the logic analyser';
     if (id === 'theme') return dark ? 'Light mode' : 'Dark mode';
+    if (id === 'keepHistory') return `${keepHistory.value.value ? '✓' : '  '}  Keep history, to look back`;
     if (id === 'thread') return mainThread ? 'Run the simulator in its worker again' : 'Run the simulator on the main thread';
     return commandLabel(id);
   }
@@ -843,6 +875,53 @@ export function workbench(ctx: ComponentContext) {
     )
   );
 
+  // Looking back: which cycle the canvas shows, and the way through
+  // history and back to now. A press there gives the keyboard back to
+  // the canvas, so `,` and `.` go on stepping.
+  const act = (then: () => void) => () => {
+    then();
+    canvas.focus();
+  };
+  const lookingBack = (
+    <row position="absolute" left={0} right={0} top={58} x="center" hitTestable={false}>
+      {status.pipe(
+        map(s => (s.past === null ? null : { past: s.past, ago: s.cycles - s.past, first: s.history?.first ?? s.past })),
+        distinctUntilChanged((a, b) => a?.past === b?.past && a?.ago === b?.ago && a?.first === b?.first),
+        map(b =>
+          b === null
+            ? []
+            : [
+                <row
+                  key="looking-back"
+                  gap={8}
+                  y="center"
+                  paddingLeft={12}
+                  paddingRight={6}
+                  paddingTop={6}
+                  paddingBottom={6}
+                  borderRadius={8}
+                  backgroundColor="selectionBackground"
+                  borderColor="secondary"
+                  borderWidth={1}
+                  role="status"
+                  live="polite">
+                  <text
+                    text={`Looking back: cycle ${b.past.toLocaleString('en')}, ${b.ago.toLocaleString('en')} ${b.ago === 1 ? 'cycle' : 'cycles'} ago`}
+                    fontSize={12}
+                    fontWeight={600}
+                    color="text"
+                    textWrap="none"
+                  />
+                  {small('◀', act(() => run('stepBack')), 'back')}
+                  {small('▶', act(() => run('step')), 'forward')}
+                  {small('Back to now', act(() => circuit.send.showCycle(null)), 'now')}
+                </row>
+              ]
+        )
+      )}
+    </row>
+  );
+
   const toast = (
     <row position="absolute" left={0} right={0} bottom={16} x="center" hitTestable={false}>
       {notice.pipe(
@@ -1000,6 +1079,7 @@ export function workbench(ctx: ComponentContext) {
           {tourCard}
           {inspector(ctx, canvas, inside)}
           {analyser.element as never}
+          {lookingBack}
           {toast}
         </stack>
       </row>

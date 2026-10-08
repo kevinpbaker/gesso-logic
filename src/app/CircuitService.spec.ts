@@ -459,3 +459,64 @@ describe('pins traced from the canvas', () => {
     expect(view.traces.some(t => t.watched)).toBe(false);
   });
 });
+
+describe('looking back', () => {
+  function counting() {
+    const h = new Harness();
+    h.service.load(counter());
+    const count = () => {
+      const signals = h.signals[h.signals.length - 1]!;
+      const geometry = h.service['geometryNow']();
+      return [0, 1, 2].reduce((sum, bit) => {
+        const net = entryOf(geometry.components, `bit${bit}.slave.q`)!.nets.out!;
+        return sum | (signalOf(signals.chunks, net) << bit);
+      }, 0);
+    };
+    // Each step a cycle: what the counter held after each, and when.
+    const held = new Map<number, number>();
+    for (let n = 0; n < 40; n++) {
+      h.service.step();
+      held.set(h.status.cycles, count());
+    }
+    return { h, count, held };
+  }
+
+  it('shows any cycle history holds as it was, and comes back to now on a step', () => {
+    const { h, count, held } = counting();
+    const now = h.status.cycles;
+    expect(h.status.history).toEqual({ first: 1, last: now });
+    for (const cycle of [now - 1, 5, 23, 24, 6]) {
+      h.service.showCycle(cycle);
+      expect(h.status.past).toBe(cycle);
+      expect(h.signals.at(-1)!.cycle).toBe(cycle);
+      expect(count()).toBe(held.get(cycle));
+    }
+    h.service.step();
+    expect(h.status.past).toBeNull();
+    expect(h.signals.at(-1)!.cycle).toBe(now + 1);
+  });
+
+  it('shows nothing it does not hold, nothing while running, and nothing once history is off', () => {
+    const { h } = counting();
+    h.service.showCycle(1_000);
+    expect(h.status.past).toBeNull();
+    h.service.run();
+    h.service.showCycle(3);
+    expect(h.status.past).toBeNull();
+    h.service.pause();
+    h.service.setKeepHistory(false);
+    expect(h.status.history).toBeNull();
+    h.service.showCycle(3);
+    expect(h.status.past).toBeNull();
+  });
+
+  it('forgets history when an edit makes another simulator, and keeps it through a move', () => {
+    const { h } = counting();
+    h.service.moveBy(['bit0.loop'], 1, 0);
+    expect(h.status.history?.first).toBe(1);
+    h.service.place('and', 40, 40, 'unrelated');
+    h.service.showCycle(3);
+    expect(h.status.past).toBeNull();
+    expect(h.status.history?.first).toBe(-1);
+  });
+});

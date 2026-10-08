@@ -174,6 +174,13 @@ export interface Status {
   readonly cycles: number;
   /** The nets that were ringing when the circuit last failed to settle, by name; empty when it settles. */
   readonly ringing: readonly string[];
+  /**
+   * The cycles that can be shown again, oldest and newest, while history
+   * is kept; null while it is not. `first` is -1 before a cycle has run.
+   */
+  readonly history: { readonly first: number; readonly last: number } | null;
+  /** The cycle the canvas shows from history, while paused and looking back; null for now. */
+  readonly past: number | null;
 }
 
 /**
@@ -375,6 +382,14 @@ export interface CircuitCommands {
   watch(pins: readonly PinRef[]): void;
   /** Stops tracing a pin traced with `watch`, by its trace's id. */
   unwatch(id: string): void;
+  /**
+   * Shows the circuit as it was at the end of a cycle, from history:
+   * signals are that cycle's until `null`, running, stepping or an input
+   * brings back now. Only while paused, and only a cycle history holds.
+   */
+  showCycle(cycle: number | null): void;
+  /** Keeps history, or stops and lets it go. On unless turned off. */
+  setKeepHistory(keep: boolean): void;
   /** Finds parts by name at every depth: published as `found`. Blank text finds nothing. */
   find(query: string): void;
   /** Puts these parts, and the chips they use, on the clipboard as text: published as `clipboard`. */
@@ -442,7 +457,7 @@ export const EMPTY_GEOMETRY: Geometry = { components: {}, wires: {}, level: '', 
 export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
-export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [] };
+export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [], history: null, past: null };
 
 export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   document: EMPTY_SUMMARY,

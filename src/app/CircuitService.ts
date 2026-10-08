@@ -23,6 +23,7 @@ import type {
 } from './CircuitContract';
 import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_SAVE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
+import { History } from './History';
 import { Analyser } from './Analyser';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
@@ -196,6 +197,17 @@ export class CircuitService {
   private opened = 0;
   private netlist: Netlist | null = null;
   private simulator: Simulator | null = null;
+  /**
+   * What the circuit was, for looking back (`History`): kept unless
+   * turned off, and forgotten whenever the simulator is another one —
+   * an edit renumbers the nets a keyframe's bytes are, a document is
+   * another circuit.
+   */
+  private history: History | null = new History();
+  /** The cycle shown from history, and its values: the replaying simulator's; null for now. */
+  private past: { readonly cycle: number; readonly values: Uint8Array } | null = null;
+  /** The simulator history is replayed in, on the live one's netlist. */
+  private replayer: Simulator | null = null;
   private error: string | null = null;
   private viewport: Rect | null = null;
   private visibleChunks: number[] | null = null;
@@ -307,6 +319,7 @@ export class CircuitService {
     this.openCamera = file.camera ?? null;
     this.message = null;
     this.simulator = null;
+    this.forgetHistory();
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.lastGesture = null;
@@ -835,6 +848,8 @@ export class CircuitService {
     if (simulator === null || !this.netlist?.inputs.has(id)) {
       return;
     }
+    this.history?.input(simulator.cycles, id, value);
+    this.past = null;
     simulator.set(id, value);
     if (!this.running) {
       this.settle(simulator);
@@ -848,6 +863,7 @@ export class CircuitService {
     }
     this.running = true;
     this.ringing = [];
+    this.past = null;
     this.restartPacing();
     this.queueSlice();
     this.publish(true);
@@ -869,8 +885,55 @@ export class CircuitService {
     if (this.running || simulator === null) {
       return;
     }
+    this.past = null;
     this.cycle(simulator);
     this.publish(true);
+  }
+
+  showCycle(cycle: number | null): void {
+    const simulator = this.simulator;
+    const netlist = this.netlist;
+    if (cycle === null || simulator === null || netlist === null || this.running || this.history === null) {
+      if (this.past === null) return;
+      this.past = null;
+      this.publish(true);
+      return;
+    }
+    const plan = this.history.plan(cycle);
+    if (plan === null) return;
+    let replayer = this.replayer;
+    if (replayer === null || replayer.netlist !== netlist) replayer = this.replayer = new Simulator(netlist);
+    // On from where the last look stopped, when that is on the way: a
+    // scrub forward is a cycle or two a move, not a run from a keyframe.
+    if (this.past === null || replayer.cycles > cycle || replayer.cycles < plan.from.cycle) {
+      replayer.restore(plan.from.values, plan.from.cycle);
+    }
+    let next = plan.inputs.findIndex(i => i.cycle >= replayer.cycles);
+    if (next < 0) next = plan.inputs.length;
+    while (replayer.cycles < cycle) {
+      while (next < plan.inputs.length && plan.inputs[next]!.cycle === replayer.cycles) {
+        replayer.set(plan.inputs[next]!.id, plan.inputs[next]!.value);
+        next++;
+      }
+      replayer.cycle();
+    }
+    this.past = { cycle, values: replayer.value };
+    this.publish(true);
+  }
+
+  setKeepHistory(keep: boolean): void {
+    if (keep === (this.history !== null)) return;
+    this.history = keep ? new History() : null;
+    this.past = null;
+    this.replayer = null;
+    this.publish(true);
+  }
+
+  /** Another simulator: history is the last one's, in its nets' numbering. */
+  private forgetHistory(): void {
+    this.history?.clear();
+    this.past = null;
+    this.replayer = null;
   }
 
   setClockHz(rate: ClockRate): void {
@@ -992,6 +1055,7 @@ export class CircuitService {
       }
       this.netlist = netlist;
       this.simulator = simulator;
+      this.forgetHistory();
       this.error = null;
       // Paced from cycle 0 again, or a run at a set rate would race to
       // catch up with the cycles the old program had run.
@@ -1100,6 +1164,7 @@ export class CircuitService {
   /** One clock cycle. An oscillation pauses the run and is reported; returns whether it settled. */
   private cycle(simulator: Simulator): boolean {
     const result = simulator.cycle();
+    this.history?.record(simulator.cycles, simulator.value);
     if (this.analyser.record(simulator.cycles, simulator.value)) {
       // The trigger: pause on the cycle the condition became true, and say so.
       const trigger = this.analyser.armed!;
@@ -1548,11 +1613,13 @@ export class CircuitService {
     if (simulator === null) {
       return { cycle: 0, chunks: {} };
     }
+    // Looking back, the cycle shown's values; otherwise now's.
+    const values = this.past?.values ?? simulator.value;
     const chunks: Record<string, string> = {};
     for (const chunk of this.chunksToPublish()) {
-      chunks[chunk] = packChunk(simulator.value, chunk);
+      chunks[chunk] = packChunk(values, chunk);
     }
-    return { cycle: simulator.cycles, chunks };
+    return { cycle: this.past?.cycle ?? simulator.cycles, chunks };
   }
 
   /**
@@ -1631,7 +1698,9 @@ export class CircuitService {
       clockHz: this.clockHz,
       achievedHz,
       cycles: this.simulator?.cycles ?? 0,
-      ringing: this.ringing
+      ringing: this.ringing,
+      history: this.history === null ? null : { first: this.history.first, last: this.history.last },
+      past: this.past?.cycle ?? null
     };
   }
 }

@@ -66,6 +66,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         watch: pins => service.watch(pins),
         unwatch: id => service.unwatch(id),
         find: query => service.find(query),
+        showCycle: cycle => service.showCycle(cycle),
+        setKeepHistory: keep => service.setKeepHistory(keep),
         copy: ids => service.copy(ids),
         duplicate: (ids, rename, dx, dy) => service.duplicate(ids, rename, dx, dy)
       }

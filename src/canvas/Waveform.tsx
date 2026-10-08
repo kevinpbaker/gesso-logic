@@ -38,6 +38,9 @@ import type { TraceWhere } from './CircuitCanvas';
  *     its own: hovering its name says where it is, and its × takes it away;
  *   - hovering a row lights what it traces on the canvas, and a click on
  *     its name takes the canvas there; dragging its name moves the row;
+ *   - while paused, the cursor is also the cycle the canvas shows, from
+ *     history: placing it looks back to that cycle, and stepping back
+ *     and forward on the canvas moves it; Live comes back to now;
  *   - right-clicking a row shows a bus in hex, decimal, signed or binary,
  *     pauses the circuit when the row becomes its value at the cursor,
  *     moves it, goes to it, or stops tracing it.
@@ -120,6 +123,16 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     order.value = ids;
   };
   let columns = 0;
+  // And the other way: the cycle the canvas shows is where the cursor is.
+  ctx.effect(
+    circuit.view.status.pipe(
+      map(s => s.past),
+      distinctUntilChanged()
+    ),
+    past => {
+      if (past !== null) cursor.value = past;
+    }
+  );
 
   // Asks for the window whenever what it shows, or how wide it is, moves.
   ctx.effect(
@@ -171,7 +184,14 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   };
   const pointerUp = (event: UiPointerEvent) => {
     const x = xOf(event);
-    if (drag !== null && !drag.moved && x >= GUTTER) cursor.value = cycleAt(x, view.value);
+    if (drag !== null && !drag.moved && x >= GUTTER) {
+      cursor.value = cycleAt(x, view.value);
+      // Paused, the canvas looks back to it, where history reaches.
+      const s = circuit.view.status.value;
+      if (!s.running && s.history !== null && cursor.value >= s.history.first && cursor.value <= s.history.last) {
+        circuit.send.showCycle(cursor.value);
+      }
+    }
     // A traced pin's ×.
     const trace = view.value.traces[rowOf(event)];
     const removing = trace?.watched === true && x >= GUTTER - REMOVE && x < GUTTER;
@@ -323,7 +343,10 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
         <text text="Analyser" fontSize={12} fontWeight={600} color="text" />
         {/* Takes the slack, so the controls stay put while the range's width changes every cycle. */}
         <text text={range} flex={1} minWidth={0} fontSize={11} color="textMuted" textWrap="none" textOverflow="ellipsis" />
-        {button(start.pipe(map(s => (s === null ? 'Live ●' : 'Live'))), () => (start.value = null))}
+        {button(start.pipe(map(s => (s === null ? 'Live ●' : 'Live'))), () => {
+          start.value = null;
+          circuit.send.showCycle(null);
+        })}
         {button('−', () => zoom(2))}
         {button('+', () => zoom(0.5))}
         <text text="Trigger" fontSize={11} color="textMuted" />

@@ -62,6 +62,8 @@ export type CommandId =
   | 'truthTable'
   | 'runPause'
   | 'step'
+  | 'stepBack'
+  | 'keepHistory'
   | 'customRate'
   | `rate:${string}`
   | `example:${SceneName}`
@@ -120,6 +122,8 @@ const FIXED: Readonly<Record<string, Command>> = {
   truthTable: { label: 'Truth table of the selection', keys: 'T', group: 'View' },
   runPause: { label: 'Run', keys: `${MOD}+Enter`, group: 'Simulate' },
   step: { label: 'Step one clock cycle', keys: '.', group: 'Simulate' },
+  stepBack: { label: 'Step back one cycle, from history', keys: ',', group: 'Simulate' },
+  keepHistory: { label: 'Keep history, to look back', group: 'Simulate' },
   customRate: { label: 'Clock: another rate…', group: 'Simulate' },
   thread: { label: 'Run the simulator on the main thread', group: 'Simulate' },
   theme: { label: 'Dark mode', keys: 'Shift+D', group: 'View' },
@@ -208,7 +212,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'Simulate',
     mnemonic: 's',
-    entries: ['runPause', 'step', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), 'customRate', MENU_SEPARATOR, 'thread']
+    entries: ['runPause', 'step', 'stepBack', MENU_SEPARATOR, ...RATES.map((rate): CommandId => `rate:${rate}`), 'customRate', MENU_SEPARATOR, 'keepHistory', 'thread']
   },
   {
     label: 'Examples',
