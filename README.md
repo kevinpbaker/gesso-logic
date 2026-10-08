@@ -93,7 +93,9 @@ biggest thing built with it, not the only thing it can do.
   selection. Undo and redo for every edit, kept in the application
   worker, so a drag is one step. Wires overlapping? Click again for the
   next one, or press Tab. While a wire is being drawn, every pin it
-  could land on is named.
+  could land on is named. Wires route themselves; drag one to move a
+  segment where you want it, and **Straighten wires** lets it route
+  itself again.
 - **Things you can touch.** Switches, push buttons, clocks, constants,
   LEDs, probes, hex and seven-segment displays, and a 32 × 16 LED
   matrix. With nothing selected, the arrow keys hold buttons named
@@ -113,11 +115,23 @@ biggest thing built with it, not the only thing it can do.
   are looking at. Scrub it, put a cursor on it, or set a trigger that
   pauses the circuit ("Triggered at cycle 32,329: bit3 = 1").
 - **A truth table** for any combinational selection.
+- **Tests.** Each level, and each chip, can keep tests: rows of what to
+  set and what should show, with `tick` between rows for a clocked
+  circuit. They run again on every edit while open, and say which line
+  fails and what it showed instead. **Fill in from what it does now**
+  writes them from a working circuit, so it stays working.
 - **Files.** Save and open circuit files through the File System
   Access API, drop one onto the page, or pick one from the recent-files
   list. Everything autosaves to OPFS and is still there after a reload.
   The format writes one part per line, so moving a gate is a one-line
-  diff.
+  diff. **Restore an earlier version** brings back any of the last fifty
+  copies kept: before your first change, every five minutes while you
+  edit, and before a document is replaced.
+- **Export.** A picture of the level or the selection as SVG or PNG,
+  drawn by the canvas's own painters, and the analyser's waveforms as a
+  VCD for GTKWave or any other viewer.
+- **A minimap** in the corner whenever the level is bigger than the
+  view: click or drag it to move around.
 - **A program editor** for the ROM, with syntax colouring, a gutter of
   line numbers and ROM addresses, the program counter's line marked
   while it runs, and errors listed line by line.
