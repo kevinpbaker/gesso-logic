@@ -136,6 +136,8 @@ export interface CanvasHandle {
    * level is on the canvas: the caller asks for the level.
    */
   reveal(where: TraceWhere): void;
+  /** Puts the view back as it was on a level, once that level is on the canvas: the caller asks for the level. */
+  restoreView(path: readonly string[], view: Camera): void;
 }
 
 /** Where a traced pin is: the chips that open its level, from the top, and the pin there. */
@@ -190,7 +192,7 @@ interface Tile {
  * A key the application answers before the editor sees it — the view
  * and simulation shortcuts, help — returning whether it did.
  */
-export type CanvasKeys = (key: string, ctrl: boolean, shift: boolean) => boolean;
+export type CanvasKeys = (key: string, ctrl: boolean, shift: boolean, alt: boolean) => boolean;
 
 export function circuitCanvas(ctx: ComponentContext, files: FileActions | null = null, keys: CanvasKeys | null = null): CanvasHandle {
   const circuit = ctx.channel(Circuit);
@@ -714,15 +716,20 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
 
   // A jump from the analyser: once its level is on the canvas and framed,
   // the view centres on the pin, close enough to read, and its part is selected.
-  let revealing: TraceWhere | null = null;
+  // Or, going back, the view as it was there.
+  let revealing: (TraceWhere & { readonly view?: Camera }) | null = null;
   const tryReveal = () => {
     const where = revealing;
     if (where === null) return;
     const document = circuit.view.document.value;
     const geometry = circuit.view.geometry.value;
     if (framedFor !== document.opened || geometry.opened !== document.opened || geometry.level !== where.path.join('/')) return;
-    const c = scene.indexOf.get(where.pin.component);
     revealing = null;
+    if (where.view !== undefined) {
+      camera.value = { ...where.view };
+      return;
+    }
+    const c = scene.indexOf.get(where.pin.component);
     if (c === undefined) return;
     const at = pinAt(scene.shapeOf(c), scene.x[c]!, scene.y[c]!, where.pin.pin, scene.rotationOf(c));
     const s = size.current;
@@ -786,7 +793,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
           event.preventDefault();
           return;
         }
-        if (keys?.(event.key, ctrl, event.modifiers.shift)) {
+        if (keys?.(event.key, ctrl, event.modifiers.shift, event.modifiers.alt)) {
           event.preventDefault();
           return;
         }
@@ -880,6 +887,10 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     },
     reveal: where => {
       revealing = where;
+      tryReveal();
+    },
+    restoreView: (path, view) => {
+      revealing = { path, pin: { component: '', pin: '' }, view };
       tryReveal();
     }
   };

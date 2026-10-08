@@ -6,7 +6,7 @@ import { createComponent, FocusService, internalState, OpfsStorage, persisted, S
 
 import { Circuit, type ClockRate, type SceneName } from '../app/CircuitContract';
 import { isMainThread } from '../canvas/Bench';
-import { circuitCanvas, type CanvasKeys } from '../canvas/CircuitCanvas';
+import { circuitCanvas, type Camera, type CanvasKeys, type TraceWhere } from '../canvas/CircuitCanvas';
 import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
 import { action, heading, rule, small, tool } from './controls';
@@ -125,7 +125,11 @@ export function workbench(ctx: ComponentContext) {
   // ---------------------------------------------------------------------
 
   let menuBarNode: UiNode | null = null;
-  const keys: CanvasKeys = (key, ctrl, shift) => {
+  const keys: CanvasKeys = (key, ctrl, shift, alt) => {
+    if (alt && key === 'ArrowLeft') {
+      run('back');
+      return true;
+    }
     if (ctrl) {
       if (key !== 'Enter') return false;
       run('runPause');
@@ -171,11 +175,29 @@ export function workbench(ctx: ComponentContext) {
   // And back: a row hovered lights its signal on the canvas, and a row's
   // name clicked goes to it.
   ctx.effect(analyser.hovered, where => canvas.highlightTrace(where));
-  ctx.effect(analyser.picked, where => {
+  ctx.effect(analyser.picked, where => jumpTo(where));
+
+  /**
+   * Where a jump left from — the level and the view there — most recent
+   * last, for Back. Only jumps: stepping in and out of chips by hand has
+   * U and the breadcrumb.
+   */
+  const visits = internalState<readonly { readonly path: readonly string[]; readonly view: Camera }[]>([]);
+  function jumpTo(where: TraceWhere): void {
+    const here = document.value.path.map(level => level.id);
+    visits.value = [...visits.value.slice(-49), { path: here, view: { ...canvas.camera.value } }];
     circuit.send.openPath(where.path);
     canvas.reveal(where);
     canvas.focus();
-  });
+  }
+  function goBack(): void {
+    const last = visits.value.at(-1);
+    if (last === undefined) return;
+    visits.value = visits.value.slice(0, -1);
+    circuit.send.openPath(last.path);
+    canvas.restoreView(last.path, last.view);
+    canvas.focus();
+  }
 
   // Whatever was open when the tab closed, brought back by the
   // application worker from its autosave — or, the first time, Pong,
@@ -309,6 +331,8 @@ export function workbench(ctx: ComponentContext) {
       case 'topLevel':
         if (d.path.length > 0) circuit.send.closeChip(0);
         return;
+      case 'back':
+        return goBack();
       case 'analyser':
         return analyser.toggle();
       case 'trace':
@@ -391,6 +415,8 @@ export function workbench(ctx: ComponentContext) {
       case 'upLevel':
       case 'topLevel':
         return d.path.length > 0;
+      case 'back':
+        return visits.value.length > 0;
       case 'step':
         return !status.value.running;
       default:
@@ -592,6 +618,7 @@ export function workbench(ctx: ComponentContext) {
                   opacity={0.97}
                  >
                   {tool({ label: 'Up one level', icon: ICONS.up, tip: tip('upLevel'), onRun: () => run('upLevel') })}
+                  {visits.value.length > 0 ? small('Back', () => run('back'), 'back') : null}
                   {small('Top', () => (circuit.send.closeChip(0), canvas.focus()), 'top')}
                   {d.path.map((level, i) => [
                     <text key={`sep${i}`} text="›" fontSize={13} color="textMuted" selectable={false} />,

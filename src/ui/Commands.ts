@@ -55,6 +55,7 @@ export type CommandId =
   | 'zoomOut'
   | 'upLevel'
   | 'topLevel'
+  | 'back'
   | 'analyser'
   | 'trace'
   | 'truthTable'
@@ -75,6 +76,8 @@ export type CommandId =
 
 /** ⌘ on a Mac, Ctrl everywhere else; a worker has a navigator too. */
 export const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
+/** ⌥ on a Mac, Alt everywhere else. */
+export const ALT = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌥' : 'Alt';
 
 interface Command {
   readonly label: string;
@@ -109,6 +112,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   zoomOut: { label: 'Zoom out', keys: '−', group: 'View' },
   upLevel: { label: 'Up one level', keys: 'U', group: 'View' },
   topLevel: { label: 'Back to the top', group: 'View' },
+  back: { label: 'Back to where you were', keys: `${ALT}+←`, group: 'View' },
   analyser: { label: 'Logic analyser', keys: 'W', group: 'View' },
   trace: { label: 'Trace the selection in the analyser', keys: 'Shift+W', group: 'View' },
   truthTable: { label: 'Truth table of the selection', keys: 'T', group: 'View' },
@@ -196,7 +200,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'View',
     mnemonic: 'v',
-    entries: ['fit', 'zoomIn', 'zoomOut', MENU_SEPARATOR, 'openChip', 'upLevel', 'topLevel', MENU_SEPARATOR, 'analyser', 'trace', 'truthTable', MENU_SEPARATOR, 'theme']
+    entries: ['fit', 'zoomIn', 'zoomOut', MENU_SEPARATOR, 'openChip', 'upLevel', 'topLevel', 'back', MENU_SEPARATOR, 'analyser', 'trace', 'truthTable', MENU_SEPARATOR, 'theme']
   },
   {
     label: 'Simulate',
