@@ -304,6 +304,8 @@ export interface CircuitCommands {
   setInput(id: string, value: number): void;
   /** Makes these components `width` bits wide; see `setWidth` in `DocumentEdits`. */
   setWidth(ids: readonly string[], width: number): void;
+  /** Names a part on the level shown; blank text takes the name away. See `setLabel` in `DocumentEdits`. */
+  setLabel(id: string, label: string): void;
   /** Says what a switch or LED is for, as a chip's pin; see `setNote` in `DocumentEdits`. */
   setNote(id: string, note: string): void;
   /** Opens the program editor on a ROM of the level on the canvas, published as `program`; '' closes it. */

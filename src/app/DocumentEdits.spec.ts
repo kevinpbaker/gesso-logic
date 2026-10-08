@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CIRCUIT_VERSION, type Circuit } from '../sim/Circuit';
-import { connect, extract, insert, moveBy, place, relabel, remove, rotate, sameConnectivity, setNote } from './DocumentEdits';
+import { connect, extract, insert, moveBy, place, relabel, remove, rotate, sameConnectivity, setLabel, setNote } from './DocumentEdits';
 
 const empty: Circuit = { version: CIRCUIT_VERSION, components: [], wires: [] };
 
@@ -113,5 +113,44 @@ describe('setNote', () => {
     expect(setNote(noted, 'led', 'Lights when both are on')).toBe(noted);
     expect(setNote(c, 'g', 'an AND')).toBe(c);
     expect('note' in setNote(noted, 'led', '  ').components.find(x => x.id === 'led')!).toBe(false);
+  });
+});
+
+describe('setLabel', () => {
+  /** `inv`: a switch `a` into a NOT into an LED `y`. The top and a chip `pair` each wire an instance of it. */
+  function nested(): Circuit {
+    const level = (input: string, instance: string, wire: string): Circuit => ({
+      version: CIRCUIT_VERSION,
+      components: [
+        { id: input, kind: 'input', x: 0, y: 0 },
+        { id: instance, kind: 'chip', chip: 'inv', x: 4, y: 0 }
+      ],
+      wires: [{ id: wire, from: { component: input, pin: 'out' }, to: { component: instance, pin: 'a' } }]
+    });
+    return { ...level('x', 'i', 'w'), chips: { inv: andCircuit(), pair: level('s', 'j', 'v') } };
+  }
+
+  it('names a part, and blank text takes the name away', () => {
+    const c = andCircuit();
+    const named = setLabel(c, null, 'g', 'carry');
+    expect(named.components.find(x => x.id === 'g')?.label).toBe('carry');
+    expect('label' in setLabel(named, null, 'g', ' ').components.find(x => x.id === 'g')!).toBe(false);
+    expect(setLabel(c, null, 'nothing', 'x')).toBe(c);
+  });
+
+  it('renames a chip’s pin with its switch, and every wire to it on every instance follows', () => {
+    const c = nested();
+    const renamed = setLabel(c, 'inv', 'a', 'in');
+    expect(renamed.chips!['inv']!.components.find(x => x.id === 'a')?.label).toBe('in');
+    expect(renamed.wires.find(w => w.id === 'w')?.to).toEqual({ component: 'i', pin: 'in' });
+    expect(renamed.chips!['pair']!.wires.find(w => w.id === 'v')?.to).toEqual({ component: 'j', pin: 'in' });
+    // A wire to another pin is the same wire.
+    expect(renamed.chips!['inv']!.wires).toBe(renamed.chips!['inv']!.wires);
+  });
+
+  it('refuses a name another of the chip’s pins has', () => {
+    const c = nested();
+    expect(setLabel(c, 'inv', 'a', 'b')).toBe(c);
+    expect(setLabel(c, 'inv', 'a', 'led')).toBe(c);
   });
 });

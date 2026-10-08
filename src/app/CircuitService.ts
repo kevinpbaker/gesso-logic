@@ -41,6 +41,7 @@ import {
   renameChip,
   rotate,
   setProgram,
+  setLabel,
   setNote,
   setWidth,
   sameConnectivity,
@@ -689,6 +690,36 @@ export class CircuitService {
 
   setWidth(ids: readonly string[], width: number): void {
     this.editLevel(level => setWidth(level, ids, width));
+  }
+
+  setLabel(id: string, label: string): void {
+    const chip = this.path.length === 0 ? null : this.pathNow().at(-1)!.chip;
+    const part = this.level().circuit.components.find(c => c.id === id);
+    if (part === undefined) return;
+    const next = setLabel(this.circuit, chip, id, label);
+    if (next === this.circuit) {
+      if ((part.label ?? '') !== label.trim()) {
+        this.message = `Another pin of ${chip} is already called ${label.trim() || id}.`;
+        this.documentSubject.next(this.summary());
+      }
+      return;
+    }
+    // A pin renamed: what was traced on it, on any instance, follows it.
+    if (chip !== null && (part.kind === 'input' || part.kind === 'output')) {
+      const from = part.label ?? part.id;
+      const to = label.trim() === '' ? part.id : label.trim();
+      this.watches = this.watches.map(w => {
+        if (w.pin.pin !== from) return w;
+        let level: Circuit | undefined = this.circuit;
+        for (const step of w.path) {
+          const instance: Component | undefined = level?.components.find(c => c.id === step && c.kind === 'chip');
+          level = instance?.chip === undefined ? undefined : this.circuit.chips?.[instance.chip];
+        }
+        const instance = level?.components.find(c => c.id === w.pin.component);
+        return instance?.kind === 'chip' && instance.chip === chip ? { ...w, pin: { component: w.pin.component, pin: to } } : w;
+      });
+    }
+    this.edit(next);
   }
 
   setNote(id: string, note: string): void {

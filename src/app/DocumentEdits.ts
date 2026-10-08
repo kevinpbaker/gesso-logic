@@ -121,6 +121,46 @@ export const WIDENABLE: ReadonlySet<Kind> = new Set(['input', 'constant', 'outpu
  * change.
  */
 /**
+ * Names a part on a level: the top when `chip` is null, or that chip's
+ * definition. Blank text takes the name away, and the part goes by its
+ * id. A switch or LED in a chip is one of its pins, named by its label,
+ * so the pin is renamed too: every wire to it, on every instance of the
+ * chip, at every level, follows. A name another of the chip's pins has
+ * is refused, as is a level or part that is not there: the document
+ * comes back unchanged.
+ */
+export function setLabel(document: Circuit, chip: string | null, id: string, label: string): Circuit {
+  const level = chip === null ? document : document.chips?.[chip];
+  const part = level?.components.find(c => c.id === id);
+  if (level === undefined || part === undefined) return document;
+  const text = label.trim();
+  if ((part.label ?? '') === text) return document;
+  const { label: _, ...rest } = part;
+  const renamed: Component = text === '' ? rest : { ...rest, label: text };
+  const relabelled: Circuit = { ...level, components: level.components.map(c => (c === part ? renamed : c)) };
+  const isPin = chip !== null && (part.kind === 'input' || part.kind === 'output');
+  if (!isPin) {
+    return chip === null ? { ...relabelled, chips: document.chips } : { ...document, chips: { ...document.chips, [chip]: relabelled } };
+  }
+  const from = part.label ?? part.id;
+  const to = text === '' ? part.id : text;
+  const clash = level.components.some(c => c !== part && (c.kind === 'input' || c.kind === 'output') && (c.label ?? c.id) === to);
+  if (clash) return document;
+  if (from === to) return { ...document, chips: { ...document.chips, [chip]: relabelled } };
+  // Every wire to the pin, on any instance of the chip, wherever it is.
+  const retarget = (circuit: Circuit): Circuit => {
+    const instances = new Set(circuit.components.filter(c => c.kind === 'chip' && c.chip === chip).map(c => c.id));
+    if (instances.size === 0) return circuit;
+    const moves = (ref: PinRef) => instances.has(ref.component) && ref.pin === from;
+    const end = (ref: PinRef): PinRef => (moves(ref) ? { component: ref.component, pin: to } : ref);
+    return { ...circuit, wires: circuit.wires.map(w => (moves(w.from) || moves(w.to) ? { ...w, from: end(w.from), to: end(w.to) } : w)) };
+  };
+  const chips: Record<string, Circuit> = {};
+  for (const [name, definition] of Object.entries(document.chips ?? {})) chips[name] = retarget(name === chip ? relabelled : definition);
+  return { ...retarget(document), chips };
+}
+
+/**
  * Says what a switch or LED is for — what hovering it as a chip's pin
  * shows — or, given blank text, stops saying. Unchanged for any other
  * kind of part, or no change.

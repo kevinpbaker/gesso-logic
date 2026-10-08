@@ -31,7 +31,8 @@ const same = (a: SelectionSummary, b: SelectionSummary) =>
   a.one?.width === b.one?.width &&
   a.one?.chip === b.one?.chip &&
   a.one?.label === b.one?.label &&
-  a.one?.note === b.one?.note;
+  a.one?.note === b.one?.note &&
+  a.one?.ownLabel === b.one?.ownLabel;
 
 export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: Observable<string | null>): UiChild {
   const circuit = ctx.channel(Circuit);
@@ -44,6 +45,7 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
   const widthText = internalState('');
   const valueText = internalState('');
   const noteText = internalState('');
+  const labelText = internalState('');
   let current: SelectionSummary = { parts: 0, wires: 0, one: null };
   ctx.effect(selection, s => {
     current = s;
@@ -51,6 +53,7 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
     widthText.value = s.one === null ? '' : String(s.one.width);
     valueText.value = '';
     noteText.value = s.one?.note ?? '';
+    labelText.value = s.one?.ownLabel ?? '';
   });
 
   const rename = () => {
@@ -62,6 +65,10 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
     const width = Number.parseInt(widthText.value, 10);
     const one = current.one;
     if (one !== null && Number.isInteger(width) && width >= 1 && width <= 32 && width !== one.width) circuit.send.setWidth([one.id], width);
+  };
+  const applyLabel = () => {
+    const one = current.one;
+    if (one !== null && labelText.value.trim() !== (one.ownLabel ?? '')) circuit.send.setLabel(one.id, labelText.value);
   };
   const applyNote = () => {
     const one = current.one;
@@ -115,8 +122,22 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
       if (chip !== null) {
         rows.push(<text key="inside" text={`Inside ${chip}: an edit here changes every ${chip}. Undo takes it back.`} fontSize={11} color="textMuted" textWrap="word" />);
       }
+      // Inside a chip a switch's or LED's label is the chip's pin name.
+      if (one !== null) {
+        const pin = chip !== null && (one.kind === 'input' || one.kind === 'output');
+        rows.push(
+          labelled(
+            'Label',
+            <row gap={6} y="center">
+              {field('label', pin ? 'Label, which is the pin’s name' : 'Label', labelText, 120, applyLabel)}
+              <text text={pin ? 'pin name' : 'Enter'} fontSize={11} color="textMuted" />
+            </row>,
+            'label'
+          )
+        );
+      }
       if (one?.kind === 'chip' && one.chip !== null) {
-        rows.push(labelled('Name', <row gap={6}>{field('name', 'Chip name', chipName, 120, rename)}{small('Rename', rename)}</row>, 'name'));
+        rows.push(labelled('Chip', <row gap={6}>{field('name', 'Chip name', chipName, 120, rename)}{small('Rename', rename)}</row>, 'name'));
       }
       if (one !== null && WIDENABLE.has(one.kind)) {
         rows.push(labelled('Width', <row gap={6} y="center">{field('width', 'Width in bits', widthText, 44, applyWidth)}<text text="bits · Enter" fontSize={11} color="textMuted" /></row>, 'width'));

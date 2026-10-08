@@ -80,6 +80,8 @@ export interface SelectionSummary {
     readonly chip: string | null;
     /** A switch's or LED's note; null for none. */
     readonly note: string | null;
+    /** Its own label, as given; null when it has none and goes by its id. */
+    readonly ownLabel: string | null;
   } | null;
 }
 
@@ -852,7 +854,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
                 width: scene.widths[only]!,
                 label: scene.labels[only] ?? null,
                 chip: scene.chipNames[only] ?? null,
-                note: scene.entries[only]!.note
+                note: scene.entries[only]!.note,
+                ownLabel: scene.entries[only]!.label
               }
       };
     },

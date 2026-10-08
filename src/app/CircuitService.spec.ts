@@ -409,6 +409,20 @@ describe('pins traced from the canvas', () => {
     expect(path).toEqual([]);
   });
 
+  it('renames a chip’s pin from inside it, and what is traced on the pin follows', () => {
+    const service = new Harness().service;
+    let view!: AnalyserView;
+    service.analyserView.subscribe(v => (view = v));
+    service.load(inverter());
+    service.setAnalyserView(null, 4, 100);
+    service.watch([{ component: 'inv', pin: 'y' }]);
+    service.openChip('inv');
+    service.setLabel('y', 'out');
+    service.closeChip(0);
+    expect(service['circuit'].wires.map(w => w.from.pin)).toContain('out');
+    expect(view.traces.filter(t => t.watched).map(t => t.name)).toEqual(['inv.out']);
+  });
+
   it('forgets what was traced when another document is opened', () => {
     const service = new Harness().service;
     let view!: AnalyserView;
