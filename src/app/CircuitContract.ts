@@ -414,6 +414,8 @@ export interface CircuitCommands {
   runTests(all: boolean, follow: boolean): void;
   /** Stops running the level's tests after every edit. */
   stopTests(): void;
+  /** Brings back an earlier version, by its id in `versions`, keeping a copy of the document as it is first. */
+  restoreVersion(id: number): void;
   /** Writes what the analyser holds as a VCD file, published as `exported`. */
   exportWaveforms(): void;
   /** Opens a link's circuit, the text after its `#`, as a new document that is not saved anywhere yet. */
@@ -440,6 +442,7 @@ export interface CircuitView {
   readonly share: ShareView;
   readonly exported: ExportView;
   readonly tested: TestsView;
+  readonly versions: VersionsView;
 }
 
 /**
@@ -483,6 +486,23 @@ export interface TestsView {
     readonly failed: number;
     readonly failures: readonly { readonly line: number; readonly message: string }[];
     readonly error: string | null;
+  }[];
+}
+
+/**
+ * The earlier versions kept of the document, newest first: see
+ * `Versions.ts`. Small — fifty at most — and changed only when a copy
+ * is kept, so published whole.
+ */
+export interface VersionsView {
+  readonly entries: readonly {
+    readonly id: number;
+    /** When it was kept, in milliseconds since the epoch. */
+    readonly at: number;
+    /** Why: before the first change, while editing, before it was replaced, before a restore. */
+    readonly reason: 'opened' | 'editing' | 'replaced' | 'restored';
+    readonly name: string | null;
+    readonly parts: number;
   }[];
 }
 
@@ -535,6 +555,7 @@ export const EMPTY_SIGNALS: Signals = { cycle: 0, chunks: {} };
 export const NO_TABLE: TableView = { ids: [], inputs: [], outputs: [], rows: [], error: null };
 export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
 export const NO_SHARE: ShareView = { serial: 0, fragment: '', error: null };
+export const NO_VERSIONS: VersionsView = { entries: [] };
 export const NO_TESTS: TestsView = { serial: 0, all: false, results: [] };
 export const NO_EXPORT: ExportView = { serial: 0, name: '', text: '', mediaType: '', error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [], history: null, past: null };
@@ -552,7 +573,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   found: NOTHING_FOUND,
   share: NO_SHARE,
   exported: NO_EXPORT,
-  tested: NO_TESTS
+  tested: NO_TESTS,
+  versions: NO_VERSIONS
 });
 
 /**

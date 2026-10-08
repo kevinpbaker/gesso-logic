@@ -4,6 +4,7 @@ import type { UiChild, UiKeyboardEvent, UiTextChangeEvent } from 'gesso-core';
 import { Dialog } from 'gesso-components';
 import { each, type InternalState, type ShellRecentFile } from 'gesso-framework';
 
+import type { VersionsView } from '../app/CircuitContract';
 import { INSTRUCTION_GROUPS, written } from '../cpu/Isa';
 import { action, field, heading, small } from './controls';
 import { MOD, parseRate, shortcutSections } from './Commands';
@@ -501,3 +502,84 @@ export function shareLink(open: Observable<boolean>, link: Observable<string>, c
 
 /** Past this many characters a link may be cut by a chat or email app. */
 const LONG_LINK = 8_000;
+
+const VERSION_REASONS: Readonly<Record<VersionsView['entries'][number]['reason'], string>> = {
+  opened: 'Before your changes',
+  editing: 'While you were editing',
+  replaced: 'Before another circuit was opened',
+  restored: 'Before an earlier version was restored'
+};
+
+/** When a version was kept, as a person says it: today's by the time, this year's by the day. */
+export function versionTime(at: number, now = Date.now()): string {
+  const when = new Date(at);
+  const today = new Date(now);
+  const time = when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const days = Math.round((new Date(today.toDateString()).getTime() - new Date(when.toDateString()).getTime()) / 86_400_000);
+  if (days === 0) return `Today ${time}`;
+  if (days === 1) return `Yesterday ${time}`;
+  const day = when.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(when.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
+  return `${day} ${time}`;
+}
+
+/**
+ * The earlier versions kept of the document, newest first, each with a
+ * Restore. Restoring keeps what is open first, so it is undone the same
+ * way, and nothing here asks before it acts.
+ */
+export function versionHistory(open: Observable<boolean>, versions: Observable<VersionsView>, restore: (id: number) => void, close: () => void): UiChild {
+  const WIDTH = 520;
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Restore an earlier version"
+      width={WIDTH}
+      content={
+        <column gap={10} width={inner(WIDTH)}>
+          <text
+            text="Copies of the circuit kept in this browser: before your first change, every few minutes while you edit, and before it is replaced. Restoring one keeps what is open now in this list too."
+            width={inner(WIDTH)}
+            fontSize={12}
+            color="textMuted"
+            textWrap="word"
+          />
+          <scrollview maxHeight={360} overscrollBehavior="contain">
+            <column gap={2} width={inner(WIDTH)}>
+              {each(
+                versions.pipe(map(v => (v.entries.length === 0 ? [{ id: -1, at: 0, reason: 'opened' as const, name: null, parts: 0 }] : v.entries))),
+                'id',
+                entry =>
+                  entry.id < 0 ? (
+                    <text text="Nothing kept yet. A copy is kept before your first change to a circuit." width={inner(WIDTH)} fontSize={12} color="textMuted" textWrap="word" />
+                  ) : (
+                    <row gap={10} y="center" width={inner(WIDTH)} paddingTop={4} paddingBottom={4}>
+                      <column gap={1} flex={1} minWidth={0}>
+                        <text
+                          text={`${versionTime(entry.at)} · ${entry.name ?? 'Untitled circuit'}`}
+                          fontSize={12}
+                          fontWeight={600}
+                          color="text"
+                          textWrap="none"
+                          textOverflow="ellipsis"
+                        />
+                        <text
+                          text={`${VERSION_REASONS[entry.reason]} · ${entry.parts} part${entry.parts === 1 ? '' : 's'}`}
+                          fontSize={11}
+                          color="textMuted"
+                          textWrap="none"
+                          textOverflow="ellipsis"
+                        />
+                      </column>
+                      {small('Restore', () => restore(entry.id))}
+                    </row>
+                  )
+              )}
+            </column>
+          </scrollview>
+          <row x="end" width={inner(WIDTH)}>{action('Close', close)}</row>
+        </column>
+      }
+    />
+  );
+}

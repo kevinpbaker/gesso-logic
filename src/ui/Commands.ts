@@ -36,6 +36,7 @@ export type CommandId =
   | 'openRecent'
   | 'save'
   | 'saveAs'
+  | 'versions'
   | 'share'
   | 'exportSvg'
   | 'exportPng'
@@ -103,6 +104,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   openRecent: { label: 'Open recent…', group: 'File' },
   save: { label: 'Save', keys: `${MOD}+S`, group: 'File' },
   saveAs: { label: 'Save as…', keys: `${MOD}+Shift+S`, group: 'File' },
+  versions: { label: 'Restore an earlier version…', group: 'File' },
   importChip: { label: 'Import a file as a chip…', group: 'File' },
   share: { label: 'Share a link to this circuit…', group: 'File' },
   exportSvg: { label: 'Export a picture as SVG…', group: 'File' },
@@ -194,7 +196,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'File',
     mnemonic: 'f',
-    entries: ['new', 'open', 'openRecent', MENU_SEPARATOR, 'save', 'saveAs', 'share', MENU_SEPARATOR, 'exportSvg', 'exportPng', 'exportVcd', MENU_SEPARATOR, 'importChip']
+    entries: ['new', 'open', 'openRecent', MENU_SEPARATOR, 'save', 'saveAs', 'versions', 'share', MENU_SEPARATOR, 'exportSvg', 'exportPng', 'exportVcd', MENU_SEPARATOR, 'importChip']
   },
   {
     label: 'Edit',

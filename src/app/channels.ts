@@ -26,7 +26,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         found: service.found,
         share: service.shared,
         exported: service.exported,
-        tested: service.tested
+        tested: service.tested,
+        versions: service.versionsView
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -75,6 +76,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         fillTests: () => service.fillTests(),
         runTests: (all, follow) => service.runTests(all, follow),
         stopTests: () => service.stopTests(),
+        restoreVersion: id => void service.restoreVersion(id),
         openShared: fragment => service.openShared(fragment),
         showCycle: cycle => service.showCycle(cycle),
         resumeFromHere: () => service.resumeFromHere(),

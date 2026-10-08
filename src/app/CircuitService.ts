@@ -18,19 +18,21 @@ import type {
   ShareView,
   ExportView,
   TestsView,
+  VersionsView,
   ProgramView,
   SaveRequest,
   Status,
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_VERSIONS, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
 import { History } from './History';
 import { circuitOfLink, linkOf } from './ShareLink';
 import { Analyser } from './Analyser';
 import { writeVcd } from './Vcd';
 import { runTests, testsFromNow } from './CircuitTests';
+import { VERSION_EVERY_MS, Versions, type VersionReason, type VersionStore } from './Versions';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
 import {
@@ -101,6 +103,10 @@ export interface ServiceOptions {
   readonly store?: AutosaveStore;
   /** How an autosave is put off until edits stop; returns a cancel. A spec passes one it fires by hand. */
   readonly delay?: (run: () => void, ms: number) => () => void;
+  /** Where earlier versions are kept. Without one, none are. */
+  readonly versions?: VersionStore;
+  /** The time of day, for dating versions: `Date.now` unless a spec moves it by hand. */
+  readonly wallClock?: () => number;
 }
 
 /**
@@ -175,6 +181,7 @@ export class CircuitService {
   readonly shared: Observable<ShareView>;
   readonly exported: Observable<ExportView>;
   readonly tested: Observable<TestsView>;
+  readonly versionsView: Observable<VersionsView>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
   readonly analyserView: Observable<AnalyserView>;
@@ -191,6 +198,11 @@ export class CircuitService {
   private readonly exportSubject = new BehaviorSubject<ExportView>(NO_EXPORT);
   private exportSerial = 0;
   private readonly testsSubject = new BehaviorSubject<TestsView>(NO_TESTS);
+  private readonly versionsSubject = new BehaviorSubject<VersionsView>(NO_VERSIONS);
+  private readonly versions: Versions | null;
+  private readonly wallClock: () => number;
+  /** The document — by its `opened` count — whose state before its first change has been kept. */
+  private versionedOpen = -1;
   /** Whether the level's tests run again after each edit, and the run waiting for edits to stop. */
   private followingTests = false;
   private cancelTestRun: (() => void) | null = null;
@@ -304,6 +316,9 @@ export class CircuitService {
     this.shared = this.shareSubject;
     this.exported = this.exportSubject;
     this.tested = this.testsSubject;
+    this.versionsView = this.versionsSubject;
+    this.wallClock = options.wallClock ?? Date.now;
+    this.versions = options.versions === undefined ? null : new Versions(options.versions, this.wallClock);
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
     this.analyserView = this.analyserSubject;
@@ -328,6 +343,8 @@ export class CircuitService {
       originals?: Readonly<Record<string, Circuit>>;
     } = { name: null, handle: null }
   ): void {
+    // What was open, kept before it goes, saved or not.
+    this.keepVersion('replaced');
     this.opened++;
     // What the file traced, traced again; the document itself does not
     // carry them, so an edit's undo does not take a trace away.
@@ -518,6 +535,7 @@ export class CircuitService {
     // the document now, and the autosave must not replace it.
     const openedAtAsk = this.opened;
     const revisionAtAsk = this.revision;
+    const versionsRead = this.versions?.load();
     try {
       const { value } = await this.store.read(AUTOSAVE_KEY);
       const saved = value === null ? null : (JSON.parse(value) as Autosave);
@@ -545,7 +563,52 @@ export class CircuitService {
       // person starts with an empty canvas, which is what they would
       // have had without it, and the next change overwrites it.
     }
+    await versionsRead;
     this.autosaving = true;
+    this.publishVersions();
+  }
+
+  /**
+   * Keeps a copy of the document as it is now, in the version history:
+   * once the autosave is running, and when there is anything to keep.
+   */
+  private keepVersion(reason: VersionReason): void {
+    const versions = this.versions;
+    if (versions === null || !this.autosaving) return;
+    if (this.circuit.components.length === 0 && Object.keys(this.circuit.chips ?? {}).length === 0) return;
+    const record = { file: writeCircuit(this.withTraces()), name: this.name, handle: this.handle, ...(this.changedOriginals() === undefined ? {} : { originals: this.changedOriginals()! }) };
+    void versions.keep(record, reason, this.circuit.components.length).then(() => this.publishVersions());
+    this.publishVersions();
+  }
+
+  private publishVersions(): void {
+    const entries = this.versions?.list ?? [];
+    if (entries.length === this.versionsSubject.value.entries.length && entries.every((e, i) => e.id === this.versionsSubject.value.entries[i]!.id)) return;
+    this.versionsSubject.next({ entries: entries.map(({ id, at, reason, name, parts }) => ({ id, at, reason, name, parts })) });
+  }
+
+  async restoreVersion(id: number): Promise<void> {
+    const entry = this.versions?.list.find(e => e.id === id);
+    const record = entry === undefined ? null : await this.versions!.read(id);
+    let circuit: Circuit;
+    try {
+      if (record === null) throw new CircuitFileError('it is no longer kept');
+      circuit = readCircuit(record.file);
+    } catch (error) {
+      if (!(error instanceof CircuitFileError) && !(error instanceof SyntaxError)) throw error;
+      this.message = `Couldn't restore that version: ${error.message}`;
+      this.documentSubject.next(this.summary());
+      return;
+    }
+    this.keepVersion('restored');
+    this.load(circuit, {
+      name: record!.name,
+      handle: record!.handle,
+      dirty: true,
+      originals: record!.originals === undefined ? undefined : readCircuit(record!.originals).chips
+    });
+    this.message = 'Restored an earlier version. What was open before is kept in the list too.';
+    this.documentSubject.next(this.summary());
   }
 
   loadScene(name: SceneName): void {
@@ -1147,6 +1210,11 @@ export class CircuitService {
     if (next === this.circuit) {
       return;
     }
+    // The document as it was opened, kept before its first change.
+    if (this.versionedOpen !== this.opened) {
+      this.versionedOpen = this.opened;
+      this.keepVersion('opened');
+    }
     const folds = gesture !== undefined && gesture === this.lastGesture && this.undoStack.length > 0;
     if (!folds) {
       this.undoStack.push({ circuit: this.circuit, gesture: gesture ?? null });
@@ -1604,6 +1672,11 @@ export class CircuitService {
         originals: this.changedOriginals()
       };
       void this.store?.write(AUTOSAVE_KEY, JSON.stringify(record));
+      // Every few minutes, while it is being changed: the autosave also
+      // follows the view, and a document only looked at is kept as it was
+      // when it is replaced.
+      const edited = this.versionedOpen === this.opened;
+      if (this.versions !== null && edited && this.wallClock() - this.versions.newestAt >= VERSION_EVERY_MS) this.keepVersion('editing');
     }, AUTOSAVE_MS);
   }
 

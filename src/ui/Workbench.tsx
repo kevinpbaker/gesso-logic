@@ -13,7 +13,7 @@ import { fileActions, type FileActions } from '../canvas/Files';
 import { waveformPanel } from '../canvas/Waveform';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, type Discard, type FindItem } from './Dialogs';
+import { clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, versionHistory, type Discard, type FindItem } from './Dialogs';
 import { kindName } from '../app/Describe';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
@@ -94,6 +94,7 @@ export function workbench(ctx: ComponentContext) {
   const showFind = internalState(false);
   const showShare = internalState(false);
   const showTests = internalState(false);
+  const showVersions = internalState(false);
   const shareUrl = internalState('');
   const findText = internalState('');
   const findActive = internalState(0);
@@ -516,6 +517,8 @@ export function workbench(ctx: ComponentContext) {
         return circuit.send.share();
       case 'tests':
         return openDialog(showTests);
+      case 'versions':
+        return openDialog(showVersions);
       case 'runAllTests':
         return circuit.send.runTests(true, false);
       case 'exportVcd':
@@ -1243,6 +1246,16 @@ export function workbench(ctx: ComponentContext) {
       />
       {programEditor(ctx, () => canvas.focus())}
       {testsDialog(ctx, showTests, closeDialog(showTests))}
+      {versionHistory(
+        showVersions,
+        circuit.view.versions,
+        id => {
+          showVersions.value = false;
+          circuit.send.restoreVersion(id);
+          canvas.focus();
+        },
+        closeDialog(showVersions)
+      )}
     </column>
   );
 }

@@ -13,6 +13,9 @@ import { circuitChannels } from './channels';
  * page forwards.
  */
 export function serveCircuit(host?: PortHost): void {
-  const service = new CircuitService({ store: new OpfsStorage({ directory: 'gessologic' }) });
+  const service = new CircuitService({
+    store: new OpfsStorage({ directory: 'gessologic' }),
+    versions: new OpfsStorage({ directory: 'gessologic-versions' })
+  });
   serveChannels(circuitChannels(service), host);
 }
