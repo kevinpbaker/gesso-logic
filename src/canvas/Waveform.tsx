@@ -1,4 +1,4 @@
-import { combineLatest, type Observable } from 'rxjs';
+import { combineLatest, Subject, type Observable } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 
 import {
@@ -14,6 +14,7 @@ import {
 import { internalState, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type AnalyserView } from '../app/CircuitContract';
+import type { TraceWhere } from './CircuitCanvas';
 
 /**
  * The logic analyser's panel: a strip of waveforms along the bottom of
@@ -33,7 +34,9 @@ import { Circuit, type AnalyserView } from '../app/CircuitContract';
  *   - the trigger field, `name = value`, pauses the circuit on the cycle
  *     that becomes true;
  *   - a pin or wire Alt+clicked on the canvas, at any depth, is a row of
- *     its own: hovering its name says where it is, and its × takes it away.
+ *     its own: hovering its name says where it is, and its × takes it away;
+ *   - hovering a row lights what it traces on the canvas, and a click on
+ *     its name takes the canvas there.
  *
  * One-bit rows are square waves. A bus is a staircase — its height is its
  * value — with the value in hex where a step is wide enough to read, so a
@@ -54,6 +57,10 @@ export interface WaveformPanel {
   readonly open: Observable<boolean>;
   /** How tall the panel is, over the bottom of the canvas, when open. */
   readonly height: Observable<number>;
+  /** Where the hovered row's signal is; null while no row is hovered. */
+  readonly hovered: Observable<TraceWhere | null>;
+  /** Where a row whose name was clicked has its signal: the canvas goes there. */
+  readonly picked: Observable<TraceWhere>;
   toggle(): void;
 }
 
@@ -64,8 +71,10 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   const span = internalState(256);
   const start = internalState<number | null>(null);
   const cursor = internalState<number | null>(null);
-  /** The row whose name the pointer is over, to say where its pin is. */
+  /** The row whose name the pointer is over, to say where its pin is, and the row it is over at all. */
   const named = internalState<number | null>(null);
+  const overRow = internalState<number | null>(null);
+  const picked = new Subject<TraceWhere>();
   const triggerText = internalState('');
   const view = circuit.view.analyser;
   let columns = 0;
@@ -100,6 +109,7 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
   const pointerMove = (event: UiPointerEvent) => {
     const row = xOf(event) < GUTTER ? rowOf(event) : null;
     if (named.value !== row) named.value = row;
+    if (overRow.value !== rowOf(event)) overRow.value = rowOf(event);
     if (drag === null) return;
     const dx = xOf(event) - drag.x;
     if (Math.abs(dx) >= 3) drag.moved = true;
@@ -110,7 +120,10 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     if (drag !== null && !drag.moved && x >= GUTTER) cursor.value = cycleAt(x, view.value);
     // A traced pin's ×.
     const trace = view.value.traces[rowOf(event)];
-    if (drag !== null && !drag.moved && x >= GUTTER - REMOVE && x < GUTTER && trace?.watched === true) circuit.send.unwatch(trace.id);
+    const removing = trace?.watched === true && x >= GUTTER - REMOVE && x < GUTTER;
+    if (drag !== null && !drag.moved && removing) circuit.send.unwatch(trace.id);
+    // Its name: the canvas goes to it.
+    else if (drag !== null && !drag.moved && x < GUTTER && trace !== undefined) picked.next({ path: trace.path, pin: trace.pin });
     drag = null;
   };
   const wheel = (event: UiWheelEvent) => {
@@ -231,7 +244,10 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
-        onPointerLeave={() => (named.value = null)}
+        onPointerLeave={() => {
+          named.value = null;
+          overRow.value = null;
+        }}
         onWheel={wheel}
         overscrollBehavior="contain">
         <paint width={percent(100)} height={percent(100)} paint={paint} />
@@ -239,7 +255,15 @@ export function waveformPanel(ctx: ComponentContext, canvasWidth: Observable<num
     </column>
   );
 
-  return { element, open, height, toggle: () => (open.value = !open.value) };
+  const hovered = combineLatest([overRow, view, open]).pipe(
+    map(([row, v, isOpen]) => {
+      const trace = row === null || !isOpen ? undefined : v.traces[row];
+      return trace === undefined ? null : { path: trace.path, pin: trace.pin };
+    }),
+    distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b))
+  );
+
+  return { element, open, height, hovered, picked, toggle: () => (open.value = !open.value) };
 }
 
 /**

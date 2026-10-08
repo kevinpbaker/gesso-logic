@@ -86,6 +86,12 @@ export interface HoverCard {
   readonly value: string;
 }
 
+/**
+ * What the analyser's hovered row points at on this level: a pin, its
+ * net lit; or the chip on this level that its pin is somewhere inside.
+ */
+export type Highlight = { readonly kind: 'pin'; readonly pin: PinRef } | { readonly kind: 'chip'; readonly id: string };
+
 type Hit =
   | { readonly kind: 'pin'; readonly pin: PinRef; readonly at: Point }
   | { readonly kind: 'component'; readonly id: string }
@@ -165,6 +171,7 @@ export class Editor {
   private readonly arrowsHeld = new Set<string>();
   /** Whether an arrow key has held a button yet: the tour's first step. */
   playedWithArrows = false;
+  private highlight: Highlight | null = null;
 
   constructor(private readonly deps: EditorDeps) {
     this.now = deps.now ?? (() => performance.now());
@@ -534,6 +541,14 @@ export class Editor {
     return w < 0 ? null : scene.wireEnds[w]!.from;
   }
 
+  /** Lights what an analyser row is tracing; null lights nothing. */
+  setHighlight(highlight: Highlight | null): void {
+    const was = this.highlight;
+    if (was === highlight || (was !== null && highlight !== null && JSON.stringify(was) === JSON.stringify(highlight))) return;
+    this.highlight = highlight;
+    this.deps.changed();
+  }
+
   /** Stops whatever is under way and lets go of the selection. */
   cancel(): void {
     this.mode = { kind: 'idle' };
@@ -650,6 +665,8 @@ export class Editor {
     const scene = this.deps.scene();
     const px = 1 / this.deps.scale();
 
+    if (this.highlight !== null) this.drawHighlight(surface, this.highlight, px);
+
     if (this.selection.size > 0) {
       surface.beginPath();
       for (const id of this.selection) {
@@ -762,6 +779,49 @@ export class Editor {
       const card = this.hoverCard();
       if (card !== null) this.drawCard(surface, card, px);
     }
+  }
+
+  /**
+   * What an analyser row traces: its pin ringed and every wire on its net
+   * drawn over, or the chip it is inside outlined, in the secondary
+   * colour, under the selection.
+   */
+  private drawHighlight(surface: PaintSurface, highlight: Highlight, px: number): void {
+    const scene = this.deps.scene();
+    if (highlight.kind === 'chip') {
+      const c = scene.indexOf.get(highlight.id);
+      if (c === undefined) return;
+      surface.beginPath();
+      surface.roundRect(scene.x[c]! - 6 * px, scene.y[c]! - 6 * px, scene.width(c) + 12 * px, scene.height(c) + 12 * px, 6 * px);
+      surface.strokeColor('secondary');
+      surface.lineWidth(3 * px);
+      surface.lineDash([6 * px, 4 * px]);
+      surface.stroke();
+      surface.lineDash([]);
+      return;
+    }
+    const c = scene.indexOf.get(highlight.pin.component);
+    if (c === undefined) return;
+    const nets = scene.entries[c]!.nets;
+    const net = nets[highlight.pin.pin] ?? nets[`${highlight.pin.pin}[0]`] ?? -1;
+    if (net >= 0) {
+      const p = scene.wirePoints;
+      surface.beginPath();
+      for (let w = 0; w < scene.wireCount; w++) {
+        if (scene.wireNet[w] !== net) continue;
+        surface.moveTo(p[scene.wireStart[w]!]!, p[scene.wireStart[w]! + 1]!);
+        for (let i = scene.wireStart[w]! + 2; i < scene.wireStart[w + 1]!; i += 2) surface.lineTo(p[i]!, p[i + 1]!);
+      }
+      surface.strokeColor('secondary');
+      surface.lineWidth(5 * px);
+      surface.stroke();
+    }
+    const at = pinOf(scene, highlight.pin);
+    surface.beginPath();
+    surface.arc(at.x, at.y, 8 * px, 0, Math.PI * 2);
+    surface.strokeColor('secondary');
+    surface.lineWidth(3 * px);
+    surface.stroke();
   }
 
   /**

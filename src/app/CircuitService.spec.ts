@@ -381,6 +381,34 @@ describe('pins traced from the canvas', () => {
     expect(view.traces.some(t => t.watched)).toBe(false);
   });
 
+  it('says where each trace is, and goes to a level in one step', () => {
+    const service = new Harness().service;
+    let view!: AnalyserView;
+    let path: readonly string[] = [];
+    let opened = 0;
+    service.analyserView.subscribe(v => (view = v));
+    service.document.subscribe(d => ((path = d.path.map(l => l.id)), (opened = d.opened)));
+    service.load(inverter());
+    service.setAnalyserView(null, 4, 100);
+    service.openChip('inv');
+    service.watch([{ component: 'n', pin: 'out' }]);
+    service.closeChip(0);
+    expect(view.traces.map(t => [t.name, t.path, t.pin])).toEqual([
+      ['led', [], { component: 'led', pin: 'in' }],
+      ['n.out', ['inv'], { component: 'n', pin: 'out' }]
+    ]);
+
+    const before = opened;
+    service.openPath(['inv']);
+    expect(path).toEqual(['inv']);
+    expect(opened).toBe(before + 1);
+    // Already there: nothing happens. A path that stops leading goes as far as it does.
+    service.openPath(['inv']);
+    expect(opened).toBe(before + 1);
+    service.openPath(['nothing', 'inv']);
+    expect(path).toEqual([]);
+  });
+
   it('forgets what was traced when another document is opened', () => {
     const service = new Harness().service;
     let view!: AnalyserView;

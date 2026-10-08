@@ -612,6 +612,22 @@ export class CircuitService {
     this.changedLevel();
   }
 
+  openPath(ids: readonly string[]): void {
+    let circuit = this.circuit;
+    const path: string[] = [];
+    for (const id of ids) {
+      const chip = circuit.components.find(c => c.id === id && c.kind === 'chip');
+      const definition = chip?.chip === undefined ? undefined : this.circuit.chips?.[chip.chip];
+      if (definition === undefined) break;
+      path.push(id);
+      circuit = definition;
+    }
+    if (path.length === this.path.length && path.every((id, i) => id === this.path[i])) return;
+    this.path.length = 0;
+    this.path.push(...path);
+    this.changedLevel();
+  }
+
   /** A new level on the canvas: framed afresh, like a document opened, but the document is the same one. */
   private changedLevel(): void {
     this.opened++;
@@ -1183,7 +1199,15 @@ export class CircuitService {
     const window = this.analyser.window(from, span, columns);
     return {
       open: true,
-      traces: this.analyser.traced.map(({ id, name, width, watched, title }) => ({ id, name, width, watched: watched === true, title: title ?? name })),
+      traces: this.analyser.traced.map(({ id, name, width, watched, title, path, pin }) => ({
+        id,
+        name,
+        width,
+        watched: watched === true,
+        title: title ?? name,
+        path: path ?? [],
+        pin: pin ?? { component: id, pin: 'in' }
+      })),
       first: this.analyser.first,
       last: this.analyser.last,
       following: start === null,
@@ -1218,7 +1242,7 @@ export class CircuitService {
       });
     const watched = this.watches.flatMap(w => {
       const found = this.resolveWatch(w);
-      return found === null ? [] : [{ id: w.id, ...found }];
+      return found === null ? [] : [{ id: w.id, path: w.path, pin: w.pin, ...found }];
     });
     const names = new Map<string, number>();
     for (const n of [...traces.map(t => t.name), ...watched.map(w => w.name)]) names.set(n, (names.get(n) ?? 0) + 1);
@@ -1230,7 +1254,9 @@ export class CircuitService {
         width: w.width,
         nets: w.nets,
         watched: true,
-        title: w.title
+        title: w.title,
+        path: w.path,
+        pin: w.pin
       }))
     ]);
   }

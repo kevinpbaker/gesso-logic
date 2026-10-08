@@ -1,5 +1,5 @@
 import { BehaviorSubject, combineLatest, Subject, type Observable } from 'rxjs';
-import { debounceTime, distinctUntilChanged, map, skip } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, map } from 'rxjs/operators';
 
 import {
   dropTarget,
@@ -21,7 +21,8 @@ import {
 import { each, FocusService, FrameService, internalState, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type Signals } from '../app/CircuitContract';
-import { intersects, type Box } from '../app/Layout';
+import { intersects, pinAt, type Box } from '../app/Layout';
+import type { PinRef } from '../sim/Circuit';
 import { signalOf } from '../app/SignalPacking';
 import { Editor } from './Editor';
 import type { Kind } from '../sim/Primitives';
@@ -123,6 +124,22 @@ export interface CanvasHandle {
   readonly editorChanged: BehaviorSubject<number>;
   /** Something was just sent to the analyser to trace, for the page to open it. */
   readonly traced: Observable<void>;
+  /**
+   * Lights what an analyser row traces: its pin and net when it is on
+   * this level, the chip it is inside when it is deeper; null for none.
+   */
+  highlightTrace(where: TraceWhere | null): void;
+  /**
+   * Centres the view on a traced pin and selects its part, once its
+   * level is on the canvas: the caller asks for the level.
+   */
+  reveal(where: TraceWhere): void;
+}
+
+/** Where a traced pin is: the chips that open its level, from the top, and the pin there. */
+export interface TraceWhere {
+  readonly path: readonly string[];
+  readonly pin: PinRef;
 }
 
 const TILE = 256;
@@ -306,7 +323,16 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
 
   // Placed after the tile machinery it uses: the view emits its current
   // value the moment this subscribes.
+  let levelKey = `${circuit.view.geometry.value.opened}|${circuit.view.geometry.value.level}`;
   ctx.effect(circuit.view.geometry, geometry => {
+    // Another level or document: the selection was the last one's. Here,
+    // before anything hears of the new level, so what is selected on
+    // arriving — a jump from the analyser — is not forgotten after.
+    const key = `${geometry.opened}|${geometry.level}`;
+    if (key !== levelKey) {
+      levelKey = key;
+      editor.forget();
+    }
     scene = new SceneIndex(geometry, scene);
     const changed = scene.changed;
     for (const tile of tiles.values()) {
@@ -535,15 +561,6 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     viewSize: () => size.current,
     traced: () => traced.next()
   });
-  // Another level or document: the selection was the last one's.
-  ctx.effect(
-    circuit.view.geometry.pipe(
-      map(g => `${g.opened}|${g.level}`),
-      distinctUntilChanged(),
-      skip(1)
-    ),
-    () => editor.forget()
-  );
   // What the application worker made of a copy, onto the clipboard.
   let clipped = 0;
   ctx.effect(circuit.view.clipboard, clip => {
@@ -681,6 +698,38 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       }
     }
   });
+  // What the analyser's hovered row traces, lit as the level changes under it.
+  let hoveredTrace: TraceWhere | null = null;
+  const lightTrace = () => {
+    const where = hoveredTrace;
+    const here = circuit.view.document.value.path.map(level => level.id);
+    const inside = where !== null && where.path.length >= here.length && here.every((id, i) => id === where.path[i]);
+    editor.setHighlight(
+      !inside ? null : where.path.length === here.length ? { kind: 'pin', pin: where.pin } : { kind: 'chip', id: where.path[here.length]! }
+    );
+  };
+  ctx.effect(revision, lightTrace);
+
+  // A jump from the analyser: once its level is on the canvas and framed,
+  // the view centres on the pin, close enough to read, and its part is selected.
+  let revealing: TraceWhere | null = null;
+  const tryReveal = () => {
+    const where = revealing;
+    if (where === null) return;
+    const document = circuit.view.document.value;
+    const geometry = circuit.view.geometry.value;
+    if (framedFor !== document.opened || geometry.opened !== document.opened || geometry.level !== where.path.join('/')) return;
+    const c = scene.indexOf.get(where.pin.component);
+    revealing = null;
+    if (c === undefined) return;
+    const at = pinAt(scene.shapeOf(c), scene.x[c]!, scene.y[c]!, where.pin.pin, scene.rotationOf(c));
+    const s = size.current;
+    const scale = Math.max(camera.value.scale, 12);
+    camera.value = { scale, x: at.x - s.width / scale / 2, y: at.y - s.height / scale / 2 };
+    editor.selectOnly([where.pin.component]);
+  };
+  ctx.effect(combineLatest([circuit.view.document, revision]), tryReveal);
+
   // And where it is left is remembered, once the view comes to rest.
   ctx.effect(camera.pipe(debounceTime(400)), c => circuit.send.rememberCamera(c.x, c.y, c.scale));
 
@@ -821,6 +870,14 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     },
     editor,
     editorChanged,
-    traced
+    traced,
+    highlightTrace: where => {
+      hoveredTrace = where;
+      lightTrace();
+    },
+    reveal: where => {
+      revealing = where;
+      tryReveal();
+    }
   };
 }

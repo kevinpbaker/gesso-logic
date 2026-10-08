@@ -26,6 +26,8 @@ export interface Trace {
   /** Traced from the canvas rather than a probe or LED, and where: see `AnalyserView`. */
   readonly watched?: boolean;
   readonly title?: string;
+  readonly path?: readonly string[];
+  readonly pin?: { readonly component: string; readonly pin: string };
 }
 
 export interface AnalyserWindow {

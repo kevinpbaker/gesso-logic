@@ -168,6 +168,14 @@ export function workbench(ctx: ComponentContext) {
   ctx.effect(canvas.traced, () => {
     if (!analyserOpen) analyser.toggle();
   });
+  // And back: a row hovered lights its signal on the canvas, and a row's
+  // name clicked goes to it.
+  ctx.effect(analyser.hovered, where => canvas.highlightTrace(where));
+  ctx.effect(analyser.picked, where => {
+    circuit.send.openPath(where.path);
+    canvas.reveal(where);
+    canvas.focus();
+  });
 
   // Whatever was open when the tab closed, brought back by the
   // application worker from its autosave — or, the first time, Pong,

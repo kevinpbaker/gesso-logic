@@ -55,6 +55,7 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         makeChip: (ids, name) => service.makeChip(ids, name),
         openChip: id => service.openChip(id),
         closeChip: depth => service.closeChip(depth),
+        openPath: ids => service.openPath(ids),
         renameChip: (from, to) => service.renameChip(from, to),
         resetChip: name => service.resetChip(name),
         importChip: (text, fileName) => service.importChip(text, fileName),

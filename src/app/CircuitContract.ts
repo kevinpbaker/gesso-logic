@@ -228,6 +228,9 @@ export interface AnalyserView {
     readonly width: number;
     readonly watched: boolean;
     readonly title: string;
+    /** Where it is: the chips that open its level, from the top, and the pin there. */
+    readonly path: readonly string[];
+    readonly pin: PinRef;
   }[];
   /** The oldest cycle held and the newest; `last` is `first - 1` when none is. */
   readonly first: number;
@@ -341,6 +344,12 @@ export interface CircuitCommands {
   openChip(id: string): void;
   /** Steps back out to `depth` levels from the top: 0 is the top. */
   closeChip(depth: number): void;
+  /**
+   * Goes to the level these chips open, from the top, in one step: as
+   * far as the path still leads. Nothing happens when that level is
+   * the one on the canvas.
+   */
+  openPath(ids: readonly string[]): void;
   /** Renames a chip definition, and every instance of it. */
   renameChip(from: string, to: string): void;
   /** Puts a chip back as the document was opened, with the chips inside it; one edit, so undo takes it back. */
