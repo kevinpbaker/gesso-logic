@@ -118,13 +118,14 @@ function PaletteRow(inputs: Inputs<PaletteRowProps>, ctx: ComponentContext): UiC
   const keys = inputs.keys.value;
   const tip = inputs.tip.value;
   const lit = inputs.lit.value;
-  const onClick = inputs.onClick.value;
   const on = inputs.placing.pipe(map(p => p === lit));
   return (
     <button
       focusable={false}
       label={label}
-      onClick={() => onClick()}
+      // Read when clicked: each render of the palette hands over a new
+      // function, and this row is not rebuilt for it.
+      onClick={() => inputs.onClick.value()}
       modifiers={[HOVER, tooltip(ctx, { text: tip, placement: 'right' })]}
       width={percent(100)}
       paddingLeft={8}
