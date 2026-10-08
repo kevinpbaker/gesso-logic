@@ -446,6 +446,23 @@ describe('the tooltip on a pin', () => {
     expect(editor.hoverCard()).toMatchObject({ title: 'led.in', about: 'LED · input', note: 'Lights when both are on' });
   });
 
+  it('follows the view moving under a still pointer, and not once the pointer has left', () => {
+    let dx = 0;
+    const { editor, at } = setup('push', undefined, { toWorld: p => ({ x: p.x / SCALE + dx, y: p.y / SCALE }) });
+    editor.pointerMove(at(10, 2));
+    expect(editor.hoverCard()?.title).toBe('g.out');
+    // The view pans two units under the pointer: the gate's output is no longer there.
+    dx = 2;
+    editor.viewMoved();
+    expect(editor.hoverCard()).toBeNull();
+    dx = 0;
+    editor.viewMoved();
+    expect(editor.hoverCard()?.title).toBe('g.out');
+    editor.pointerLeave();
+    editor.viewMoved();
+    expect(editor.hoverCard()).toBeNull();
+  });
+
   it('shows nothing away from a pin, while a wire is drawn, or once the pointer has left', () => {
     const { editor, at } = setup();
     editor.pointerMove(at(3, 6));

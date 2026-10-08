@@ -173,6 +173,12 @@ const REFRESH_PER_FRAME = 4;
  * keeps the blank ground under 2% on average.
  */
 const NEW_PER_FRAME = 3;
+/**
+ * The most new tiles brought in in one frame for ground nothing covers —
+ * the edges a pinch zooming out uncovers. Blank ground is the glitch the
+ * queue is there to avoid making worse, so it goes first, and more of it.
+ */
+const BLANK_PER_FRAME = 8;
 
 interface Tile {
   readonly key: string;
@@ -216,8 +222,25 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
    */
   const netVersion = internalState(0);
 
+  /**
+   * Every chunk's value as last published, not only the snapshot's. A
+   * snapshot holds the chunks in and around the view; a chunk that left
+   * it was dropped, and coming back — a pinch zooming out faster than
+   * the band around the view — its wires were drawn unknown, grey, for
+   * the frame or two before the next snapshot. They keep their last
+   * value now, a frame stale at worst, which on a running circuit is
+   * what the next frame would have said anyway. Kept across documents
+   * too: a new one is published around the view the moment it opens and
+   * whenever the view moves, which replaces any value from the last one
+   * before it can be seen. Clearing it there lost a snapshot that came
+   * before the new geometry, and a paused circuit sends no other.
+   */
   let chunks: Readonly<Record<string, string>> = circuit.view.signals.value.chunks;
-  ctx.effect(circuit.view.signals, (signals: Signals) => (chunks = signals.chunks));
+  const known = new BehaviorSubject(chunks);
+  ctx.effect(circuit.view.signals, (signals: Signals) => {
+    chunks = { ...chunks, ...signals.chunks };
+    known.next(chunks);
+  });
 
   // ---------------------------------------------------------------------
   // The round trip: what is on screen, snapped outward to index cells so
@@ -283,21 +306,18 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
    * screen to protect: a view with no tile shown at all (the first
    * frame, a jump), and an edit, whose tiles are all new at once.
    */
-  let previousOctave: number | null = null;
-  let lastOctave = gridOctave.value;
   let ready = new Set<string>();
   let pending: { key: string; tx: number; ty: number; world: number }[] = [];
   /** Of the tiles the view wants, how many have nothing on their ground, and out of how many. */
   let blankCells = 0;
   let wantedCells = 0;
   const promoted = internalState(0);
-  ctx.effect(gridOctave, octave => {
-    if (octave === lastOctave) return;
-    if (previousOctave === null) {
-      previousOctave = lastOctave;
-    }
-    lastOctave = octave;
-  });
+  /** Whether a tile is over a cell's ground, so can stand in for it. */
+  const covers = (tile: Tile, cell: { tx: number; ty: number; world: number }) =>
+    cell.tx * cell.world < tile.area.right &&
+    (cell.tx + 1) * cell.world > tile.area.left &&
+    cell.ty * cell.world < tile.area.bottom &&
+    (cell.ty + 1) * cell.world > tile.area.top;
 
   /** When the camera's scale last changed, for telling a zoom in progress from a view at rest. */
   let scaleChangedAt = 0;
@@ -397,20 +417,14 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       // again: its layers were dropped with it and are drawn afresh.
       ready = new Set(current.filter(cell => ready.has(cell.key)).map(cell => cell.key));
       pending = current.filter(cell => !ready.has(cell.key));
-      // The old grid's tiles stay only over ground whose new tile is not
-      // ready: drawing both grids everywhere for a whole change doubled
-      // the tiles composited on every frame of a zoom.
-      const covers = (tile: Tile, cell: { tx: number; ty: number; world: number }) =>
-        cell.tx * cell.world < tile.area.right &&
-        (cell.tx + 1) * cell.world > tile.area.left &&
-        cell.ty * cell.world < tile.area.bottom &&
-        (cell.ty + 1) * cell.world > tile.area.top;
-      const old =
-        previousOctave === null
-          ? []
-          : cells(previousOctave, c, s)
-              .flatMap(cell => tiles.get(cell.key) ?? [])
-              .filter(tile => pending.some(cell => covers(tile, cell)));
+      // What was on screen stays over ground whose new tile is not ready,
+      // and only there: drawing both grids everywhere for a whole change
+      // doubled the tiles composited on every frame of a zoom. Whatever
+      // grid it was cut on — remembering only the one grid before lost
+      // a pinch's middle grid when it crossed two before the queue
+      // caught up, and its ground went blank.
+      const world = TILE / octave;
+      const old = shown.filter(tile => tile.world !== world && pending.some(cell => covers(tile, cell)));
       let list = [...old, ...current.filter(cell => ready.has(cell.key)).map(cell => made(cell, c.scale))];
       wantedCells = current.length;
       blankCells = pending.filter(cell => !old.some(tile => covers(tile, cell))).length;
@@ -441,10 +455,10 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
   const renderTile = (tile: Tile) => {
     const under = tile.version.pipe(map((v): UiPaint => ({ draw: tile.drawUnder, inputs: [tile.key, v] })));
     const over = tile.version.pipe(map((v): UiPaint => ({ draw: tile.drawOver, inputs: [tile.key, v] })));
-    const live = combineLatest([circuit.view.signals, tile.version, netVersion]).pipe(
-      map(([s, v, nets]): UiPaint => ({
+    const live = combineLatest([known, tile.version, netVersion]).pipe(
+      map(([k, v, nets]): UiPaint => ({
         draw: tile.drawLive,
-        inputs: [tile.key, v, nets, ...tile.chunks.map(chunk => s.chunks[chunk])]
+        inputs: [tile.key, v, nets, ...tile.chunks.map(chunk => k[chunk])]
       }))
     );
     const box = combineLatest([camera, tile.drawnAt]).pipe(
@@ -490,8 +504,11 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     // Tiles waiting to come in take this frame's budget, before any
     // settle-zoom redraw: both are a tile's layers rasterised, and a
     // frame should pay for a few of them, not for both queues at once.
+    // Ground nothing covers comes first, more of it a frame.
     if (pending.length > 0) {
-      const byDistance = pending
+      const blank = pending.filter(cell => !shown.some(tile => covers(tile, cell)));
+      const queue = blank.length > 0 ? blank : pending;
+      const byDistance = queue
         .map(cell => ({
           cell,
           d: distanceTo({
@@ -502,15 +519,9 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
           })
         }))
         .sort((a, b) => a.d - b.d);
-      for (const { cell } of byDistance.slice(0, NEW_PER_FRAME)) {
+      for (const { cell } of byDistance.slice(0, blank.length > 0 ? BLANK_PER_FRAME : NEW_PER_FRAME)) {
         ready.add(cell.key);
       }
-      promoted.value++;
-      return;
-    }
-    if (previousOctave !== null) {
-      // The new grid covers the view; the old one goes.
-      previousOctave = null;
       promoted.value++;
       return;
     }
@@ -593,6 +604,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     viewSize: () => size.current,
     traced: () => traced.next()
   });
+  // A view moving under a still pointer changes what is under it.
+  ctx.effect(camera, () => editor.viewMoved());
   // What the application worker made of a copy, onto the clipboard.
   let clipped = 0;
   ctx.effect(circuit.view.clipboard, clip => {

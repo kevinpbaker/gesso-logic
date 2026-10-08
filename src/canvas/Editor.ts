@@ -158,6 +158,8 @@ export class Editor {
   private mode: Mode = { kind: 'idle' };
   private pointer: Point = { x: 0, y: 0 };
   private hover: Hit = { kind: 'empty' };
+  /** Where the pointer is on the canvas, in screen pixels; null once it has left. */
+  private screenPointer: Point | null = null;
   /** Ids this editor has handed out and may not have seen come back yet. */
   private readonly issued = new Set<string>();
   private gestures = 0;
@@ -291,6 +293,7 @@ export class Editor {
   }
 
   pointerMove(screen: Point, buttons?: number): void {
+    this.screenPointer = screen;
     const world = this.deps.toWorld(screen);
     this.pointer = world;
     // A right or middle press never reports its release — the surface
@@ -362,8 +365,23 @@ export class Editor {
     return hit;
   }
 
+  /**
+   * The view moved under a pointer holding still — a pinch, a wheel, a
+   * jump — so what is under it is asked again: the tooltip, and the net
+   * lit, were the last thing's until the pointer next moved.
+   */
+  viewMoved(): void {
+    if (this.screenPointer === null || this.mode.kind !== 'idle') return;
+    this.pointer = this.deps.toWorld(this.screenPointer);
+    const hit = this.hitAt(this.pointer);
+    if (JSON.stringify(hit) === JSON.stringify(this.hover)) return;
+    this.hover = hit;
+    this.deps.changed();
+  }
+
   /** The pointer has left the canvas: nothing is under it, so no tooltip. */
   pointerLeave(): void {
+    this.screenPointer = null;
     if (this.hover.kind === 'empty') return;
     this.hover = { kind: 'empty' };
     this.deps.changed();
