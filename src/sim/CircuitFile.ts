@@ -1,4 +1,4 @@
-import { CIRCUIT_VERSION, type Circuit, type Component, type PinRef, type Rotation, type Wire } from './Circuit';
+import { CIRCUIT_VERSION, type Circuit, type Component, type PinRef, type Rotation, type TracedPin, type Wire } from './Circuit';
 import { pinsOf } from './Chips';
 import { MAX_WIDTH, PINS, ROM_WORDS, widthOf, type Kind } from './Primitives';
 
@@ -90,13 +90,36 @@ export function writeCircuit(circuit: Circuit): string {
       : `,\n  "chips": {\n${names
           .map(name => `    ${JSON.stringify(name)}: {\n${body(circuit.chips![name]!, '      ')}\n    }`)
           .join(',\n')}\n  }`;
+  const traces =
+    circuit.traces === undefined || circuit.traces.length === 0
+      ? ''
+      : `,\n  "traces": ${list(
+          circuit.traces.map(t => JSON.stringify({ path: [...t.path], pin: { component: t.pin.component, pin: t.pin.pin } })),
+          '  '
+        )}`;
   return (
     '{\n' +
     `  "format": "${FILE_FORMAT}",\n` +
     `  "version": ${CIRCUIT_VERSION},\n` +
-    `${body(circuit, '  ')}${chips}\n` +
+    `${body(circuit, '  ')}${chips}${traces}\n` +
     '}\n'
   );
+}
+
+/** The pins traced, as a file lists them: checked for shape, not for being in the document. */
+function tracesFrom(raw: unknown): TracedPin[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new CircuitFileError('traces: not a list');
+  return raw.map((t: unknown, n) => {
+    const here = `traces[${n}]`;
+    const path = isRecord(t) ? t['path'] : undefined;
+    const pin = isRecord(t) ? t['pin'] : undefined;
+    if (!Array.isArray(path) || !path.every(id => typeof id === 'string')) throw new CircuitFileError(`${here}.path: not a list of ids`);
+    if (!isRecord(pin) || typeof pin['component'] !== 'string' || typeof pin['pin'] !== 'string') {
+      throw new CircuitFileError(`${here}.pin: not a component and a pin`);
+    }
+    return { path: path as string[], pin: { component: pin['component'], pin: pin['pin'] } };
+  });
 }
 
 export function readCircuit(text: string): Circuit {
@@ -134,7 +157,8 @@ export function circuitFrom(data: unknown): Circuit {
     chips[name] = levelFrom((rawChips as Record<string, unknown>)[name], `chips[${JSON.stringify(name)}]`, names);
   }
   const top = levelFrom(data, '', names);
-  const circuit: Circuit = names.size === 0 ? top : { ...top, chips };
+  const traces = tracesFrom(data['traces']);
+  const circuit: Circuit = { ...top, ...(names.size === 0 ? {} : { chips }), ...(traces.length === 0 ? {} : { traces }) };
   for (const [at, level] of [['', top] as const, ...Object.entries(chips).map(([name, level]) => [`chips[${JSON.stringify(name)}].`, level] as const)]) {
     checkWires(level, at, circuit.chips);
   }

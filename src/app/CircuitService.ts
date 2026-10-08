@@ -289,7 +289,11 @@ export class CircuitService {
     } = { name: null, handle: null }
   ): void {
     this.opened++;
-    this.watches = [];
+    // What the file traced, traced again; the document itself does not
+    // carry them, so an edit's undo does not take a trace away.
+    const { traces: _, ...document } = circuit;
+    this.watches = (circuit.traces ?? []).map(t => ({ id: `watch:${++this.watchCount}`, path: [...t.path], pin: { ...t.pin } }));
+    circuit = document;
     this.originals = { ...circuit.chips, ...file.originals };
     this.changedCache = new WeakMap();
     this.path.length = 0;
@@ -331,7 +335,7 @@ export class CircuitService {
     this.savingSubject.next({
       serial: ++this.saveSerial,
       name: this.name ?? DEFAULT_FILE_NAME,
-      text: writeCircuit(this.circuit),
+      text: writeCircuit(this.withTraces()),
       handle: asNew ? null : this.handle
     });
   }
@@ -1176,16 +1180,28 @@ export class CircuitService {
       added = true;
     }
     if (!added) return;
+    this.tracesChanged();
+  }
+
+  /** The document as a file has it: with what is traced. */
+  private withTraces(): Circuit {
+    return this.watches.length === 0 ? this.circuit : { ...this.circuit, traces: this.watches.map(({ path, pin }) => ({ path, pin })) };
+  }
+
+  /** What is traced is saved with the file, so changing it is a change to save. */
+  private tracesChanged(): void {
     this.traceNow();
     if (this.analyserAsk.columns > 0) this.analyserSubject.next(this.analyserNow());
+    if (this.savedRevision === this.revision) this.savedRevision = -1;
+    this.autosave();
+    this.documentSubject.next(this.summary());
   }
 
   unwatch(id: string): void {
     const before = this.watches.length;
     this.watches = this.watches.filter(w => w.id !== id);
     if (this.watches.length === before) return;
-    this.traceNow();
-    if (this.analyserAsk.columns > 0) this.analyserSubject.next(this.analyserNow());
+    this.tracesChanged();
   }
 
   /**
@@ -1351,7 +1367,7 @@ export class CircuitService {
       this.cancelAutosave = null;
       const record: Autosave = {
         format: 'gessologic-autosave',
-        file: writeCircuit(this.circuit),
+        file: writeCircuit(this.withTraces()),
         name: this.name,
         handle: this.handle,
         dirty: this.revision !== this.savedRevision,

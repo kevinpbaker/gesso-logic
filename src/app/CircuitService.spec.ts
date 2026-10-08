@@ -423,6 +423,30 @@ describe('pins traced from the canvas', () => {
     expect(view.traces.filter(t => t.watched).map(t => t.name)).toEqual(['inv.out']);
   });
 
+  it('saves what is traced with the file, as a change to save, and traces it again on opening', () => {
+    const service = new Harness().service;
+    let view!: AnalyserView;
+    let dirty = false;
+    let text = '';
+    service.analyserView.subscribe(v => (view = v));
+    service.document.subscribe(d => (dirty = d.dirty));
+    service.saving.subscribe(s => (text = s.text));
+    service.load(inverter());
+    service.setAnalyserView(null, 4, 100);
+    expect(dirty).toBe(false);
+    service.openChip('inv');
+    service.watch([{ component: 'n', pin: 'out' }]);
+    expect(dirty).toBe(true);
+    service.requestSave(false);
+    expect(text).toContain('"traces"');
+
+    service.load(inverter());
+    expect(view.traces.some(t => t.watched)).toBe(false);
+    service.open(text, 'inverter.gessologic.json', null);
+    expect(view.traces.filter(t => t.watched).map(t => t.title)).toEqual(['inv › n.out']);
+    expect(dirty).toBe(false);
+  });
+
   it('forgets what was traced when another document is opened', () => {
     const service = new Harness().service;
     let view!: AnalyserView;

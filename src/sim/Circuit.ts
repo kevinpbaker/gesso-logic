@@ -31,6 +31,19 @@ export interface Circuit {
    * is ignored — so each definition exists once however deep it is used.
    */
   readonly chips?: Readonly<Record<string, Circuit>>;
+  /**
+   * The pins traced in the logic analyser from the canvas, at any depth,
+   * kept so a session's watch list opens with the file. Only the top
+   * level's count. A path or pin no longer in the document is kept, and
+   * traces nothing, until an edit puts it back.
+   */
+  readonly traces?: readonly TracedPin[];
+}
+
+/** A pin traced in the analyser: the chips that open its level, from the top, and the pin there. */
+export interface TracedPin {
+  readonly path: readonly string[];
+  readonly pin: PinRef;
 }
 
 export interface Component {

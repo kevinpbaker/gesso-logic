@@ -26,6 +26,14 @@ describe('the circuit file', () => {
     expect(readCircuit(writeCircuit(circuit))).toEqual(circuit);
   });
 
+  it('keeps the pins traced in the analyser, and checks their shape', () => {
+    const circuit = { ...small(), traces: [{ path: ['cpu', 'alu'], pin: { component: 'adder', pin: 'S' } }] };
+    expect(readCircuit(writeCircuit(circuit))).toEqual(circuit);
+    const bad = JSON.parse(writeCircuit(circuit));
+    bad.traces[0].pin = 'S';
+    expect(() => readCircuit(JSON.stringify(bad))).toThrow('traces[0].pin: not a component and a pin');
+  });
+
   it('writes a component or a wire a line, so a move diffs as one line', () => {
     const circuit = small();
     const moved = { ...circuit, components: circuit.components.map(c => (c.id === 'g' ? { ...c, x: c.x + 1 } : c)) };
