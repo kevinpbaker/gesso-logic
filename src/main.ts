@@ -81,6 +81,11 @@ const start = (): void => {
     // The render worker is told the mode in its name, as it is `/proof`'s.
     workerName: mainThread && !params.has('bench') ? (workerName === undefined ? 'main' : `${workerName}+main`) : workerName,
     ...(appLogic === undefined ? {} : { appLogicWorker: appLogic }),
+    // The circuit's commands, offered to an agent the browser runs, by
+    // WebMCP: on the app, not on the measured pages. A browser without it
+    // registers nothing. A command that replaces the document is put to
+    // the person first, with the browser's own confirm.
+    webmcp: plainName === undefined,
     // The toggle asks for this page with `?main` added or taken away; that
     // is navigated here, in place. Any other url opens in a new tab.
     onOpenUrl: url => {
