@@ -68,6 +68,9 @@ export const LAYOUT: Readonly<Record<Kind, KindLayout>> = {
   // The ROM: an instruction port and a table port, each an address in
   // on the left and its word out on the right.
   rom: { width: 8, height: 6, pins: { A: { x: 0, y: 1 }, T: { x: 0, y: 3 }, D: { x: 8, y: 1 }, Q: { x: 8, y: 3 } } },
+  // Placeholders: a named wire's and a note's size follow their words; see `tagShape` and `noteShape`.
+  tunnel: { width: 4, height: 2, pins: { io: { x: 0, y: 1 } } },
+  note: { width: 6, height: 2, pins: {} },
   seg7: {
     width: 5,
     height: 8,
@@ -121,6 +124,23 @@ export function busShape(kind: 'split' | 'join', bits: readonly string[]): KindL
   return { width: 2, height: bits.length + 1, pins };
 }
 
+/** A note's lines are this tall, in grid units, and its letters about this wide. */
+export const NOTE_LINE = 1.6;
+export const NOTE_CHAR = 0.62;
+export const NOTE_FONT = 1.1;
+
+/** A note's box: as wide as its longest line and as tall as its lines, in whole units. */
+export function noteShape(text: string): KindLayout {
+  const lines = text.split('\n');
+  const longest = Math.max(4, ...lines.map(line => line.length));
+  return { width: Math.ceil(longest * NOTE_CHAR * NOTE_FONT + 1), height: Math.ceil(lines.length * NOTE_LINE + 0.6), pins: {} };
+}
+
+/** A named wire's tag: its pin a unit down the left, a point there, and room for its name. */
+export function tagShape(name: string): KindLayout {
+  return { width: Math.max(3, Math.ceil(name.length * 0.5 + 2)), height: 2, pins: { io: { x: 0, y: 1 } } };
+}
+
 /**
  * A component's shape: its kind's, or one its width or definition
  * decides — a chip's body, a split's or join's, a hex display with as
@@ -144,6 +164,10 @@ export function shapeOf(component: Component, chips: Circuit['chips']): Shape {
     case 'output':
     case 'probe':
       return width > 1 ? { width: 4, height: 2, pins: { in: { x: 0, y: 1 } } } : component.kind;
+    case 'note':
+      return noteShape(component.label ?? '');
+    case 'tunnel':
+      return tagShape(component.label ?? '');
     case 'hex': {
       if (component.width === undefined) return 'hex';
       const digits = Math.max(1, Math.ceil(width / 4));

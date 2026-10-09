@@ -125,6 +125,8 @@ export interface CanvasHandle {
   focus(): void;
   /** A component's label, or null; for naming parts in messages. */
   labelOf(id: string): string | null;
+  /** A component's kind, or null for one not on this level. */
+  kindOf(id: string): Kind | null;
   /** The chip definition a part on this level is an instance of; null for any other part. */
   chipOf(id: string): string | null;
   /** Selection, gestures and the keys that drive them. */
@@ -133,6 +135,10 @@ export interface CanvasHandle {
   readonly editorChanged: BehaviorSubject<number>;
   /** Something was just sent to the analyser to trace, for the page to open it. */
   readonly traced: Observable<void>;
+  /** A note's words or a named wire's name to edit, by id: just placed, or double-clicked. */
+  readonly textToEdit: Observable<string>;
+  /** Asks the page to edit a note's words or a named wire's name. */
+  editText(id: string): void;
   /** A right-click that was not a pan: where, in page pixels, and what it was on, now selected. */
   readonly contextMenu: Observable<{ readonly at: Point; readonly hit: Hit }>;
   /**
@@ -604,6 +610,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
 
   const editorChanged = new BehaviorSubject(0);
   const traced = new Subject<void>();
+  const textToEdit = new Subject<string>();
   // A right press pans when dragged, and asks for a menu when not: the
   // menu opens once the press has held still a moment, or at once when
   // it is let go — whichever is first — and not at all once it moves.
@@ -646,7 +653,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     },
     pinNote: (chip, pin) => circuit.view.document.value.chips.find(c => c.name === chip)?.notes[pin] ?? null,
     viewSize: () => size.current,
-    traced: () => traced.next()
+    traced: () => traced.next(),
+    editText: id => textToEdit.next(id)
   });
   // A view moving under a still pointer changes what is under it.
   ctx.effect(camera, () => editor.viewMoved());
@@ -977,6 +985,10 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       const c = scene.indexOf.get(id);
       return c === undefined ? null : scene.labels[c] ?? null;
     },
+    kindOf: (id: string) => {
+      const c = scene.indexOf.get(id);
+      return c === undefined ? null : scene.kindOf(c);
+    },
     selectedChip: () => {
       if (editor.selection.size !== 1) return null;
       const c = scene.indexOf.get([...editor.selection][0]!);
@@ -985,6 +997,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     editor,
     editorChanged,
     traced,
+    textToEdit,
+    editText: (id: string) => textToEdit.next(id),
     contextMenu,
     highlightTrace: where => {
       hoveredTrace = where;

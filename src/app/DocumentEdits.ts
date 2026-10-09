@@ -44,6 +44,9 @@ export function place(
     kind,
     x,
     y,
+    // A note starts with words to replace, and a named wire with a name
+    // no other has, so it joins nothing until it is named.
+    ...(kind === 'note' ? { label: 'Note' } : kind === 'tunnel' ? { label: freshTagName(circuit) } : {}),
     ...(rotation === 0 ? {} : { rotation }),
     ...(kind === 'chip' ? { chip } : {}),
     ...(width !== undefined && width > 1 && WIDENABLE.has(kind) ? { width } : {})
@@ -158,7 +161,7 @@ export function pinWidth(circuit: Circuit, ref: PinRef): number {
 }
 
 /** The kinds a width means something for. */
-export const WIDENABLE: ReadonlySet<Kind> = new Set(['input', 'constant', 'output', 'probe', 'hex', 'split', 'join']);
+export const WIDENABLE: ReadonlySet<Kind> = new Set(['input', 'constant', 'output', 'probe', 'hex', 'split', 'join', 'tunnel']);
 
 /**
  * Makes components a given number of bits wide: switches, constants,
@@ -437,7 +440,9 @@ export function sameConnectivity(a: Circuit, b: Circuit): boolean {
     const x = a.components[i]!;
     const y = b.components[i]!;
     // A ROM's words are the netlist's too: a new program is not a move.
-    if (x.id !== y.id || x.kind !== y.kind || x.value !== y.value || x.chip !== y.chip || x.rom !== y.rom) return false;
+    // A width is pins, and a named wire's name is what it joins.
+    if (x.id !== y.id || x.kind !== y.kind || x.value !== y.value || x.chip !== y.chip || x.rom !== y.rom || x.width !== y.width) return false;
+    if (x.kind === 'tunnel' && x.label !== y.label) return false;
   }
   for (let i = 0; i < a.wires.length; i++) {
     const x = a.wires[i]!;
@@ -615,6 +620,12 @@ export function freshChipName(circuit: Circuit): string {
 }
 
 /** A component id not yet used in the circuit: the prefix and the first free number. */
+/** A named wire's name no other on the level has: `net1`, `net2`, … */
+export function freshTagName(circuit: Circuit): string {
+  const taken = new Set(circuit.components.filter(c => c.kind === 'tunnel').map(c => c.label));
+  for (let n = 1; ; n++) if (!taken.has(`net${n}`)) return `net${n}`;
+}
+
 export function freshId(circuit: Circuit, prefix: string): string {
   const used = ids(circuit);
   for (let n = 1; ; n++) {

@@ -28,7 +28,16 @@ export type BusKind = 'split' | 'join';
  * gate does. Its words are the component's `rom`.
  */
 export type MemoryKind = 'rom';
-export type Kind = GateKind | SourceKind | DisplayKind | ChipKind | BusKind | MemoryKind;
+/**
+ * A named wire: every tag of the same name on one level is the same
+ * net, as though a wire ran between them — for a clock or a bus that
+ * goes everywhere, drawn without the wires. Its one pin, `io`, drives
+ * nothing; whatever drives the net drives it. Its name is its label.
+ */
+export type TagKind = 'tunnel';
+/** Words on the canvas: a note, its text its label. No pins, no logic. */
+export type NoteKind = 'note';
+export type Kind = GateKind | SourceKind | DisplayKind | ChipKind | BusKind | MemoryKind | TagKind | NoteKind;
 
 /** A ROM's size in words, and its ports' widths. */
 export const ROM_WORDS = 256;
@@ -97,7 +106,9 @@ export const PINS: Readonly<Record<Kind, PinSpec>> = {
   // Their pins depend on their width; ask `pinsOf`. These are an 8-bit one's shape without the bits.
   split: { inputs: ['in'], outputs: [] },
   join: { inputs: [], outputs: ['out'] },
-  rom: { inputs: ['A', 'T'], outputs: ['D', 'Q'], widths: { A: 8, T: 8, D: 16, Q: 8 } }
+  rom: { inputs: ['A', 'T'], outputs: ['D', 'Q'], widths: { A: 8, T: 8, D: 16, Q: 8 } },
+  tunnel: { inputs: ['io'], outputs: [] },
+  note: { inputs: [], outputs: [] }
 };
 
 /** Parts a person drives: switches and push buttons. */

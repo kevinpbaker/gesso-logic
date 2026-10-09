@@ -61,6 +61,8 @@ export function pinsOf(component: Component, chips: Circuit['chips']): PinSpec {
     case 'output':
     case 'probe':
       return { inputs: ['in'], outputs: [], ...wide('in', width) };
+    case 'tunnel':
+      return { inputs: ['io'], outputs: [], ...wide('io', width) };
     case 'hex':
       // With a width, one bus pin; without, the four one-bit pins it always had.
       return component.width === undefined ? PINS.hex : { inputs: ['in'], outputs: [], ...wide('in', width) };

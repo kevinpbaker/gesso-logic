@@ -32,7 +32,9 @@ const KIND_NAMES: Readonly<Record<Kind, string>> = {
   xor: 'XOR gate',
   xnor: 'XNOR gate',
   chip: 'Chip',
-  rom: 'Program ROM'
+  rom: 'Program ROM',
+  tunnel: 'Named wire',
+  note: 'Note'
 };
 
 /** A kind of part as a person calls it: `Switch`, `AND gate`. */

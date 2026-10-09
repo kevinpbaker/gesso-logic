@@ -124,7 +124,14 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
         rows.push(<text key="inside" text={`Inside ${chip}: an edit here changes every ${chip}. Undo takes it back.`} fontSize={11} color="textMuted" textWrap="word" />);
       }
       // Inside a chip a switch's or LED's label is the chip's pin name.
-      if (one !== null) {
+      if (one?.kind === 'note') {
+        rows.push(<row key="words">{small('Edit the words…', () => canvas.editText(one.id), 'words')}</row>);
+      } else if (one?.kind === 'tunnel') {
+        rows.push(
+          labelled('Name', <row gap={6} y="center">{field('label', 'Name: every named wire of this name on this level is joined', labelText, 120, applyLabel)}<text text="Enter" fontSize={11} color="textMuted" /></row>, 'label')
+        );
+        rows.push(<text key="tag" text="Joined to every named wire called this on this level." fontSize={11} color="textMuted" textWrap="word" />);
+      } else if (one !== null) {
         const pin = chip !== null && (one.kind === 'input' || one.kind === 'output');
         rows.push(
           labelled(

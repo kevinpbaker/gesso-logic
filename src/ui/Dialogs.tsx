@@ -583,3 +583,52 @@ export function versionHistory(open: Observable<boolean>, versions: Observable<V
     />
   );
 }
+
+/**
+ * A note's words, several lines of them: what a part of the circuit
+ * does, for whoever reads it next. Enter starts a new line;
+ * Ctrl or Cmd with Enter keeps the note.
+ */
+export function noteText(open: Observable<boolean>, text: InternalState<string>, apply: () => void, close: () => void): UiChild {
+  const WIDTH = 460;
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Note"
+      width={WIDTH}
+      content={
+        <column gap={10} width={inner(WIDTH)}>
+          <editabletext
+            value={text as never}
+            multiline={true}
+            width={inner(WIDTH)}
+            height={140}
+            padding={8}
+            lineHeight={17}
+            fontSize={13}
+            color="text"
+            backgroundColor="background"
+            borderColor="border"
+            borderWidth={1}
+            borderRadius={4}
+            role="textbox"
+            label="The note's words"
+            onInput={(event: UiTextChangeEvent) => (text.value = event.value)}
+            onKeyDown={(event: UiKeyboardEvent) => {
+              if (event.key === 'Enter' && (event.modifiers.ctrl || event.modifiers.meta)) {
+                apply();
+                event.preventDefault();
+              }
+            }}
+          />
+          <row gap={8} y="center" width={inner(WIDTH)}>
+            <text text={`${MOD}+Enter keeps it`} flex={1} fontSize={11} color="textMuted" />
+            {action('Cancel', close)}
+            {action('Keep', apply, 'accent')}
+          </row>
+        </column>
+      }
+    />
+  );
+}

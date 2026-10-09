@@ -14,7 +14,7 @@ import { waveformPanel } from '../canvas/Waveform';
 import { minimap } from '../canvas/Minimap';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, versionHistory, type Discard, type FindItem } from './Dialogs';
+import { noteText, clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, versionHistory, type Discard, type FindItem } from './Dialogs';
 import { kindName } from '../app/Describe';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
@@ -102,6 +102,9 @@ export function workbench(ctx: ComponentContext) {
   const showShare = internalState(false);
   const showTests = internalState(false);
   const showVersions = internalState(false);
+  const showNote = internalState(false);
+  const noteWords = internalState('');
+  let noting = '';
   const shareUrl = internalState('');
   const findText = internalState('');
   const findActive = internalState(0);
@@ -215,6 +218,33 @@ export function workbench(ctx: ComponentContext) {
   // name clicked goes to it.
   ctx.effect(analyser.hovered, where => canvas.highlightTrace(where));
   ctx.effect(analyser.picked, where => jumpTo(where));
+
+  // A note's words or a named wire's name, asked for when one is placed
+  // or double-clicked — once it is on the canvas, which a part just
+  // placed is not until its geometry comes back.
+  let wantsText: string | null = null;
+  const askText = () => {
+    const id = wantsText;
+    if (id === null) return;
+    const label = canvas.labelOf(id);
+    if (label === null) return;
+    wantsText = null;
+    if (canvas.kindOf(id) === 'note') {
+      noting = id;
+      noteWords.value = label;
+      openDialog(showNote);
+    } else {
+      renaming = id;
+      renameText.value = label;
+      renameWhat.value = 'The wire’s name. Every named wire with this name on this level is the same wire.';
+      openDialog(showRename);
+    }
+  };
+  ctx.effect(canvas.textToEdit, id => {
+    wantsText = id;
+    askText();
+  });
+  ctx.effect(canvas.editorChanged, askText);
 
   // ---------------------------------------------------------------------
   // The canvas's right-click menu: what can be done with what was clicked
@@ -1274,6 +1304,15 @@ export function workbench(ctx: ComponentContext) {
       />
       {programEditor(ctx, () => canvas.focus())}
       {testsDialog(ctx, showTests, closeDialog(showTests))}
+      {noteText(
+        showNote,
+        noteWords,
+        () => {
+          circuit.send.setLabel(noting, noteWords.value);
+          closeDialog(showNote)();
+        },
+        closeDialog(showNote)
+      )}
       {versionHistory(
         showVersions,
         circuit.view.versions,

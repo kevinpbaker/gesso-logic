@@ -318,7 +318,9 @@ export const PART_SECTIONS = [
     title: 'Wiring',
     parts: [
       ['split', 'Split', 'S', 'A bus into its bits'],
-      ['join', 'Join', 'J', 'Bits into a bus']
+      ['join', 'Join', 'J', 'Bits into a bus'],
+      ['tunnel', 'Named wire', 'G', 'Joins every named wire of its name on this level, with no wire between'],
+      ['note', 'Note', 'Shift+N', 'Words on the canvas, to say what a part of the circuit does']
     ]
   }
 ] as const;

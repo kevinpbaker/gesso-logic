@@ -1,6 +1,6 @@
 import type { PaintSurface } from 'gesso-core';
 
-import type { Box } from '../app/Layout';
+import { NOTE_FONT, NOTE_LINE, type Box } from '../app/Layout';
 import { signalOf } from '../app/SignalPacking';
 import { MATRIX_WIDTH } from '../sim/Primitives';
 import type { SceneIndex } from './SceneIndex';
@@ -58,7 +58,7 @@ export function detailAt(scale: number): Detail {
   return scale < BLOCKS_BELOW ? 'blocks' : scale < WIRES_FROM ? 'gates' : 'full';
 }
 /** Parts that show no one value of their own: chips, ROMs, and a bus's splits and joins. */
-const WIRING: ReadonlySet<string> = new Set(['chip', 'split', 'join', 'rom']);
+const WIRING: ReadonlySet<string> = new Set(['chip', 'split', 'join', 'rom', 'tunnel', 'note']);
 
 /** At or above this, switches and LEDs carry their labels. */
 const LABELS_FROM = 10;
@@ -164,7 +164,8 @@ export function paintLive(
   if (detail === 'blocks') {
     // Every component as a block filled by the value it shows; a chip,
     // which shows no one value, as a block of its own colour.
-    scene.forEach(area, c => (WIRING.has(scene.kindOf(c)) ? low.push(c) : sort(scene.valueNet[c]!, c)), null);
+    // A note is words, and at this size there are none to read.
+    scene.forEach(area, c => (scene.kindOf(c) === 'note' ? undefined : WIRING.has(scene.kindOf(c)) ? low.push(c) : sort(scene.valueNet[c]!, c)), null);
     for (const [items, color] of [
       [low, 'textMuted'],
       [unknown, 'placeholder'],
@@ -557,6 +558,49 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
     surface.fill();
   }
 
+  // Named wires: a tag pointing at its pin, its name inside.
+  const tags = others.filter(c => scene.kindOf(c) === 'tunnel');
+  if (tags.length > 0) {
+    surface.beginPath();
+    for (const c of tags) {
+      const across = scene.turns[c]! % 2 === 1 ? scene.height(c) : scene.width(c);
+      turned(surface, scene, c, (x, y) => {
+        surface.moveTo(x, y + 1);
+        surface.lineTo(x + 1, y + 0.2);
+        surface.lineTo(x + across - 0.1, y + 0.2);
+        surface.lineTo(x + across - 0.1, y + 1.8);
+        surface.lineTo(x + 1, y + 1.8);
+        surface.closePath();
+      });
+    }
+    surface.fillColor('surface');
+    surface.fill();
+    surface.strokeColor('secondary');
+    surface.lineWidth(1.4 / scale);
+    surface.stroke();
+    if (scale >= BLOCKS_BELOW) {
+      surface.fillColor('secondary');
+      for (const c of tags) {
+        surface.text(scene.labels[c] ?? '', scene.x[c]! + scene.width(c) / 2 + 0.4, scene.y[c]! + scene.height(c) / 2 + 0.3, {
+          fontSize: 0.85,
+          align: 'center',
+          fontWeight: 600
+        });
+      }
+    }
+  }
+
+  // Notes: their words, a line at a time, on a faint card.
+  const notes = others.filter(c => scene.kindOf(c) === 'note');
+  if (notes.length > 0 && scale >= BLOCKS_BELOW) {
+    surface.fillColor('textMuted');
+    for (const c of notes) {
+      (scene.labels[c] ?? '').split('\n').forEach((line, i) => {
+        surface.text(line, scene.x[c]! + 0.5, scene.y[c]! + 0.3 + NOTE_FONT + i * NOTE_LINE, { fontSize: NOTE_FONT });
+      });
+    }
+  }
+
   // Outlines of switches and LEDs, whose insides the live layer fills.
   const outlined = others.filter(c => !WIRING.has(scene.kindOf(c)));
   if (outlined.length > 0) {
@@ -574,6 +618,8 @@ function drawSymbols(surface: PaintSurface, scene: SceneIndex, area: Box, scale:
       const style = { fontSize: 0.7, align: 'center' as const };
       for (const c of others) {
         const label = scene.labels[c];
+        // A note and a named wire say their words inside, not over.
+        if (scene.kindOf(c) === 'note' || scene.kindOf(c) === 'tunnel') continue;
         if (label !== null && label !== undefined) {
           surface.text(label, scene.x[c]! + scene.width(c) / 2, scene.y[c]! - 0.3, style);
         }

@@ -254,6 +254,8 @@ export function compile(circuit: Circuit, previous?: Netlist): Netlist {
       const spec = pinsOf(component, chips);
       const placed = place(component, id, spec, !edge && !bus);
       here.set(component.id, placed);
+      // A named wire is joined to its namesakes below; a note is words.
+      if (component.kind === 'tunnel' || component.kind === 'note') continue;
       if (bus) {
         const busPin = component.kind === 'split' ? 'in' : 'out';
         const ones = component.kind === 'split' ? spec.outputs : spec.inputs;
@@ -264,6 +266,30 @@ export function compile(circuit: Circuit, previous?: Netlist): Netlist {
         });
       } else if (!edge) {
         parts.push(placed);
+      }
+    }
+    // Named wires of one name on this level are one net, bit for bit.
+    const named = new Map<string, Placed>();
+    for (const component of level.components) {
+      if (component.kind !== 'tunnel') continue;
+      const name = (component.label ?? '').trim();
+      if (name === '') continue;
+      const placed = here.get(component.id)!;
+      const first = named.get(name);
+      if (first === undefined) {
+        named.set(name, placed);
+        continue;
+      }
+      const width = widthOf(placed.spec, 'io');
+      if (width !== widthOf(first.spec, 'io')) {
+        throw new CircuitError(
+          'width',
+          `Two wires named '${name}' are ${widthOf(first.spec, 'io')} and ${width} bits wide: a name joins wires of one width.`
+        );
+      }
+      for (let i = 0; i < width; i++) {
+        linkFrom.push(first.base + first.offsets.get('io')! + i);
+        linkTo.push(placed.base + placed.offsets.get('io')! + i);
       }
     }
     for (const wire of level.wires) {

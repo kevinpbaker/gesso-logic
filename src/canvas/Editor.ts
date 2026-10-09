@@ -66,6 +66,8 @@ export interface EditorDeps {
   viewSize?(): { readonly width: number; readonly height: number };
   /** Something was just sent to the analyser to trace: the page opens it. */
   traced?(): void;
+  /** A note's words or a named wire's name to edit, just placed or double-clicked: the page asks for them. */
+  editText?(id: string): void;
 }
 
 /** What Alt is called on the keyboard in hand: Option, on a Mac. */
@@ -156,7 +158,9 @@ const PART_KEYS: Readonly<Record<string, Kind>> = {
   h: 'hex',
   '7': 'seg7',
   s: 'split',
-  j: 'join'
+  j: 'join',
+  g: 'tunnel',
+  N: 'note'
 };
 
 /** What copy puts on the clipboard: marked, so a paste can tell a circuit from any other text. */
@@ -561,7 +565,9 @@ export class Editor {
         return true;
       }
       default: {
-        const part = PART_KEYS[key];
+        // Shifted, however the key arrives: some keyboards and remote
+        // drivers send `n` with Shift held rather than `N`.
+        const part = PART_KEYS[shift && /^[a-z]$/.test(key) ? key.toUpperCase() : key];
         if (part !== undefined) {
           this.startPlacing(part);
           return true;
@@ -1150,7 +1156,10 @@ export class Editor {
     const scene = this.deps.scene();
     const start = scene.indexOf.get(from.component);
     const fromDrives = start !== undefined && scene.drives(start, from.pin);
-    const other = (c: number, pin: string) => !(scene.ids[c] === from.component && pin === from.pin) && scene.drives(c, pin) !== fromDrives;
+    // A named wire's pin is either end of a wire: it carries what drives its net.
+    const tag = (c: number | undefined) => c !== undefined && scene.kindOf(c) === 'tunnel';
+    const other = (c: number, pin: string) =>
+      !(scene.ids[c] === from.component && pin === from.pin) && (scene.drives(c, pin) !== fromDrives || tag(c) || tag(start));
     const notItself = (c: number, pin: string) => !(scene.ids[c] === from.component && pin === from.pin);
     const reach = DROP_REACH / this.deps.scale();
     const near = scene.pinNear(world, reach, other);
@@ -1213,6 +1222,12 @@ export class Editor {
       this.lastClick = null;
       this.selection.clear();
       this.deps.send.openChip(id);
+      return;
+    }
+    if (twice && c !== undefined && (scene.kindOf(c) === 'note' || scene.kindOf(c) === 'tunnel') && !additive) {
+      this.lastClick = null;
+      this.select([id], false);
+      this.deps.editText?.(id);
       return;
     }
     if (twice && c !== undefined && scene.kindOf(c) === 'rom' && !additive) {
@@ -1330,6 +1345,8 @@ export class Editor {
     const id = this.fresh(what);
     const at = placement(this.shapeFor(what, chip), world);
     this.deps.send.place(what, at.x, at.y, id, undefined, chip);
+    // Words are what a note is for, and a name is what a named wire is.
+    if (what === 'note' || what === 'tunnel') this.deps.editText?.(id);
     return id;
   }
 

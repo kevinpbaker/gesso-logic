@@ -3,7 +3,7 @@ import { pinsOf } from './Chips';
 import { MAX_WIDTH, PINS, ROM_WORDS, widthOf, type Kind } from './Primitives';
 
 /** The kinds that may have a width. */
-const WIDTHED: ReadonlySet<Kind> = new Set(['input', 'constant', 'output', 'probe', 'hex', 'split', 'join']);
+const WIDTHED: ReadonlySet<Kind> = new Set(['input', 'constant', 'output', 'probe', 'hex', 'split', 'join', 'tunnel']);
 
 /**
  * The circuit file: a circuit document as JSON, marked and versioned.
