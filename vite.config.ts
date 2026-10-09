@@ -19,5 +19,8 @@ import { defineConfig } from 'vite';
  * back in `main.ts`.
  */
 export default defineConfig({
-  plugins: [gesso()]
+  plugins: [gesso()],
+  // The commit a build is of, for an error report to say which build
+  // threw: Vercel gives it to the build; anywhere else it is `dev`.
+  define: { __COMMIT__: JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'dev') }
 });

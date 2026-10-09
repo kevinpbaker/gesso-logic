@@ -1,4 +1,5 @@
 import { serveCircuit } from './app/serveCircuit';
+import { reportUncaught } from './ErrorReports';
 
 /**
  * The application worker: the circuit, and the simulator running it.
@@ -15,4 +16,5 @@ import { serveCircuit } from './app/serveCircuit';
  * writes the render worker, so `main.ts` names neither — except with
  * `?main`, when `main.ts` serves the circuit on the page instead.
  */
+reportUncaught('app');
 serveCircuit();

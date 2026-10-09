@@ -23,7 +23,11 @@
 import { proofPanel } from 'gesso-devtools';
 import { createApp, OpfsStorage, type PortHost } from 'gesso-framework';
 
+import { reportUncaught, sendErrorReport } from './ErrorReports';
 import { INCOMING_LINK, isProofPath, LINK_STORE } from './route';
+
+// The live site's errors, sent home: see `ErrorReports.ts`.
+reportUncaught('page');
 
 const host = document.querySelector<HTMLElement>('#app');
 if (host === null) {
@@ -86,6 +90,16 @@ const start = (): void => {
     // registers nothing. A command that replaces the document is put to
     // the person first, with the browser's own confirm.
     webmcp: plainName === undefined,
+    // A built site's render worker errors go home as well as to the
+    // console. A dev server's go to the plugin's overlay instead.
+    ...(import.meta.env.PROD
+      ? {
+          onError: (message: string, stack: string | undefined, source: string) => {
+            console.error(`[gesso render worker: ${source}] ${message}`, stack);
+            sendErrorReport({ thread: 'render', kind: source, message, ...(stack === undefined ? {} : { stack }) });
+          }
+        }
+      : {}),
     // The toggle asks for this page with `?main` added or taken away; that
     // is navigated here, in place. Any other url opens in a new tab.
     onOpenUrl: url => {
