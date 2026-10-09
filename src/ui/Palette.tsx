@@ -23,7 +23,24 @@ import { PART_SECTIONS } from './Commands';
  */
 export const PALETTE_WIDTH = 188;
 
-export function palette(ctx: ComponentContext, canvas: CanvasHandle, document: Observable<DocumentSummary>, myChips: Observable<MyChipsView>): UiChild {
+/** What a lesson of the course lets a person place: only these are shown while it is open. */
+export interface PaletteLesson {
+  readonly id: string;
+  readonly title: string;
+  readonly kinds: readonly Kind[];
+  readonly chips: readonly string[];
+}
+
+/** Parts any lesson may use besides its own: to look at a signal, and to write on the canvas. */
+const LESSON_EXTRAS: readonly Kind[] = ['probe', 'note'];
+
+export function palette(
+  ctx: ComponentContext,
+  canvas: CanvasHandle,
+  document: Observable<DocumentSummary>,
+  myChips: Observable<MyChipsView>,
+  lesson: Observable<PaletteLesson | null>
+): UiChild {
   const placing = canvas.editorChanged.pipe(
     map(() => {
       const p = canvas.editor.placing;
@@ -48,76 +65,118 @@ export function palette(ctx: ComponentContext, canvas: CanvasHandle, document: O
     </column>
   );
 
+  const parts: readonly (readonly [Kind, string, string, string])[] = PART_SECTIONS.flatMap(s => s.parts as readonly (readonly [Kind, string, string, string])[]);
+  const partRow = (kind: Kind) => {
+    const [, label, keys, tip] = parts.find(([k]) => k === kind)!;
+    return row(kind, label, keys, `${tip} — press ${keys}`, `kind:${kind}`, () => pick(kind));
+  };
+  /**
+   * A lesson's palette: the chips it builds on, which are what a person
+   * should reach for first, then the parts it allows, and nothing else,
+   * so the wrong part is never one click away.
+   */
+  const forLesson = (l: PaletteLesson) => (
+    <column key={`lesson:${l.id}`} padding={6} paddingBottom={16} width={percent(100)}>
+      <box paddingLeft={8} paddingRight={8} paddingTop={8}>
+        <text text={`Only the parts for ${l.title} are shown. Close the course to see them all.`} fontSize={11} color="textMuted" textWrap="word" />
+      </box>
+      {l.chips.length === 0
+        ? null
+        : section(
+            'Your chips',
+            <column gap={1} width={percent(100)}>
+              {l.chips.map(name => row(`lesson-chip:${name}`, name, '', `Your ${name}, from an earlier lesson`, `chip:${name}`, () => pick('chip', name)))}
+            </column>
+          )}
+      {l.kinds.length === 0 ? null : section('Parts', <column gap={1} width={percent(100)}>{l.kinds.filter(k => parts.some(([kind]) => kind === k)).map(partRow)}</column>)}
+      {section('Also', <column gap={1} width={percent(100)}>{LESSON_EXTRAS.map(partRow)}</column>)}
+    </column>
+  );
+
+  /** Every part, as the palette is outside a lesson. */
+  const everything = (
+    <column key="all" padding={6} paddingBottom={16} width={percent(100)}>
+      {PART_SECTIONS.map(s =>
+        section(
+          s.title,
+          <column gap={1} width={percent(100)}>
+            {s.parts.map(([kind, label, keys, tip]) => row(kind, label, keys, `${tip} — press ${keys}`, `kind:${kind}`, () => pick(kind)))}
+          </column>
+        )
+      )}
+      {section(
+        'Library',
+        <column gap={1} width={percent(100)}>
+          {each(
+            document.pipe(
+              map(d => d.library.map(part => ({ name: part.name, note: part.note }))),
+              distinctUntilChanged((a, b) => a.length === b.length && a.every((p, i) => p.name === b[i]!.name))
+            ),
+            'name',
+            part => row(part.name, part.name, '', part.note, `chip:${part.name}`, () => pick('chip', part.name))
+          )}
+        </column>
+      )}
+      {section(
+        'My chips',
+        <column gap={1} width={percent(100)}>
+          {each(
+            myChips.pipe(
+              map(v => (v.chips.length === 0 ? [{ name: '' }] : v.chips.map(chip => ({ name: chip.name })))),
+              distinctUntilChanged((a, b) => a.length === b.length && a.every((p, i) => p.name === b[i]!.name))
+            ),
+            'name',
+            chip =>
+              chip.name === '' ? (
+                <box paddingLeft={8} paddingRight={8} paddingTop={2}>
+                  <text text="Select a chip and choose Add to My chips, to place it in any circuit." fontSize={11} color="textMuted" textWrap="word" />
+                </box>
+              ) : (
+                row(`mine:${chip.name}`, chip.name, '', `Place your ${chip.name}: it comes into this circuit with the chips it is made of`, `chip:mine:${chip.name}`, () =>
+                  pick('chip', `mine:${chip.name}`)
+                )
+              )
+          )}
+        </column>
+      )}
+      {section(
+        'This circuit’s chips',
+        <column gap={1} width={percent(100)}>
+          {each(
+            document.pipe(
+              map(d => (d.chips.length === 0 ? [{ name: '' }] : d.chips.map(chip => ({ name: chip.name })))),
+              distinctUntilChanged((a, b) => a.length === b.length && a.every((p, i) => p.name === b[i]!.name))
+            ),
+            'name',
+            chip =>
+              chip.name === '' ? (
+                <box paddingLeft={8} paddingRight={8} paddingTop={2}>
+                  <text text="None yet. Select some parts and press M to make one." fontSize={11} color="textMuted" textWrap="word" />
+                </box>
+              ) : (
+                row(chip.name, chip.name, '', `Place a ${chip.name}; double-click one to look inside`, `chip:${chip.name}`, () =>
+                  pick('chip', chip.name)
+                )
+              )
+          )}
+        </column>
+      )}
+    </column>
+  );
+  let currentLesson: PaletteLesson | null = null;
+  ctx.effect(lesson, l => (currentLesson = l));
+
   return (
     <column width={PALETTE_WIDTH} height={percent(100)} backgroundColor="surface" flexShrink={0}>
       <scrollview flex={1} minHeight={0} width={percent(100)} overscrollBehavior="contain">
-        <column padding={6} paddingBottom={16} width={percent(100)}>
-          {PART_SECTIONS.map(s =>
-            section(
-              s.title,
-              <column gap={1} width={percent(100)}>
-                {s.parts.map(([kind, label, keys, tip]) => row(kind, label, keys, `${tip} — press ${keys}`, `kind:${kind}`, () => pick(kind)))}
-              </column>
-            )
-          )}
-          {section(
-            'Library',
-            <column gap={1} width={percent(100)}>
-              {each(
-                document.pipe(
-                  map(d => d.library.map(part => ({ name: part.name, note: part.note }))),
-                  distinctUntilChanged((a, b) => a.length === b.length && a.every((p, i) => p.name === b[i]!.name))
-                ),
-                'name',
-                part => row(part.name, part.name, '', part.note, `chip:${part.name}`, () => pick('chip', part.name))
-              )}
-            </column>
-          )}
-          {section(
-            'My chips',
-            <column gap={1} width={percent(100)}>
-              {each(
-                myChips.pipe(
-                  map(v => (v.chips.length === 0 ? [{ name: '' }] : v.chips.map(chip => ({ name: chip.name })))),
-                  distinctUntilChanged((a, b) => a.length === b.length && a.every((p, i) => p.name === b[i]!.name))
-                ),
-                'name',
-                chip =>
-                  chip.name === '' ? (
-                    <box paddingLeft={8} paddingRight={8} paddingTop={2}>
-                      <text text="Select a chip and choose Add to My chips, to place it in any circuit." fontSize={11} color="textMuted" textWrap="word" />
-                    </box>
-                  ) : (
-                    row(`mine:${chip.name}`, chip.name, '', `Place your ${chip.name}: it comes into this circuit with the chips it is made of`, `chip:mine:${chip.name}`, () =>
-                      pick('chip', `mine:${chip.name}`)
-                    )
-                  )
-              )}
-            </column>
-          )}
-          {section(
-            'This circuit’s chips',
-            <column gap={1} width={percent(100)}>
-              {each(
-                document.pipe(
-                  map(d => (d.chips.length === 0 ? [{ name: '' }] : d.chips.map(chip => ({ name: chip.name })))),
-                  distinctUntilChanged((a, b) => a.length === b.length && a.every((p, i) => p.name === b[i]!.name))
-                ),
-                'name',
-                chip =>
-                  chip.name === '' ? (
-                    <box paddingLeft={8} paddingRight={8} paddingTop={2}>
-                      <text text="None yet. Select some parts and press M to make one." fontSize={11} color="textMuted" textWrap="word" />
-                    </box>
-                  ) : (
-                    row(chip.name, chip.name, '', `Place a ${chip.name}; double-click one to look inside`, `chip:${chip.name}`, () =>
-                      pick('chip', chip.name)
-                    )
-                  )
-              )}
-            </column>
-          )}
-        </column>
+        {lesson.pipe(
+          map(l => (l === null ? 'all' : `lesson:${l.id}`)),
+          distinctUntilChanged(),
+          map(() => {
+            const l = currentLesson;
+            return l === null ? [everything] : [forLesson(l)];
+          })
+        )}
       </scrollview>
     </column>
   );

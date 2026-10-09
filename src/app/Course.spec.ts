@@ -4,7 +4,7 @@ import { compile } from '../sim/Netlist';
 import type { CourseView, LevelView } from './CircuitContract';
 import { CircuitService } from './CircuitService';
 import { answer, chipsFor, lessonCircuit, mark } from './Course';
-import { LESSONS } from './CourseLessons';
+import { LESSONS, rowShowing, tableOf } from './CourseLessons';
 
 describe('the course', () => {
   it.each(LESSONS.map(lesson => [lesson.title, lesson] as const))('%s: its answer passes, and where it starts does not', (_, lesson) => {
@@ -87,6 +87,7 @@ describe('the course in the service', () => {
     service.openLesson('and');
     service.place('chip', 20, 0, 'inv', undefined, 'NOT');
     expect(level().parts.find(p => p.id === 'inv')).toMatchObject({ kind: 'chip', chip: 'NOT' });
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(JSON.parse(course.data.get('progress')!).built.NOT).toContain('"id":"n","kind":"nand","x":16');
 
     // Going back finds the work where it was left; afresh, where it starts.
@@ -107,10 +108,57 @@ describe('the course in the service', () => {
     expect(again.view()).toMatchObject({ done: ['xor'] });
   });
 
+  it('never keeps a lesson as it starts over the work kept for it', async () => {
+    const { service, level } = await started();
+    service.openLesson('or');
+    service.place('nand', 16, 0, 'mine');
+    service.openLesson('not');
+    // Opened afresh and left untouched: nothing to keep, so the work stays.
+    service.openLesson('or', true);
+    service.openLesson('not');
+    service.openLesson('or');
+    expect(level().parts.some(p => p.id === 'mine')).toBe(true);
+  });
+
+  it('keeps work that uses chips, and chips built from chips, across lessons', async () => {
+    const { service, level, view } = await started();
+    service.openLesson('or');
+    service.place('chip', 10, 0, 'na', undefined, 'NOT');
+    service.openLesson('not');
+    service.openLesson('or');
+    expect(level().parts.some(p => p.id === 'na')).toBe(true);
+    // AND built with a NOT chip is the AND the next lesson gets, not the answer.
+    service.openLesson('and');
+    service.showAnswer();
+    service.move('n', 13, 0);
+    service.checkLesson();
+    expect(view().marking.passed).toBe(true);
+    service.openLesson('xor');
+    service.openPath([]);
+    service.place('chip', 10, 20, 'x', undefined, 'AND');
+    service.openChip('x');
+    expect(level().parts.find(p => p.id === 'n')).toMatchObject({ x: 13 });
+  });
+
   it('stops being a lesson when another document opens', async () => {
     const { service, view } = await started();
     service.openLesson('or');
     service.loadScene('counter');
     expect(view().lesson).toBeNull();
+  });
+});
+
+describe('a lesson’s table', () => {
+  it('reads the tests as rows, and says which row the switches are on and whether it is right', () => {
+    const table = tableOf(LESSONS.find(l => l.id === 'D flip-flop')!.tests);
+    expect(table.inputs).toEqual(['d', 'clk']);
+    expect(table.outputs).toEqual(['q', 'qn']);
+    expect(table.rows[0]).toEqual({ inputs: [1, 0], outputs: [null, null] });
+    expect(table.rows).toHaveLength(7);
+    const adder = tableOf(LESSONS.find(l => l.id === 'adder 4')!.tests);
+    expect(adder.rows[1]).toEqual({ inputs: [3, 4, 0], outputs: [7, 0] });
+    expect(rowShowing(adder, adder.rows[1]!, { A: 3, B: 4, cin: 0, S: 7, cout: 0 })).toEqual({ set: true, right: true });
+    expect(rowShowing(adder, adder.rows[1]!, { A: 3, B: 4, cin: 0, S: 6, cout: 0 })).toEqual({ set: true, right: false });
+    expect(rowShowing(adder, adder.rows[1]!, { A: 2, B: 4, cin: 0, S: 7, cout: 0 }).set).toBe(false);
   });
 });

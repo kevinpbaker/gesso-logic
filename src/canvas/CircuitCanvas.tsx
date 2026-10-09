@@ -98,6 +98,8 @@ export interface CanvasHandle {
   readonly size: UiContainerSizeSource;
   /** Frames the camera: everything, a few hundred gates, or a few dozen. */
   show(preset: ZoomPreset): void;
+  /** Pixels along the left a card covers, for framing to leave clear: the course's card, while it is open. */
+  readonly insetLeft: BehaviorSubject<number>;
   /** Centres the view on these components, zooming out if they do not fit. */
   frame(ids: readonly string[]): void;
   /** Zooms about the middle of the view by a factor: 2 is twice as close. */
@@ -680,6 +682,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
    * under way it records nothing and costs nothing.
    */
   const highlight = new BehaviorSubject<readonly string[]>([]);
+  const insetLeft = new BehaviorSubject(0);
   const drawOverlay = (surface: PaintSurface) => {
     const c = camera.value;
     surface.scale(c.scale, c.scale);
@@ -726,11 +729,15 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       camera.value = { scale: 16, x: -4, y: -4 };
       return;
     }
-    const fit = Math.min(s.width / (b.right - b.left + 8), s.height / (b.bottom - b.top + 8));
+    // Fitted beside a card along the left, when one is there: a lesson's
+    // switches under the course's card could not be clicked.
+    const inset = Math.min(insetLeft.value, s.width / 2);
+    const width = s.width - inset;
+    const fit = Math.min(width / (b.right - b.left + 8), s.height / (b.bottom - b.top + 8), MAX_SCALE / 2);
     const scale = preset === 'all' ? fit : preset === 'mid' ? 4 : 12;
     const cx = (b.left + b.right) / 2;
     const cy = (b.top + b.bottom) / 2;
-    camera.value = { scale, x: cx - s.width / scale / 2, y: cy - s.height / scale / 2 };
+    camera.value = { scale, x: cx - (inset + width / 2) / scale, y: cy - s.height / scale / 2 };
   };
 
   const frame = (ids: readonly string[]) => {
@@ -922,6 +929,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     camera,
     size,
     show,
+    insetLeft,
     frame,
     zoomBy,
     highlight,

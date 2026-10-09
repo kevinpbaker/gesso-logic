@@ -26,6 +26,7 @@ import { GAMES, PROGRAMS } from './Programs';
 import { ringingParts } from './Problems';
 import { tour } from './Tour';
 import { coursePanel } from './CoursePanel';
+import { lessonById } from '../app/CourseLessons';
 
 /**
  * The simulator as a person uses it.
@@ -57,6 +58,8 @@ export function workbench(ctx: ComponentContext) {
   const mainThread = isMainThread();
   const tourOpen = internalState(false);
   const courseOpen = internalState(false);
+  /** The course's card covers the left of the canvas while it shows; a lesson opens framed beside it. */
+  const courseShowing = combineLatest([courseOpen, circuit.view.course]).pipe(map(([open, c]) => open || c.lesson !== null));
 
   // Light or dark: the system's until the toggle is used, and then the
   // choice, remembered in a folder of its own beside the autosave's.
@@ -210,6 +213,8 @@ export function workbench(ctx: ComponentContext) {
     return true;
   };
   const canvas = circuitCanvas(ctx, files, keys);
+  // The card's width and its margin, and a little room.
+  ctx.effect(courseShowing, showing => canvas.insetLeft.next(showing ? 336 : 0));
   const editor = canvas.editor;
   const analyser = waveformPanel(ctx, canvas.size.changes.pipe(map(s => s.width)));
   let analyserOpen = false;
@@ -1273,7 +1278,17 @@ export function workbench(ctx: ComponentContext) {
       {toolbar}
       {line('x')}
       <row flex={1} minHeight={0} width={percent(100)}>
-        {palette(ctx, canvas, document, circuit.view.myChips)}
+        {palette(
+          ctx,
+          canvas,
+          document,
+          circuit.view.myChips,
+          circuit.view.course.pipe(
+            map(c => (c.lesson === null ? undefined : lessonById(c.lesson))),
+            distinctUntilChanged(),
+            map(l => (l === undefined ? null : { id: l.id, title: l.title, kinds: l.kinds, chips: l.chips }))
+          )
+        )}
         {line('y')}
         <stack position="relative" flex={1} minWidth={0} height={percent(100)}>
           {canvas.element}
@@ -1283,6 +1298,7 @@ export function workbench(ctx: ComponentContext) {
           {coursePanel(
             courseOpen,
             circuit.view.course,
+            { level: circuit.view.level, readings: circuit.view.readings, revision: document.pipe(map(d => d.revision)) },
             combineLatest([analyser.open, analyser.height]).pipe(map(([open, height]) => (open ? height + 24 : 12))),
             {
               // A lesson's work is kept with the course, so moving between

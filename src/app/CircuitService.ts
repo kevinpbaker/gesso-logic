@@ -37,7 +37,7 @@ import { Analyser } from './Analyser';
 import { writeVcd } from './Vcd';
 import { runTests, testsFromNow } from './CircuitTests';
 import { MyChips } from './MyChips';
-import { answer, lessonCircuit, mark } from './Course';
+import { answer, lessonCircuit, mark, readLessonLevel } from './Course';
 import { lessonById } from './CourseLessons';
 import { VERSION_EVERY_MS, Versions, type VersionReason, type VersionStore } from './Versions';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
@@ -241,6 +241,7 @@ export class CircuitService {
   private readonly courseStore: VersionStore | null;
   /** Progress through the course: the chips built, as file text by name, the lessons passed, the lesson open, and work left in each. */
   private progress: CourseProgress = { built: {}, done: [], current: null, work: {} };
+  private progressWrites: Promise<unknown> = Promise.resolve();
   private readonly readingsSubject = new BehaviorSubject<Readings>({});
   /** The readings last published, as text, so an unchanged set is not published again. */
   private readingsText = '{}';
@@ -518,8 +519,15 @@ export class CircuitService {
     return this.progress;
   }
 
+  /**
+   * Writes progress, one write after another: two at once to one file in
+   * the private file system can leave either, and a lesson's work kept
+   * by the first could be lost to the second.
+   */
   private writeProgress(): void {
-    void this.courseStore?.write(PROGRESS_KEY, JSON.stringify(this.progress));
+    const store = this.courseStore;
+    if (store === null) return;
+    this.progressWrites = this.progressWrites.then(() => store.write(PROGRESS_KEY, JSON.stringify(this.progress))).catch(() => undefined);
   }
 
   private setLesson(id: string | null): void {
@@ -538,7 +546,7 @@ export class CircuitService {
     const out: Record<string, Circuit> = {};
     for (const [name, text] of Object.entries(this.progress.built)) {
       try {
-        out[name] = readCircuit(text);
+        out[name] = readLessonLevel(text);
       } catch {
         // A chip that does not read is one built again.
       }
@@ -549,9 +557,15 @@ export class CircuitService {
   /** The lesson open's top level as it is, kept so going back to it finds it so. */
   private keepLessonWork(): void {
     const id = this.progress.current;
-    if (id === null || this.circuit.components.length === 0) return;
+    const lesson = id === null ? undefined : lessonById(id);
+    if (lesson === undefined || this.circuit.components.length === 0) return;
     const { chips: _, ...level } = this.circuit;
-    this.progress = { ...this.progress, work: { ...this.progress.work, [id]: writeCircuit(level) } };
+    const text = writeCircuit(level);
+    // A lesson as it starts is nothing to keep, and kept, it would stand
+    // over work saved before: only looking at a lesson loses nothing.
+    const { chips: __, ...start } = lessonCircuit(lesson, {});
+    if (text === writeCircuit(start)) return;
+    this.progress = { ...this.progress, work: { ...this.progress.work, [lesson.id]: text } };
     this.writeProgress();
   }
 
@@ -560,10 +574,10 @@ export class CircuitService {
     if (lesson === undefined) return;
     this.keepLessonWork();
     let start: Circuit | null = null;
-    const work = fresh ? undefined : this.progress.work[id];
+    const work = fresh ? undefined : this.progress.work[lesson.id];
     if (work !== undefined) {
       try {
-        start = readCircuit(work);
+        start = readLessonLevel(work);
       } catch {
         start = null;
       }

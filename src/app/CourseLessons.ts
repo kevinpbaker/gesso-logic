@@ -187,6 +187,61 @@ export const COURSE_END = [
   'Open the computer and look inside: it is the same chips, many of them.'
 ];
 
+/** Parts any lesson may use: what puts values in and shows them, and words. */
+export const ALWAYS: readonly Kind[] = ['input', 'output', 'probe', 'constant', 'note', 'tunnel'];
+
+/**
+ * The gate a lesson's chip is: once NOT is built, the palette's NOT gate
+ * is as good as the chip, and refusing it for being the wrong NOT only
+ * puzzles the person who used it.
+ */
+export const GATE_OF_CHIP: Readonly<Record<string, Kind>> = { NOT: 'not', AND: 'and', OR: 'or', XOR: 'xor' };
+
+/** Every kind of part a lesson accepts, chips aside. */
+export function allowedKinds(lesson: Lesson): ReadonlySet<Kind> {
+  return new Set<Kind>([...ALWAYS, ...lesson.kinds, ...lesson.chips.flatMap(name => GATE_OF_CHIP[name] ?? [])]);
+}
+
+/** A lesson's tests as a table: its columns, and each row's values, null where any value will do. */
+export interface LessonTable {
+  readonly inputs: readonly string[];
+  readonly outputs: readonly string[];
+  readonly rows: readonly { readonly inputs: readonly (number | null)[]; readonly outputs: readonly (number | null)[] }[];
+}
+
+/**
+ * Reads a lesson's tests as a table, to show rather than to run: the
+ * header and the rows, comments and ticks left out. The lessons' own
+ * tests always read; text that does not is an empty table.
+ */
+export function tableOf(tests: string): LessonTable {
+  const value = (text: string): number | null => {
+    if (text === 'x' || text === 'X' || text === '-') return null;
+    const n = /^0x/i.test(text) ? parseInt(text.slice(2), 16) : /^0b/i.test(text) ? parseInt(text.slice(2), 2) : Number(text);
+    return Number.isFinite(n) ? n : null;
+  };
+  let header: { inputs: string[]; outputs: string[] } | null = null;
+  const rows: { inputs: (number | null)[]; outputs: (number | null)[] }[] = [];
+  for (const raw of tests.split('\n')) {
+    const line = raw.replace(/#.*$/, '').trim();
+    if (line === '' || /^tick\b/i.test(line)) continue;
+    const [left, right] = line.split('|');
+    if (left === undefined || right === undefined) continue;
+    const ins = left.trim().split(/\s+/).filter(Boolean);
+    const outs = right.trim().split(/\s+/).filter(Boolean);
+    if (header === null) header = { inputs: ins, outputs: outs };
+    else rows.push({ inputs: ins.map(value), outputs: outs.map(value) });
+  }
+  return header === null ? { inputs: [], outputs: [], rows: [] } : { ...header, rows };
+}
+
+/** Whether a row is what the circuit shows now: its inputs set so, and its outputs showing what they should. */
+export function rowShowing(table: LessonTable, row: LessonTable['rows'][number], readings: Readonly<Record<string, number | null>>): { readonly set: boolean; readonly right: boolean } {
+  const set = table.inputs.every((name, i) => row.inputs[i] === null || readings[name] === row.inputs[i]);
+  const right = set && table.outputs.every((name, i) => row.outputs[i] === null || readings[name] === row.outputs[i]);
+  return { set, right };
+}
+
 export function lessonById(id: string): Lesson | undefined {
   return LESSONS.find(lesson => lesson.id === id);
 }

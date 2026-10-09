@@ -1,8 +1,9 @@
 import { CIRCUIT_VERSION, type Circuit, type Component, type Wire } from '../sim/Circuit';
+import { circuitFrom, writeCircuit } from '../sim/CircuitFile';
 import type { Kind } from '../sim/Primitives';
 import { runTests } from './CircuitTests';
 import { kindName } from './Describe';
-import { LESSONS, type Lesson } from './CourseLessons';
+import { allowedKinds, LESSONS, type Lesson } from './CourseLessons';
 
 /**
  * The course's circuits: where each lesson starts, an answer to each
@@ -15,15 +16,6 @@ import { LESSONS, type Lesson } from './CourseLessons';
  * skipped, so every lesson can be done whatever came before.
  */
 
-/**
- * The gate a lesson's chip is: once NOT is built, the palette's NOT gate
- * is as good as the chip, and refusing it for being the wrong NOT only
- * puzzles the person who used it.
- */
-const GATE_OF_CHIP: Readonly<Record<string, Kind>> = { NOT: 'not', AND: 'and', OR: 'or', XOR: 'xor' };
-
-/** Parts any lesson may use: what puts values in and shows them, and words. */
-const ALWAYS: ReadonlySet<Kind> = new Set(['input', 'output', 'probe', 'constant', 'note', 'tunnel']);
 
 const pinRef = (end: string) => {
   const dot = end.indexOf('.');
@@ -193,6 +185,21 @@ export function lessonCircuit(lesson: Lesson, built: Readonly<Record<string, Cir
   return { ...level, tests: lesson.tests, ...(Object.keys(chips).length === 0 ? {} : { chips }) };
 }
 
+/**
+ * A lesson's circuit, or a chip built in one, read back from the text it
+ * was kept as: its level, without the chips it uses, which a lesson
+ * brings for itself. The text names chips it does not define, so it is
+ * read with the answers' chips beside it, which have the same pins.
+ */
+export function readLessonLevel(text: string): Circuit {
+  const data = JSON.parse(text) as { components?: { kind?: string; chip?: string }[] };
+  const names = (data.components ?? []).flatMap(c => (c.kind === 'chip' && typeof c.chip === 'string' ? [c.chip] : []));
+  const lent = chipsFor(names, {});
+  const file = Object.keys(lent).length === 0 ? data : { ...data, chips: (JSON.parse(writeCircuit({ version: CIRCUIT_VERSION, components: [], wires: [], chips: lent })) as { chips: unknown }).chips };
+  const { chips: _, ...level } = circuitFrom(file);
+  return level;
+}
+
 export interface Marking {
   readonly passed: boolean;
   /** What to tell the person: what passed, or what is wrong, a line each. */
@@ -209,7 +216,7 @@ export function allowedText(lesson: Lesson): string {
 
 /** Marks a lesson's circuit: its tests, as the lesson wrote them, and only the parts it allows. */
 export function mark(lesson: Lesson, level: Circuit, chips: Circuit['chips']): Marking {
-  const kinds = new Set<Kind>([...ALWAYS, ...lesson.kinds, ...lesson.chips.flatMap(name => GATE_OF_CHIP[name] ?? [])]);
+  const kinds = allowedKinds(lesson);
   const extra = new Set<string>();
   for (const c of level.components) {
     if (c.kind === 'chip') {
