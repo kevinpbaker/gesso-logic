@@ -32,6 +32,13 @@ describe('the course', () => {
     const level = { ...answer(lesson), components: [...answer(lesson).components, { id: 'g', kind: 'and' as const, x: 0, y: 20 }] };
     expect(mark(lesson, level, chipsFor(lesson.chips, {})).lines[0]).toBe('This lesson is built from NAND gates and your NOT only. Take out: AND gate.');
   });
+
+  it('takes the palette’s gate for a chip already built: a NOT gate is a NOT', () => {
+    const lesson = LESSONS.find(l => l.id === 'and')!;
+    const withGate = answer(lesson);
+    const level = { ...withGate, components: withGate.components.map(c => (c.id === 'inv' ? { id: 'inv', kind: 'not' as const, x: c.x, y: c.y } : c)) };
+    expect(mark(lesson, level, chipsFor(lesson.chips, {}))).toMatchObject({ passed: true });
+  });
 });
 
 describe('the course in the service', () => {

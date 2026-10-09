@@ -15,6 +15,13 @@ import { LESSONS, type Lesson } from './CourseLessons';
  * skipped, so every lesson can be done whatever came before.
  */
 
+/**
+ * The gate a lesson's chip is: once NOT is built, the palette's NOT gate
+ * is as good as the chip, and refusing it for being the wrong NOT only
+ * puzzles the person who used it.
+ */
+const GATE_OF_CHIP: Readonly<Record<string, Kind>> = { NOT: 'not', AND: 'and', OR: 'or', XOR: 'xor' };
+
 /** Parts any lesson may use: what puts values in and shows them, and words. */
 const ALWAYS: ReadonlySet<Kind> = new Set(['input', 'output', 'probe', 'constant', 'note', 'tunnel']);
 
@@ -202,7 +209,7 @@ export function allowedText(lesson: Lesson): string {
 
 /** Marks a lesson's circuit: its tests, as the lesson wrote them, and only the parts it allows. */
 export function mark(lesson: Lesson, level: Circuit, chips: Circuit['chips']): Marking {
-  const kinds = new Set<Kind>([...ALWAYS, ...lesson.kinds]);
+  const kinds = new Set<Kind>([...ALWAYS, ...lesson.kinds, ...lesson.chips.flatMap(name => GATE_OF_CHIP[name] ?? [])]);
   const extra = new Set<string>();
   for (const c of level.components) {
     if (c.kind === 'chip') {
@@ -214,7 +221,10 @@ export function mark(lesson: Lesson, level: Circuit, chips: Circuit['chips']): M
   if (extra.size > 0) {
     return {
       passed: false,
-      lines: [`This lesson is built from ${allowedText(lesson)} only. Take out: ${[...extra].join(', ')}.`]
+      lines: [
+        `This lesson is built from ${allowedText(lesson)} only. Take out: ${[...extra].join(', ')}.`,
+        'Your chips from earlier lessons are in the palette, under This circuit’s chips.'
+      ]
     };
   }
   const report = runTests(level, chips, lesson.tests);

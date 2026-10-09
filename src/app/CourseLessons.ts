@@ -49,7 +49,10 @@ export const LESSONS: readonly Lesson[] = [
     id: 'and',
     title: 'AND',
     chip: 'AND',
-    brief: ['AND is 1 only when a and b are both 1: exactly the opposite of NAND.', 'Your NOT is in the palette now, as a chip. Use it.'],
+    brief: [
+      'AND is 1 only when a and b are both 1: exactly the opposite of NAND.',
+      'Your NOT is in the palette now, under This circuit’s chips — or use the NOT gate, now that you have built one.'
+    ],
     hint: 'AND is NOT of NAND.',
     inputs: [{ name: 'a' }, { name: 'b' }],
     outputs: [{ name: 'out' }],
