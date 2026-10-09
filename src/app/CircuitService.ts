@@ -20,6 +20,7 @@ import type {
   TestsView,
   VersionsView,
   LevelView,
+  MyChipsView,
   Readings,
   ProgramView,
   SaveRequest,
@@ -27,13 +28,14 @@ import type {
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_VERSIONS, EMPTY_LEVEL, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_VERSIONS, EMPTY_LEVEL, NO_MY_CHIPS, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
 import { History } from './History';
 import { circuitOfLink, linkOf } from './ShareLink';
 import { Analyser } from './Analyser';
 import { writeVcd } from './Vcd';
 import { runTests, testsFromNow } from './CircuitTests';
+import { MyChips } from './MyChips';
 import { VERSION_EVERY_MS, Versions, type VersionReason, type VersionStore } from './Versions';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
@@ -111,6 +113,8 @@ export interface ServiceOptions {
   readonly delay?: (run: () => void, ms: number) => () => void;
   /** Where earlier versions are kept. Without one, none are. */
   readonly versions?: VersionStore;
+  /** Where the person's own chips are kept. Without one, there are none. */
+  readonly myChips?: VersionStore;
   /** The time of day, for dating versions: `Date.now` unless a spec moves it by hand. */
   readonly wallClock?: () => number;
 }
@@ -128,6 +132,9 @@ export interface AutosaveStore {
 /** The autosave's key in the store, and how long after the last change it is written. */
 export const AUTOSAVE_KEY = 'autosave';
 const AUTOSAVE_MS = 1000;
+
+/** What a chip placed from the person's own chips is named with, before its name. */
+export const MINE = 'mine:';
 
 /** How long after the last edit a followed level's tests run again. */
 const TEST_RUN_MS = 300;
@@ -189,6 +196,7 @@ export class CircuitService {
   readonly tested: Observable<TestsView>;
   readonly versionsView: Observable<VersionsView>;
   readonly levelView: Observable<LevelView>;
+  readonly myChipsView: Observable<MyChipsView>;
   readonly readings: Observable<Readings>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
@@ -208,6 +216,8 @@ export class CircuitService {
   private readonly testsSubject = new BehaviorSubject<TestsView>(NO_TESTS);
   private readonly versionsSubject = new BehaviorSubject<VersionsView>(NO_VERSIONS);
   private readonly levelSubject = new BehaviorSubject<LevelView>(EMPTY_LEVEL);
+  private readonly myChipsSubject = new BehaviorSubject<MyChipsView>(NO_MY_CHIPS);
+  private readonly mine: MyChips | null;
   private readonly readingsSubject = new BehaviorSubject<Readings>({});
   /** The readings last published, as text, so an unchanged set is not published again. */
   private readingsText = '{}';
@@ -330,9 +340,11 @@ export class CircuitService {
     this.tested = this.testsSubject;
     this.versionsView = this.versionsSubject;
     this.levelView = this.levelSubject;
+    this.myChipsView = this.myChipsSubject;
     this.readings = this.readingsSubject;
     this.wallClock = options.wallClock ?? Date.now;
     this.versions = options.versions === undefined ? null : new Versions(options.versions, this.wallClock);
+    this.mine = options.myChips === undefined ? null : new MyChips(options.myChips, this.wallClock);
     this.saving = this.savingSubject;
     this.clipboard = this.clipboardSubject;
     this.analyserView = this.analyserSubject;
@@ -456,6 +468,35 @@ export class CircuitService {
     };
   }
 
+  async saveMyChip(name: string): Promise<void> {
+    if (this.mine === null) return;
+    const kept = await this.mine.save(this.circuit, name);
+    this.message = kept ? `“${name}” is in My chips: place it in any circuit from the palette.` : `Couldn't keep “${name}” in My chips.`;
+    this.publishMyChips();
+    this.documentSubject.next(this.summary());
+  }
+
+  async removeMyChip(name: string): Promise<void> {
+    if (this.mine === null) return;
+    await this.mine.remove(name);
+    this.publishMyChips();
+  }
+
+  private publishMyChips(): void {
+    this.myChipsSubject.next({
+      chips: (this.mine?.list ?? []).map(({ name, savedAt, circuit }) => {
+        const { chips, ...definition } = circuit;
+        const all = { ...chips, [name]: definition };
+        return {
+          name,
+          savedAt,
+          shape: shapeOf({ id: '', kind: 'chip', chip: name, x: 0, y: 0 }, all) as KindLayout,
+          notes: pinNotes(definition)
+        };
+      })
+    });
+  }
+
   exportWaveforms(): void {
     const dump = this.analyser.dump();
     const serial = ++this.exportSerial;
@@ -550,6 +591,7 @@ export class CircuitService {
     const openedAtAsk = this.opened;
     const revisionAtAsk = this.revision;
     const versionsRead = this.versions?.load();
+    const mineRead = this.mine?.load().then(() => this.publishMyChips());
     try {
       const { value } = await this.store.read(AUTOSAVE_KEY);
       const saved = value === null ? null : (JSON.parse(value) as Autosave);
@@ -578,6 +620,7 @@ export class CircuitService {
       // have had without it, and the next change overwrites it.
     }
     await versionsRead;
+    await mineRead;
     this.autosaving = true;
     this.publishVersions();
   }
@@ -674,6 +717,16 @@ export class CircuitService {
         const brought = importChip(level, { ...definition!, chips: dependencies }, chip);
         target = brought.circuit;
         name = brought.name ?? chip;
+      }
+      // One of the person's own chips: brought in the same way, numbered
+      // if the document has another of its name.
+      if (kind === 'chip' && chip !== undefined && chip.startsWith(MINE)) {
+        const kept = this.mine?.get(chip.slice(MINE.length));
+        if (kept === undefined) return level;
+        const brought = importChip(level, kept.circuit, kept.name);
+        if (brought.name === null) return level;
+        target = brought.circuit;
+        name = brought.name;
       }
       const placed = place(target, id ?? freshId(target, kind), kind, x, y, rotation, name, width);
       return kind === 'clock' ? withRate(placed, this.clockHz) : placed;

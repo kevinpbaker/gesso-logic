@@ -1,10 +1,10 @@
-import { combineLatest, map, type Observable } from 'rxjs';
+import { BehaviorSubject, combineLatest, map, type Observable } from 'rxjs';
 
 import type { UiChild, UiKeyboardEvent, UiTextChangeEvent } from 'gesso-core';
 import { Dialog } from 'gesso-components';
 import { each, type InternalState, type ShellRecentFile } from 'gesso-framework';
 
-import type { VersionsView } from '../app/CircuitContract';
+import type { MyChipsView, VersionsView } from '../app/CircuitContract';
 import { INSTRUCTION_GROUPS, written } from '../cpu/Isa';
 import { action, field, heading, small } from './controls';
 import { MOD, parseRate, shortcutSections } from './Commands';
@@ -627,6 +627,69 @@ export function noteText(open: Observable<boolean>, text: InternalState<string>,
             {action('Cancel', close)}
             {action('Keep', apply, 'accent')}
           </row>
+        </column>
+      }
+    />
+  );
+}
+
+/**
+ * The person's own chips, to see what is kept and let one go. Letting
+ * one go cannot be undone here, so it asks; a document that uses the
+ * chip keeps its copy.
+ */
+export function myChipsDialog(open: Observable<boolean>, chips: Observable<MyChipsView>, remove: (name: string) => void, close: () => void): UiChild {
+  const WIDTH = 440;
+  const asking = new BehaviorSubject<string | null>(null);
+  return (
+    <Dialog
+      open={open}
+      onClose={() => {
+        asking.next(null);
+        close();
+      }}
+      title="My chips"
+      width={WIDTH}
+      content={
+        <column gap={10} width={inner(WIDTH)}>
+          <text
+            text="Chips you have kept, to place in any circuit from the palette. Placing one brings it into that circuit with the chips it is made of."
+            width={inner(WIDTH)}
+            fontSize={12}
+            color="textMuted"
+            textWrap="word"
+          />
+          <scrollview maxHeight={320} overscrollBehavior="contain">
+            <column gap={2} width={inner(WIDTH)}>
+              {each(
+                combineLatest([chips, asking]).pipe(
+                  map(([v, ask]) => (v.chips.length === 0 ? [{ name: '', savedAt: 0, ask: false }] : v.chips.map(c => ({ name: c.name, savedAt: c.savedAt, ask: ask === c.name }))))
+                ),
+                'name',
+                chip =>
+                  chip.name === '' ? (
+                    <text text="None yet. Select a chip on the canvas and choose Add to My chips." width={inner(WIDTH)} fontSize={12} color="textMuted" textWrap="word" />
+                  ) : (
+                    <row gap={8} y="center" width={inner(WIDTH)} paddingTop={3} paddingBottom={3}>
+                      <column flex={1} minWidth={0} gap={1}>
+                        <text text={chip.name} fontSize={12} fontWeight={600} color="text" textWrap="none" textOverflow="ellipsis" />
+                        <text text={`Kept ${versionTime(chip.savedAt)}`} fontSize={11} color="textMuted" textWrap="none" />
+                      </column>
+                      {chip.ask
+                        ? [
+                            small('Keep it', () => asking.next(null), 'keep'),
+                            action('Let it go', () => {
+                              asking.next(null);
+                              remove(chip.name);
+                            }, 'danger')
+                          ]
+                        : small('Remove…', () => asking.next(chip.name), 'remove')}
+                    </row>
+                  )
+              )}
+            </column>
+          </scrollview>
+          <row x="end" width={inner(WIDTH)}>{action('Close', close)}</row>
         </column>
       }
     />

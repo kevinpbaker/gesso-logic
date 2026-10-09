@@ -289,7 +289,11 @@ export interface ProgramView {
 }
 
 export interface CircuitCommands {
-  /** Adds a component. With no id, one is made from the kind. */
+  /**
+   * Adds a component. With no id, one is made from the kind. A chip names
+   * the document's definition, a standard library part, or `mine:` and
+   * one of the person's own chips, which comes into the document with it.
+   */
   place(kind: Kind, x: number, y: number, id?: string, rotation?: Rotation, chip?: string, width?: number): void;
   /** Joins two pins with a wire. With no id, one is made. */
   connect(from: PinRef, to: PinRef, id?: string): void;
@@ -512,6 +516,19 @@ export interface CircuitCommands {
    */
   restoreVersion(id: number): void;
   /**
+   * Keeps one of the document's chips in the person's own chips, with the
+   * chips it is made of, to place in any document; one kept under that
+   * name is replaced.
+   */
+  saveMyChip(name: string): void;
+  /**
+   * Stops keeping one of the person's own chips. Documents that use it
+   * keep their copy.
+   * @destructive
+   * @confirm
+   */
+  removeMyChip(name: string): void;
+  /**
    * Writes what the analyser holds as a VCD file, published as `exported`.
    * @hidden
    */
@@ -585,6 +602,8 @@ export interface CircuitView {
   readonly level: LevelView;
   /** What the level's switches, LEDs, probes and displays show now. */
   readonly readings: Readings;
+  /** The person's own chips, kept across documents. */
+  readonly myChips: MyChipsView;
 }
 
 /**
@@ -682,6 +701,21 @@ export interface LevelView {
  */
 export type Readings = Readonly<Record<string, number | null>>;
 
+/**
+ * The person's own chips, kept across documents (see `MyChips.ts`), for
+ * the palette: each by name, with the body an instance gets and what its
+ * pins are for. Placing one is `place('chip', …, 'mine:' + name)`.
+ */
+export interface MyChipsView {
+  readonly chips: readonly {
+    readonly name: string;
+    readonly shape: KindLayout;
+    readonly notes: Readonly<Record<string, string>>;
+    /** When it was last saved, in milliseconds since the epoch. */
+    readonly savedAt: number;
+  }[];
+}
+
 /** What `find` found: the query it answers, so a stale answer can be told from the latest, and the parts. */
 export interface FoundView {
   readonly query: string;
@@ -733,6 +767,7 @@ export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
 export const NO_SHARE: ShareView = { serial: 0, fragment: '', error: null };
 export const NO_VERSIONS: VersionsView = { entries: [] };
 export const EMPTY_LEVEL: LevelView = { path: 'the top level', parts: [], wires: [] };
+export const NO_MY_CHIPS: MyChipsView = { chips: [] };
 export const NO_TESTS: TestsView = { serial: 0, all: false, results: [] };
 export const NO_EXPORT: ExportView = { serial: 0, name: '', text: '', mediaType: '', error: null };
 export const INITIAL_STATUS: Status = { running: false, clockHz: 'max', achievedHz: 0, cycles: 0, ringing: [], history: null, past: null };
@@ -753,7 +788,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   tested: NO_TESTS,
   versions: NO_VERSIONS,
   level: EMPTY_LEVEL,
-  readings: {}
+  readings: {},
+  myChips: NO_MY_CHIPS
 });
 
 /**

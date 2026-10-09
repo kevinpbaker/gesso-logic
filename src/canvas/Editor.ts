@@ -233,7 +233,7 @@ export class Editor {
   get hint(): string {
     switch (this.mode.kind) {
       case 'placing':
-        return `Placing ${this.mode.chip ?? this.mode.what}: click to drop it · Esc stops`;
+        return `Placing ${(this.mode.chip ?? this.mode.what).replace(/^mine:/, '')}: click to drop it · Esc stops`;
       case 'wiring':
         return 'Release on a pin to connect · Esc cancels';
       case 'moving':

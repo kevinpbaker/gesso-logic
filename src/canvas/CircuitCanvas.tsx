@@ -651,6 +651,8 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
     changed: () => editorChanged.next(editorChanged.value + 1),
     chipShape: name => {
       const document = circuit.view.document.value;
+      // One of the person's own chips, by `mine:` and its name: see `MINE`.
+      if (name.startsWith('mine:')) return circuit.view.myChips.value.chips.find(chip => chip.name === name.slice(5))?.shape;
       return (document.chips.find(chip => chip.name === name) ?? document.library.find(part => part.name === name))?.shape;
     },
     pinNote: (chip, pin) => circuit.view.document.value.chips.find(c => c.name === chip)?.notes[pin] ?? null,

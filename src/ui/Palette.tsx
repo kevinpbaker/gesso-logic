@@ -4,7 +4,7 @@ import { percent, type UiChild } from 'gesso-core';
 import { tooltip } from 'gesso-components';
 import { createComponent, each, type ComponentContext, type Inputs } from 'gesso-framework';
 
-import type { DocumentSummary } from '../app/CircuitContract';
+import type { DocumentSummary, MyChipsView } from '../app/CircuitContract';
 import type { CanvasHandle } from '../canvas/CircuitCanvas';
 import type { Kind } from '../sim/Primitives';
 import { HOVER, heading } from './controls';
@@ -12,7 +12,8 @@ import { PART_SECTIONS } from './Commands';
 
 /**
  * The parts, down the left: every kind by what it is for, then the
- * standard library, then the chips this document has made.
+ * standard library, the person's own chips, kept across documents, and
+ * the chips this document has made.
  *
  * Each row names its part and the key that picks it up, and is lit
  * while that part is on the pointer, so the palette teaches the keys
@@ -22,7 +23,7 @@ import { PART_SECTIONS } from './Commands';
  */
 export const PALETTE_WIDTH = 188;
 
-export function palette(ctx: ComponentContext, canvas: CanvasHandle, document: Observable<DocumentSummary>): UiChild {
+export function palette(ctx: ComponentContext, canvas: CanvasHandle, document: Observable<DocumentSummary>, myChips: Observable<MyChipsView>): UiChild {
   const placing = canvas.editorChanged.pipe(
     map(() => {
       const p = canvas.editor.placing;
@@ -69,6 +70,28 @@ export function palette(ctx: ComponentContext, canvas: CanvasHandle, document: O
                 ),
                 'name',
                 part => row(part.name, part.name, '', part.note, `chip:${part.name}`, () => pick('chip', part.name))
+              )}
+            </column>
+          )}
+          {section(
+            'My chips',
+            <column gap={1} width={percent(100)}>
+              {each(
+                myChips.pipe(
+                  map(v => (v.chips.length === 0 ? [{ name: '' }] : v.chips.map(chip => ({ name: chip.name })))),
+                  distinctUntilChanged((a, b) => a.length === b.length && a.every((p, i) => p.name === b[i]!.name))
+                ),
+                'name',
+                chip =>
+                  chip.name === '' ? (
+                    <box paddingLeft={8} paddingRight={8} paddingTop={2}>
+                      <text text="Select a chip and choose Add to My chips, to place it in any circuit." fontSize={11} color="textMuted" textWrap="word" />
+                    </box>
+                  ) : (
+                    row(`mine:${chip.name}`, chip.name, '', `Place your ${chip.name}: it comes into this circuit with the chips it is made of`, `chip:mine:${chip.name}`, () =>
+                      pick('chip', `mine:${chip.name}`)
+                    )
+                  )
               )}
             </column>
           )}

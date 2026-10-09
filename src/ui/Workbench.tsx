@@ -15,7 +15,7 @@ import { waveformPanel } from '../canvas/Waveform';
 import { minimap } from '../canvas/Minimap';
 import { action, heading, rule, small, tool } from './controls';
 import { commandKeys, commandLabel, EXAMPLES, MENUS, rateLabel, rateOf, RATES, type CommandId } from './Commands';
-import { noteText, clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, versionHistory, type Discard, type FindItem } from './Dialogs';
+import { myChipsDialog, noteText, clockRate, confirmDiscard, findDialog, shareLink, gettingStarted, instructionSet, pasteHint, recentFiles, renamePart, shortcuts, versionHistory, type Discard, type FindItem } from './Dialogs';
 import { kindName } from '../app/Describe';
 import { ICONS } from './icons';
 import { inspector } from './Inspector';
@@ -104,6 +104,7 @@ export function workbench(ctx: ComponentContext) {
   const showTests = internalState(false);
   const showVersions = internalState(false);
   const showNote = internalState(false);
+  const showMyChips = internalState(false);
   const noteWords = internalState('');
   let noting = '';
   const shareUrl = internalState('');
@@ -277,7 +278,7 @@ export function workbench(ctx: ComponentContext) {
         const one = s.one;
         const items: MenuItem[] = [];
         if (one !== null) items.push({ value: 'rename', label: 'Rename…' });
-        if (one?.kind === 'chip') items.push(item('openChip'));
+        if (one?.kind === 'chip') items.push(item('openChip'), item('saveMyChip'));
         if (one?.kind === 'rom') items.push({ value: `program:${one.id}`, label: 'Edit the program…' });
         items.push(item('trace', s.parts === 1 ? 'Trace its outputs in the analyser' : 'Trace their outputs in the analyser'));
         items.push(item('truthTable'), item('rotate'), item('duplicate'), item('copy'));
@@ -542,6 +543,13 @@ export function workbench(ctx: ComponentContext) {
         if (chip !== null) circuit.send.resetChip(chip);
         return;
       }
+      case 'saveMyChip': {
+        const chip = chipToKeep();
+        if (chip !== null) circuit.send.saveMyChip(chip);
+        return;
+      }
+      case 'myChips':
+        return openDialog(showMyChips);
       case 'openChip': {
         const one = canvas.selection().one;
         if (one?.kind === 'chip') circuit.send.openChip(one.id);
@@ -680,6 +688,12 @@ export function workbench(ctx: ComponentContext) {
     return target >= s.history.first ? target : null;
   }
 
+  /** The chip Add to My chips keeps: the one selected, or else the one whose inside is shown. */
+  function chipToKeep(): string | null {
+    const one = canvas.selection().one;
+    return one?.kind === 'chip' && one.chip !== null ? one.chip : (document.value.path.at(-1)?.chip ?? null);
+  }
+
   /**
    * The chip Reset would put back: the one selected, or else the one
    * whose inside is shown — when it has changed since it was opened.
@@ -710,6 +724,8 @@ export function workbench(ctx: ComponentContext) {
         return s.parts > 0;
       case 'resetChip':
         return resetTarget() !== null;
+      case 'saveMyChip':
+        return chipToKeep() !== null;
       case 'straighten':
         return canvas.bent();
       case 'arrange:across':
@@ -1250,7 +1266,7 @@ export function workbench(ctx: ComponentContext) {
       {toolbar}
       {line('x')}
       <row flex={1} minHeight={0} width={percent(100)}>
-        {palette(ctx, canvas, document)}
+        {palette(ctx, canvas, document, circuit.view.myChips)}
         {line('y')}
         <stack position="relative" flex={1} minWidth={0} height={percent(100)}>
           {canvas.element}
@@ -1319,6 +1335,7 @@ export function workbench(ctx: ComponentContext) {
       />
       {programEditor(ctx, () => canvas.focus())}
       {testsDialog(ctx, showTests, closeDialog(showTests))}
+      {myChipsDialog(showMyChips, circuit.view.myChips, name => circuit.send.removeMyChip(name), closeDialog(showMyChips))}
       {noteText(
         showNote,
         noteWords,

@@ -58,6 +58,8 @@ export type CommandId =
   | 'straighten'
   | `arrange:${Arrangement}`
   | 'resetChip'
+  | 'saveMyChip'
+  | 'myChips'
   | 'openChip'
   | 'fit'
   | 'zoomIn'
@@ -136,6 +138,8 @@ const FIXED: Readonly<Record<string, Command>> = {
   'arrange:across': { label: 'Space evenly across', group: 'Edit' },
   'arrange:down': { label: 'Space evenly down', group: 'Edit' },
   resetChip: { label: 'Reset the chip to how it was opened', group: 'Edit' },
+  saveMyChip: { label: 'Add the chip to My chips', group: 'Edit' },
+  myChips: { label: 'My chips…', group: 'File' },
   openChip: { label: 'Look inside the chip', keys: 'Double-click', group: 'View' },
   fit: { label: 'Fit the circuit', keys: '0', group: 'View' },
   zoomIn: { label: 'Zoom in', keys: '=', group: 'View' },
@@ -210,7 +214,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
   {
     label: 'File',
     mnemonic: 'f',
-    entries: ['new', 'open', 'openRecent', MENU_SEPARATOR, 'save', 'saveAs', 'versions', 'share', MENU_SEPARATOR, 'exportSvg', 'exportPng', 'exportVcd', MENU_SEPARATOR, 'importChip']
+    entries: ['new', 'open', 'openRecent', MENU_SEPARATOR, 'save', 'saveAs', 'versions', 'share', MENU_SEPARATOR, 'exportSvg', 'exportPng', 'exportVcd', MENU_SEPARATOR, 'importChip', 'myChips']
   },
   {
     label: 'Edit',
@@ -231,7 +235,8 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       MENU_SEPARATOR,
       'rotate',
       'makeChip',
-      'resetChip'
+      'resetChip',
+      'saveMyChip'
     ]
   },
   {
