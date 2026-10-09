@@ -132,6 +132,17 @@ biggest thing built with it, not the only thing it can do.
   VCD for GTKWave or any other viewer.
 - **A minimap** in the corner whenever the level is bigger than the
   view: click or drag it to move around.
+- **Notes and named wires.** Write on the canvas with a note, and join
+  wires by name with tags instead of drawing them across the level.
+  **Arrange** lines parts up and spaces them evenly.
+- **My chips.** Keep any chip you make and place it in any circuit
+  from the palette, with the chips it is built from.
+- **A course: build a computer from NAND.** Ten lessons, from NOT to a
+  D flip-flop. Each is a chip to build from the ones before it, checked
+  by its tests and by the parts it allows, and becomes a part you use in
+  the lessons after it. Help › Build a computer from NAND.
+- **Errors reported home.** The live site sends its crashes, without
+  your circuit, to a function beside it (`api/errors.ts`).
 - **A program editor** for the ROM, with syntax colouring, a gutter of
   line numbers and ROM addresses, the program counter's line marked
   while it runs, and errors listed line by line.

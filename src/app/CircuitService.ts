@@ -21,6 +21,7 @@ import type {
   VersionsView,
   LevelView,
   MyChipsView,
+  CourseView,
   Readings,
   ProgramView,
   SaveRequest,
@@ -28,7 +29,7 @@ import type {
   TableView,
   WireGeometry
 } from './CircuitContract';
-import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_VERSIONS, EMPTY_LEVEL, NO_MY_CHIPS, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
+import { bucketOf, CLOSED_ANALYSER, NO_CLIP, NO_PROGRAM, NO_EXPORT, NO_SAVE, NO_TESTS, NO_VERSIONS, EMPTY_LEVEL, NO_MY_CHIPS, NO_COURSE, NO_SHARE, NO_TABLE, NOTHING_FOUND, type Buckets as GeometryBuckets } from './CircuitContract';
 import { findParts } from './Search';
 import { History } from './History';
 import { circuitOfLink, linkOf } from './ShareLink';
@@ -36,6 +37,8 @@ import { Analyser } from './Analyser';
 import { writeVcd } from './Vcd';
 import { runTests, testsFromNow } from './CircuitTests';
 import { MyChips } from './MyChips';
+import { answer, lessonCircuit, mark } from './Course';
+import { lessonById } from './CourseLessons';
 import { VERSION_EVERY_MS, Versions, type VersionReason, type VersionStore } from './Versions';
 import { CircuitFileError, DEFAULT_FILE_NAME, readCircuit, writeCircuit } from '../sim/CircuitFile';
 import { assemble, AssemblyError, listing } from '../cpu/Assembler';
@@ -115,6 +118,8 @@ export interface ServiceOptions {
   readonly versions?: VersionStore;
   /** Where the person's own chips are kept. Without one, there are none. */
   readonly myChips?: VersionStore;
+  /** Where progress through the course is kept. Without one, it lasts as long as the page. */
+  readonly course?: VersionStore;
   /** The time of day, for dating versions: `Date.now` unless a spec moves it by hand. */
   readonly wallClock?: () => number;
 }
@@ -132,6 +137,19 @@ export interface AutosaveStore {
 /** The autosave's key in the store, and how long after the last change it is written. */
 export const AUTOSAVE_KEY = 'autosave';
 const AUTOSAVE_MS = 1000;
+
+/** Progress through the course, as it is kept. */
+interface CourseProgress {
+  /** The chips the person built, as circuit file text, by chip name. */
+  readonly built: Readonly<Record<string, string>>;
+  readonly done: readonly string[];
+  /** The lesson the document is, or null. */
+  readonly current: string | null;
+  /** Each lesson's circuit as the person left it, as file text, by lesson id. */
+  readonly work: Readonly<Record<string, string>>;
+}
+
+const PROGRESS_KEY = 'progress';
 
 /** What a chip placed from the person's own chips is named with, before its name. */
 export const MINE = 'mine:';
@@ -197,6 +215,7 @@ export class CircuitService {
   readonly versionsView: Observable<VersionsView>;
   readonly levelView: Observable<LevelView>;
   readonly myChipsView: Observable<MyChipsView>;
+  readonly courseView: Observable<CourseView>;
   readonly readings: Observable<Readings>;
   readonly saving: Observable<SaveRequest>;
   readonly clipboard: Observable<ClipRequest>;
@@ -218,6 +237,10 @@ export class CircuitService {
   private readonly levelSubject = new BehaviorSubject<LevelView>(EMPTY_LEVEL);
   private readonly myChipsSubject = new BehaviorSubject<MyChipsView>(NO_MY_CHIPS);
   private readonly mine: MyChips | null;
+  private readonly courseSubject = new BehaviorSubject<CourseView>(NO_COURSE);
+  private readonly courseStore: VersionStore | null;
+  /** Progress through the course: the chips built, as file text by name, the lessons passed, the lesson open, and work left in each. */
+  private progress: CourseProgress = { built: {}, done: [], current: null, work: {} };
   private readonly readingsSubject = new BehaviorSubject<Readings>({});
   /** The readings last published, as text, so an unchanged set is not published again. */
   private readingsText = '{}';
@@ -341,6 +364,8 @@ export class CircuitService {
     this.versionsView = this.versionsSubject;
     this.levelView = this.levelSubject;
     this.myChipsView = this.myChipsSubject;
+    this.courseView = this.courseSubject;
+    this.courseStore = options.course ?? null;
     this.readings = this.readingsSubject;
     this.wallClock = options.wallClock ?? Date.now;
     this.versions = options.versions === undefined ? null : new Versions(options.versions, this.wallClock);
@@ -367,10 +392,15 @@ export class CircuitService {
       dirty?: boolean;
       camera?: Camera | null;
       originals?: Readonly<Record<string, Circuit>>;
+      /** The course's lesson this document is; absent for any other. */
+      lesson?: string;
     } = { name: null, handle: null }
   ): void {
-    // What was open, kept before it goes, saved or not.
+    // What was open, kept before it goes, saved or not; a lesson's work
+    // is kept with the course too.
     this.keepVersion('replaced');
+    this.keepLessonWork();
+    this.setLesson(file.lesson ?? null);
     this.opened++;
     // What the file traced, traced again; the document itself does not
     // carry them, so an edit's undo does not take a trace away.
@@ -466,6 +496,116 @@ export class CircuitService {
       all,
       results: levels.map(({ level, circuit }) => ({ level, ...runTests(circuit, chips, circuit.tests ?? '') }))
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // The course
+  // -------------------------------------------------------------------------
+
+  private async readProgress(): Promise<CourseProgress> {
+    if (this.courseStore !== null) {
+      try {
+        const { value } = await this.courseStore.read(PROGRESS_KEY);
+        const read = value === null ? null : (JSON.parse(value) as Partial<CourseProgress>);
+        if (read !== null) {
+          this.progress = { built: read.built ?? {}, done: read.done ?? [], current: read.current ?? null, work: read.work ?? {} };
+        }
+      } catch {
+        // Progress that cannot be read is a course not started.
+      }
+    }
+    this.publishCourse(this.courseSubject.value.marking);
+    return this.progress;
+  }
+
+  private writeProgress(): void {
+    void this.courseStore?.write(PROGRESS_KEY, JSON.stringify(this.progress));
+  }
+
+  private setLesson(id: string | null): void {
+    if (this.progress.current === id) return;
+    this.progress = { ...this.progress, current: id };
+    this.writeProgress();
+    this.publishCourse({ serial: this.courseSubject.value.marking.serial, passed: false, lines: [] });
+  }
+
+  private publishCourse(marking: CourseView['marking']): void {
+    this.courseSubject.next({ lesson: this.progress.current, done: this.progress.done, marking });
+  }
+
+  /** The chips built in the course, read from their file text. */
+  private builtChips(): Record<string, Circuit> {
+    const out: Record<string, Circuit> = {};
+    for (const [name, text] of Object.entries(this.progress.built)) {
+      try {
+        out[name] = readCircuit(text);
+      } catch {
+        // A chip that does not read is one built again.
+      }
+    }
+    return out;
+  }
+
+  /** The lesson open's top level as it is, kept so going back to it finds it so. */
+  private keepLessonWork(): void {
+    const id = this.progress.current;
+    if (id === null || this.circuit.components.length === 0) return;
+    const { chips: _, ...level } = this.circuit;
+    this.progress = { ...this.progress, work: { ...this.progress.work, [id]: writeCircuit(level) } };
+    this.writeProgress();
+  }
+
+  openLesson(id: string, fresh = false): void {
+    const lesson = lessonById(id);
+    if (lesson === undefined) return;
+    this.keepLessonWork();
+    let start: Circuit | null = null;
+    const work = fresh ? undefined : this.progress.work[id];
+    if (work !== undefined) {
+      try {
+        start = readCircuit(work);
+      } catch {
+        start = null;
+      }
+    }
+    // Not the work just kept: this lesson's, opened now.
+    this.progress = { ...this.progress, current: null };
+    this.load(lessonCircuit(lesson, this.builtChips(), start), { name: null, handle: null, lesson: id });
+    this.message = null;
+    this.documentSubject.next(this.summary());
+  }
+
+  checkLesson(): void {
+    const lesson = this.progress.current === null ? undefined : lessonById(this.progress.current);
+    const serial = this.courseSubject.value.marking.serial + 1;
+    if (lesson === undefined) return;
+    const { chips, ...level } = this.circuit;
+    const marking = mark(lesson, level, chips);
+    if (marking.passed) {
+      const { tests: _, traces: __, ...definition } = level;
+      this.progress = {
+        ...this.progress,
+        done: this.progress.done.includes(lesson.id) ? this.progress.done : [...this.progress.done, lesson.id],
+        built: { ...this.progress.built, [lesson.chip]: writeCircuit(definition) }
+      };
+      this.keepLessonWork();
+    }
+    this.writeProgress();
+    this.publishCourse({ serial, passed: marking.passed, lines: marking.lines });
+  }
+
+  showAnswer(): void {
+    const lesson = this.progress.current === null ? undefined : lessonById(this.progress.current);
+    if (lesson === undefined) return;
+    this.lastGesture = null;
+    // The answer, in place of the level, as one edit: undo brings back what was there.
+    this.edit({ ...answer(lesson), ...(this.circuit.tests === undefined ? {} : { tests: this.circuit.tests }), ...(this.circuit.chips === undefined ? {} : { chips: this.circuit.chips }) });
+    this.publishCourse({ serial: this.courseSubject.value.marking.serial + 1, passed: false, lines: ['That is one answer. Read it, run it, and check it to move on.'] });
+  }
+
+  leaveCourse(): void {
+    this.keepLessonWork();
+    this.setLesson(null);
   }
 
   async saveMyChip(name: string): Promise<void> {
@@ -592,6 +732,7 @@ export class CircuitService {
     const revisionAtAsk = this.revision;
     const versionsRead = this.versions?.load();
     const mineRead = this.mine?.load().then(() => this.publishMyChips());
+    const courseRead = this.readProgress();
     try {
       const { value } = await this.store.read(AUTOSAVE_KEY);
       const saved = value === null ? null : (JSON.parse(value) as Autosave);
@@ -606,6 +747,9 @@ export class CircuitService {
         });
         this.camera = saved.camera;
         if (saved.running) this.run();
+        // A lesson open when the page closed is the document it brought back.
+        const progress = await courseRead;
+        if (progress.current !== null && lessonById(progress.current) !== undefined) this.setLesson(progress.current);
       } else if (untouched && value === null && first !== undefined) {
         // A first visit: the showpiece, already playing.
         this.loadProgram(first.name, first.source, first.rate);
@@ -621,6 +765,7 @@ export class CircuitService {
     }
     await versionsRead;
     await mineRead;
+    await courseRead;
     this.autosaving = true;
     this.publishVersions();
   }

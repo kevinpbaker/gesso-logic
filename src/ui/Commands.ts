@@ -86,6 +86,7 @@ export type CommandId =
   | 'gettingStarted'
   | 'instructionSet'
   | 'tour'
+  | 'course'
   | 'thread'
   | 'theme'
   | 'minimap'
@@ -165,6 +166,7 @@ const FIXED: Readonly<Record<string, Command>> = {
   gettingStarted: { label: 'Getting started', group: 'Help' },
   instructionSet: { label: 'The CPU’s instruction set', group: 'Help' },
   tour: { label: 'Take the tour', group: 'Help' },
+  course: { label: 'Build a computer from NAND: a course', group: 'Help' },
   menuBar: { label: 'Go to the menu bar', keys: 'F10', group: 'Help' }
 };
 
@@ -280,7 +282,7 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       'example:bench'
     ]
   },
-  { label: 'Help', mnemonic: 'h', entries: ['tour', 'gettingStarted', 'instructionSet', 'shortcuts'] }
+  { label: 'Help', mnemonic: 'h', entries: ['tour', 'course', 'gettingStarted', 'instructionSet', 'shortcuts'] }
 ];
 
 /** The shortcut sheet: the commands with a key, by menu, then what the pointer and the part keys do. */

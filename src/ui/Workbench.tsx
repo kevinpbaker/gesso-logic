@@ -25,6 +25,7 @@ import { palette } from './Palette';
 import { GAMES, PROGRAMS } from './Programs';
 import { ringingParts } from './Problems';
 import { tour } from './Tour';
+import { coursePanel } from './CoursePanel';
 
 /**
  * The simulator as a person uses it.
@@ -55,6 +56,7 @@ export function workbench(ctx: ComponentContext) {
   const shell = ctx.inject(ShellService);
   const mainThread = isMainThread();
   const tourOpen = internalState(false);
+  const courseOpen = internalState(false);
 
   // Light or dark: the system's until the toggle is used, and then the
   // choice, remembered in a folder of its own beside the autosave's.
@@ -624,6 +626,11 @@ export function workbench(ctx: ComponentContext) {
       }
       case 'tour':
         tourOpen.value = true;
+        courseOpen.value = false;
+        return;
+      case 'course':
+        courseOpen.value = true;
+        tourOpen.value = false;
         return;
       case 'theme':
         appearance.set(dark ? 'light' : 'dark');
@@ -1273,6 +1280,38 @@ export function workbench(ctx: ComponentContext) {
           {emptyState}
           {breadcrumb}
           {tourCard}
+          {coursePanel(
+            courseOpen,
+            circuit.view.course,
+            combineLatest([analyser.open, analyser.height]).pipe(map(([open, height]) => (open ? height + 24 : 12))),
+            {
+              // A lesson's work is kept with the course, so moving between
+              // lessons asks nothing; leaving another document for one asks
+              // as any open does.
+              open: (id, fresh) => {
+                const go = () => {
+                  courseOpen.value = true;
+                  tourOpen.value = false;
+                  circuit.send.openLesson(id, fresh);
+                  canvas.focus();
+                };
+                if (circuit.view.course.value.lesson !== null) go();
+                else guard('Opening a lesson', go);
+              },
+              check: () => circuit.send.checkLesson(),
+              answer: () => circuit.send.showAnswer(),
+              computer: () => {
+                courseOpen.value = false;
+                circuit.send.leaveCourse();
+                run('example:computer');
+              },
+              close: () => {
+                courseOpen.value = false;
+                circuit.send.leaveCourse();
+                canvas.focus();
+              }
+            }
+          )}
           {inspector(ctx, canvas, inside)}
           {minimap(
             ctx,

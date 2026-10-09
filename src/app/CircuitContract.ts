@@ -516,6 +516,22 @@ export interface CircuitCommands {
    */
   restoreVersion(id: number): void;
   /**
+   * Opens a lesson of the course as the document: where it was left, or
+   * where it starts. With `fresh`, where it starts, whatever was done.
+   * @destructive
+   * @confirm
+   */
+  openLesson(id: string, fresh?: boolean): void;
+  /** Checks the lesson open against its tests and the parts it allows; passed, its circuit is a chip for the lessons after. */
+  checkLesson(): void;
+  /**
+   * Replaces the lesson's circuit with an answer, to read or check.
+   * @confirm
+   */
+  showAnswer(): void;
+  /** Stops treating the document as a lesson. */
+  leaveCourse(): void;
+  /**
    * Keeps one of the document's chips in the person's own chips, with the
    * chips it is made of, to place in any document; one kept under that
    * name is replaced.
@@ -604,6 +620,8 @@ export interface CircuitView {
   readonly readings: Readings;
   /** The person's own chips, kept across documents. */
   readonly myChips: MyChipsView;
+  /** The course: the lesson open and the ones passed. */
+  readonly course: CourseView;
 }
 
 /**
@@ -716,6 +734,17 @@ export interface MyChipsView {
   }[];
 }
 
+/**
+ * The course (see `CourseLessons.ts`): the lesson open, if the document
+ * is one, the lessons passed, and what the last check of the lesson
+ * said. `marking.serial` counts checks; 0 is none yet.
+ */
+export interface CourseView {
+  readonly lesson: string | null;
+  readonly done: readonly string[];
+  readonly marking: { readonly serial: number; readonly passed: boolean; readonly lines: readonly string[] };
+}
+
 /** What `find` found: the query it answers, so a stale answer can be told from the latest, and the parts. */
 export interface FoundView {
   readonly query: string;
@@ -767,6 +796,7 @@ export const NOTHING_FOUND: FoundView = { query: '', parts: [] };
 export const NO_SHARE: ShareView = { serial: 0, fragment: '', error: null };
 export const NO_VERSIONS: VersionsView = { entries: [] };
 export const EMPTY_LEVEL: LevelView = { path: 'the top level', parts: [], wires: [] };
+export const NO_COURSE: CourseView = { lesson: null, done: [], marking: { serial: 0, passed: false, lines: [] } };
 export const NO_MY_CHIPS: MyChipsView = { chips: [] };
 export const NO_TESTS: TestsView = { serial: 0, all: false, results: [] };
 export const NO_EXPORT: ExportView = { serial: 0, name: '', text: '', mediaType: '', error: null };
@@ -789,7 +819,8 @@ export const Circuit = channel<CircuitView, CircuitCommands>('circuit', {
   versions: NO_VERSIONS,
   level: EMPTY_LEVEL,
   readings: {},
-  myChips: NO_MY_CHIPS
+  myChips: NO_MY_CHIPS,
+  course: NO_COURSE
 });
 
 /**

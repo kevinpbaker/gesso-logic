@@ -16,7 +16,8 @@ export function serveCircuit(host?: PortHost): void {
   const service = new CircuitService({
     store: new OpfsStorage({ directory: 'gessologic' }),
     versions: new OpfsStorage({ directory: 'gessologic-versions' }),
-    myChips: new OpfsStorage({ directory: 'gessologic-my-chips' })
+    myChips: new OpfsStorage({ directory: 'gessologic-my-chips' }),
+    course: new OpfsStorage({ directory: 'gessologic-course' })
   });
   serveChannels(circuitChannels(service), host);
 }

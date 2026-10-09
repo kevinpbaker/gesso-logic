@@ -30,7 +30,8 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         versions: service.versionsView,
         level: service.levelView,
         readings: service.readings,
-        myChips: service.myChipsView
+        myChips: service.myChipsView,
+        course: service.courseView
       },
       commands: {
         place: (kind, x, y, id, rotation, chip, width) => service.place(kind, x, y, id, rotation, chip, width),
@@ -83,6 +84,10 @@ export function circuitChannels(service: CircuitService): ServedChannel[] {
         runTests: (all, follow) => service.runTests(all, follow),
         stopTests: () => service.stopTests(),
         saveMyChip: name => void service.saveMyChip(name),
+        openLesson: (id, fresh) => service.openLesson(id, fresh),
+        checkLesson: () => service.checkLesson(),
+        showAnswer: () => service.showAnswer(),
+        leaveCourse: () => service.leaveCourse(),
         removeMyChip: name => void service.removeMyChip(name),
         restoreVersion: id => void service.restoreVersion(id),
         openShared: fragment => service.openShared(fragment),
