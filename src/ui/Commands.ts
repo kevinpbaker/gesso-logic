@@ -1,6 +1,7 @@
 import { MENU_SEPARATOR, type MenuBarMenu } from 'gesso-components';
 
 import type { ClockRate, SceneName } from '../app/CircuitContract';
+import type { Arrangement } from '../app/DocumentEdits';
 import { GAMES, PROGRAMS } from './Programs';
 
 /**
@@ -55,6 +56,7 @@ export type CommandId =
   | 'rotate'
   | 'makeChip'
   | 'straighten'
+  | `arrange:${Arrangement}`
   | 'resetChip'
   | 'openChip'
   | 'fit'
@@ -125,6 +127,14 @@ const FIXED: Readonly<Record<string, Command>> = {
   rotate: { label: 'Rotate', keys: 'R', group: 'Edit' },
   makeChip: { label: 'Make a chip of the selection', keys: 'M', group: 'Edit' },
   straighten: { label: 'Straighten wires', group: 'Edit' },
+  'arrange:left': { label: 'Align left edges', group: 'Edit' },
+  'arrange:centre': { label: 'Align centres', group: 'Edit' },
+  'arrange:right': { label: 'Align right edges', group: 'Edit' },
+  'arrange:top': { label: 'Align top edges', group: 'Edit' },
+  'arrange:middle': { label: 'Align middles', group: 'Edit' },
+  'arrange:bottom': { label: 'Align bottom edges', group: 'Edit' },
+  'arrange:across': { label: 'Space evenly across', group: 'Edit' },
+  'arrange:down': { label: 'Space evenly down', group: 'Edit' },
   resetChip: { label: 'Reset the chip to how it was opened', group: 'Edit' },
   openChip: { label: 'Look inside the chip', keys: 'Double-click', group: 'View' },
   fit: { label: 'Fit the circuit', keys: '0', group: 'View' },
@@ -220,9 +230,26 @@ export const MENUS: readonly MenuBarMenu<CommandId>[] = [
       'find',
       MENU_SEPARATOR,
       'rotate',
-      'straighten',
       'makeChip',
       'resetChip'
+    ]
+  },
+  {
+    label: 'Arrange',
+    mnemonic: 'a',
+    entries: [
+      'arrange:left',
+      'arrange:centre',
+      'arrange:right',
+      MENU_SEPARATOR,
+      'arrange:top',
+      'arrange:middle',
+      'arrange:bottom',
+      MENU_SEPARATOR,
+      'arrange:across',
+      'arrange:down',
+      MENU_SEPARATOR,
+      'straighten'
     ]
   },
   {

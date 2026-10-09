@@ -76,6 +76,8 @@ export interface SelectionSummary {
   readonly wires: number;
   /** Whether a wire selected was bent by hand. */
   readonly bent: boolean;
+  /** The parts selected, by id. */
+  readonly partIds: readonly string[];
   readonly one: {
     readonly id: string;
     readonly kind: Kind;
@@ -945,10 +947,13 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
       let parts = 0;
       let wires = 0;
       let bent = false;
+      const partIds: string[] = [];
       // An id in neither is one just handed out, not yet come back.
       for (const id of editor.selection) {
-        if (scene.indexOf.has(id)) parts++;
-        else {
+        if (scene.indexOf.has(id)) {
+          parts++;
+          partIds.push(id);
+        } else {
           const w = scene.wireIds.indexOf(id);
           if (w < 0) continue;
           wires++;
@@ -960,6 +965,7 @@ export function circuitCanvas(ctx: ComponentContext, files: FileActions | null =
         parts,
         wires,
         bent,
+        partIds,
         one:
           only === undefined
             ? null

@@ -58,6 +58,8 @@ import {
   setNote,
   setVia,
   straighten,
+  arrange,
+  type Arrangement,
   setWidth,
   sameConnectivity,
   type Fragment
@@ -894,6 +896,10 @@ export class CircuitService {
 
   straighten(ids: readonly string[]): void {
     this.editLevel(level => straighten(level, ids));
+  }
+
+  arrange(ids: readonly string[], how: Arrangement): void {
+    this.editLevel(level => arrange(level, ids, how));
   }
 
   rotate(ids: readonly string[]): void {

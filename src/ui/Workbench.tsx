@@ -5,6 +5,7 @@ import { Menu, MENU_SEPARATOR, MenuBar, Select, type MenuItem } from 'gesso-comp
 import { createComponent, FocusService, internalState, OpfsStorage, persisted, ShellService, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type ClockRate, type SceneName } from '../app/CircuitContract';
+import type { Arrangement } from '../app/DocumentEdits';
 import { isMainThread, isOpeningLink } from '../canvas/Bench';
 import { INCOMING_LINK, LINK_STORE } from '../route';
 import { circuitCanvas, type Camera, type CanvasKeys, type TraceWhere } from '../canvas/CircuitCanvas';
@@ -472,6 +473,10 @@ export function workbench(ctx: ComponentContext) {
       circuit.send.setClockHz(rate);
       return;
     }
+    if (id.startsWith('arrange:')) {
+      circuit.send.arrange(canvas.selection().partIds, id.slice(8) as Arrangement);
+      return;
+    }
     if (id.startsWith('example:')) {
       const scene = id.slice(8) as SceneName;
       const example = EXAMPLES.find(e => e.scene === scene)!;
@@ -707,6 +712,16 @@ export function workbench(ctx: ComponentContext) {
         return resetTarget() !== null;
       case 'straighten':
         return canvas.bent();
+      case 'arrange:across':
+      case 'arrange:down':
+        return s.parts >= 3;
+      case 'arrange:left':
+      case 'arrange:centre':
+      case 'arrange:right':
+      case 'arrange:top':
+      case 'arrange:middle':
+      case 'arrange:bottom':
+        return s.parts >= 2;
       case 'deselect':
         return s.parts + s.wires > 0;
       case 'openChip':

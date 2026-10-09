@@ -5,7 +5,7 @@ import { each, internalState, type ComponentContext } from 'gesso-framework';
 
 import { Circuit, type TableView } from '../app/CircuitContract';
 import { headings } from '../app/TruthTable';
-import { WIDENABLE } from '../app/DocumentEdits';
+import { WIDENABLE, type Arrangement } from '../app/DocumentEdits';
 import type { CanvasHandle, SelectionSummary } from '../canvas/CircuitCanvas';
 import { kindName } from '../app/Describe';
 import { field, heading, small } from './controls';
@@ -47,7 +47,7 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
   const valueText = internalState('');
   const noteText = internalState('');
   const labelText = internalState('');
-  let current: SelectionSummary = { parts: 0, wires: 0, bent: false, one: null };
+  let current: SelectionSummary = { parts: 0, wires: 0, bent: false, partIds: [], one: null };
   ctx.effect(selection, s => {
     current = s;
     chipName.value = s.one?.chip ?? '';
@@ -173,6 +173,27 @@ export function inspector(ctx: ComponentContext, canvas: CanvasHandle, inside: O
       }
       if (s.parts > 1) {
         actions.push(small('Make chip  M', act(() => editor.makeChip()), 'chip'));
+        // The selection when clicked: these rows outlive a change to another of the same size.
+        const line = (how: Arrangement) => act(() => circuit.send.arrange(canvas.selection().partIds, how));
+        rows.push(
+          labelled(
+            'Align',
+            <row gap={3} flexWrap="wrap">
+              {small('Left', line('left'), 'a-left')}
+              {small('Centre', line('centre'), 'a-centre')}
+              {small('Right', line('right'), 'a-right')}
+              {small('Top', line('top'), 'a-top')}
+              {small('Middle', line('middle'), 'a-middle')}
+              {small('Bottom', line('bottom'), 'a-bottom')}
+            </row>,
+            'align'
+          )
+        );
+        if (s.parts > 2) {
+          rows.push(
+            labelled('Space', <row gap={3}>{small('Evenly across', line('across'), 's-across')}{small('Evenly down', line('down'), 's-down')}</row>, 'space')
+          );
+        }
       }
       if (s.bent) actions.push(small('Straighten', act(() => circuit.send.straighten([...editor.selection])), 'straighten'));
       if (s.parts > 0) actions.push(small('Truth table  T', act(() => editor.tabulate()), 'table'));

@@ -1,7 +1,7 @@
 import { channel } from 'gesso-framework';
 
 import type { PinRef, Rotation } from '../sim/Circuit';
-import type { Fragment } from './DocumentEdits';
+import type { Arrangement, Fragment } from './DocumentEdits';
 import type { FoundPart } from './Search';
 import type { KindLayout } from './Layout';
 import type { Kind } from '../sim/Primitives';
@@ -310,6 +310,12 @@ export interface CircuitCommands {
    * @idempotent
    */
   straighten(ids: readonly string[]): void;
+  /**
+   * Lines components up: an edge or a middle in common, or for three or
+   * more the same space between them, across or down. One edit.
+   * @idempotent
+   */
+  arrange(ids: readonly string[], how: Arrangement): void;
   /** Turns components a quarter turn clockwise. */
   rotate(ids: readonly string[]): void;
   /** Removes components and wires; wires left with an end on nothing go too. */

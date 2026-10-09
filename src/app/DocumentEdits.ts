@@ -2,6 +2,7 @@ import type { Circuit, Component, PinRef, Rotation, Wire } from '../sim/Circuit'
 import type { Kind } from '../sim/Primitives';
 import { DEFAULT_BUS_WIDTH, pinsOf } from '../sim/Chips';
 import { MAX_WIDTH, widthOf } from '../sim/Primitives';
+import { boxOf, shapeOf } from './Layout';
 
 /**
  * Edits to a circuit document, as functions from one document to the
@@ -642,4 +643,63 @@ function ids(circuit: Circuit): Set<string> {
 
 function hasId(circuit: Circuit, id: string): boolean {
   return circuit.components.some(c => c.id === id) || circuit.wires.some(w => w.id === id);
+}
+
+/** How `arrange` lines parts up: an edge or a middle in common, or the same space between. */
+export type Arrangement = 'left' | 'centre' | 'right' | 'top' | 'middle' | 'bottom' | 'across' | 'down';
+
+/**
+ * Lines parts up by their boxes, as a drawing program does: their left
+ * edges at the leftmost, their middles on the middle of them all, and so
+ * on; or, for three or more, the same space between each and the next,
+ * left to right or top to bottom, the two at the ends staying put.
+ * Positions stay on the grid, so pins do. The circuit as it was for too
+ * few parts, or when nothing would move.
+ */
+export function arrange(circuit: Circuit, ids: readonly string[], how: Arrangement): Circuit {
+  const chosen = new Set(ids);
+  const placed = circuit.components
+    .filter(c => chosen.has(c.id))
+    .map(c => ({ c, box: boxOf(shapeOf(c, circuit.chips), c.x, c.y, c.rotation) }));
+  const spacing = how === 'across' || how === 'down';
+  if (placed.length < (spacing ? 3 : 2)) return circuit;
+  const left = Math.min(...placed.map(p => p.box.left));
+  const right = Math.max(...placed.map(p => p.box.right));
+  const top = Math.min(...placed.map(p => p.box.top));
+  const bottom = Math.max(...placed.map(p => p.box.bottom));
+  const at = new Map<string, { x: number; y: number }>();
+  if (spacing) {
+    const horizontal = how === 'across';
+    const start = (p: (typeof placed)[number]) => (horizontal ? p.box.left : p.box.top);
+    const size = (p: (typeof placed)[number]) => (horizontal ? p.box.right - p.box.left : p.box.bottom - p.box.top);
+    const order = [...placed].sort((a, b) => start(a) - start(b));
+    const first = order[0]!;
+    const last = order[order.length - 1]!;
+    const free = start(last) + size(last) - start(first) - order.reduce((sum, p) => sum + size(p), 0);
+    const gap = free / (order.length - 1);
+    let next = start(first);
+    for (const p of order) {
+      const to = Math.round(next);
+      at.set(p.c.id, horizontal ? { x: p.c.x + to - p.box.left, y: p.c.y } : { x: p.c.x, y: p.c.y + to - p.box.top });
+      next += size(p) + gap;
+    }
+  } else {
+    for (const { c, box } of placed) {
+      const width = box.right - box.left;
+      const height = box.bottom - box.top;
+      const x =
+        how === 'left' ? left : how === 'right' ? right - width : how === 'centre' ? Math.round((left + right) / 2 - width / 2) : box.left;
+      const y =
+        how === 'top' ? top : how === 'bottom' ? bottom - height : how === 'middle' ? Math.round((top + bottom) / 2 - height / 2) : box.top;
+      at.set(c.id, { x: c.x + x - box.left, y: c.y + y - box.top });
+    }
+  }
+  let changed = false;
+  const components = circuit.components.map(c => {
+    const to = at.get(c.id);
+    if (to === undefined || (to.x === c.x && to.y === c.y)) return c;
+    changed = true;
+    return { ...c, x: to.x, y: to.y };
+  });
+  return changed ? { ...circuit, components } : circuit;
 }
