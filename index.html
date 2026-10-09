@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>gessologic</title>
+    <!--
+      Chrome's WebMCP origin trial, for gesso-logic.vercel.app, until 30
+      March 2027: without it the browser offers no document.modelContext
+      and the app registers no tools (see main.ts). Renew it before then.
+    -->
+    <meta
+      http-equiv="origin-trial"
+      content="Apr3nr+228teQP8xpdP5UpcAQJ6zoiIy9MuZRJaOOddPzlyD1U1K/pXj0q9u89HJ54RiVce4Wz0o7klrd0X3gAUAAABWeyJvcmlnaW4iOiJodHRwczovL2dlc3NvLWxvZ2ljLnZlcmNlbC5hcHA6NDQzIiwiZmVhdHVyZSI6IldlYk1DUCIsImV4cGlyeSI6MTgwNjM2NDgwMH0=" />
     <style>
       /*
         The canvas is sized to its host, so the host needs a size. This
