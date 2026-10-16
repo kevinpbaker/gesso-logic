@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       gesso-components:
-        specifier: ^0.6.22
-        version: 0.6.22(rxjs@7.8.2)
+        specifier: ^0.6.24
+        version: 0.6.24(rxjs@7.8.2)
       gesso-core:
-        specifier: ^0.6.22
-        version: 0.6.22(rxjs@7.8.2)
+        specifier: ^0.6.24
+        version: 0.6.24(rxjs@7.8.2)
       gesso-framework:
-        specifier: ^0.6.22
-        version: 0.6.22(rxjs@7.8.2)
+        specifier: ^0.6.24
+        version: 0.6.24(rxjs@7.8.2)
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -25,14 +25,14 @@ importers:
         specifier: ^26.6.3
         version: 26.6.3
       gesso-devtools:
-        specifier: ^0.6.22
-        version: 0.6.22(rxjs@7.8.2)
+        specifier: ^0.6.24
+        version: 0.6.24(rxjs@7.8.2)
       gesso-testing:
-        specifier: ^0.6.22
-        version: 0.6.22(rxjs@7.8.2)(vitest@4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)))
+        specifier: ^0.6.24
+        version: 0.6.24(rxjs@7.8.2)(vitest@4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)))
       gesso-vite-plugin:
-        specifier: ^0.6.22
-        version: 0.6.22(typescript@7.0.2)(vite@8.3.1(@types/node@26.6.3))
+        specifier: ^0.6.24
+        version: 0.6.24(typescript@7.0.2)(vite@8.3.1(@types/node@26.6.3))
       typescript:
         specifier: ~7.0.2
         version: 7.0.2
@@ -356,26 +356,26 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  gesso-components@0.6.22:
-    resolution: {integrity: sha512-Lj7AW7y8IAJESUNvd+xXsQqVetO+T/mCJd8DTHtq59wktA7p371pUXw1gCOOmiFo9fQ6Zs9GfW/+wNI/l14BPw==}
+  gesso-components@0.6.24:
+    resolution: {integrity: sha512-dImxYh635KAxugzyUUKCK6pw5qNK8k6f0OOZXmmGAuEu4hHbSOrj5HoqfefDbH/VHLYPO5ZO7nYzW5L9Dhi+Cg==}
     peerDependencies:
       rxjs: ^7.8.2
 
-  gesso-core@0.6.22:
-    resolution: {integrity: sha512-pM/foobYczOjO5JXwzOeyK3XzcYXAazf5HHAIl/76ih0oCSxweWRvPA46cLtIBXQhY/mvQq41PyMPdq+1CHxGA==}
+  gesso-core@0.6.24:
+    resolution: {integrity: sha512-4g4gWVk3rQ7Vmlb3OOAkjuT6n3AOfhBU7jQcLhbf3QASokILjmTT1sv2RuwsxmIhJ42p1t/mMp8JGf2JC+vK6Q==}
     peerDependencies:
       rxjs: ^7.8.2
 
-  gesso-devtools@0.6.22:
-    resolution: {integrity: sha512-L7x8EaZmbpb7TitzvCzm/ZABUE2kycM9N5eFlLWt7fXAbPLDeOCTGx+Hm2o60Z62BgIbacXtNu5JYuLco9KVXQ==}
+  gesso-devtools@0.6.24:
+    resolution: {integrity: sha512-7hyXo19JEyynYr6HgpiVZsVKxcrbWDGxieNgq5qPHHIGMV3Yg2el+TVgiIm++G3z6slaLK56oB9gqFHTFMI6Ew==}
 
-  gesso-framework@0.6.22:
-    resolution: {integrity: sha512-Sjvbg0OJRbDPZ81y+kxnblqHY1ejVU+v04g3u6jmVD8W/9jWj6tXOttinf4Nus3Lyt0qL3hJXVo24ywU3hvXJA==}
+  gesso-framework@0.6.24:
+    resolution: {integrity: sha512-WfYLe/T3BspxPsbS1bz9P6Xh9KaSM6q4Noa7WbpDZ7baHXvdizXSyOeYTNY5S2ggimla5iro/OcPIWmBHtyZqQ==}
     peerDependencies:
       rxjs: ^7.8.2
 
-  gesso-testing@0.6.22:
-    resolution: {integrity: sha512-c+5hj2x+UBdcUYQy9MLB4RuPGmHru3NUnkDiYnzxjmwrCE/nTUCMJYyd/s696StD7DlZpgTbW5RvDV1cjxEgxg==}
+  gesso-testing@0.6.24:
+    resolution: {integrity: sha512-TJXnxpzZeNULB4dXUyeNSIXoWIJfK7LVpl9LW0nZPucFl+VQymsaS5RncNndCPn1dCCq773biuW4rnYv0xnArw==}
     peerDependencies:
       rxjs: ^7.8.2
       vitest: ^4.1.10
@@ -383,8 +383,8 @@ packages:
       vitest:
         optional: true
 
-  gesso-vite-plugin@0.6.22:
-    resolution: {integrity: sha512-jdtba+x47FSfdML0zRxXhi7BCxRm74bl514Wt/qnf54x4qcO88P+bv36UmCgMAs8un8fvmFznU5qMj1jk1ZYHA==}
+  gesso-vite-plugin@0.6.24:
+    resolution: {integrity: sha512-qsBAa0GkQNIYt4hJaC/pZXuQTvrE8LNeXDdDX5YSjRRp8jB8Z0fWbjuVUYu4CCaTEj2ROyjwvW9luTwARkJvVA==}
     hasBin: true
     peerDependencies:
       typescript: '>=7.0.0'
@@ -823,37 +823,37 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  gesso-components@0.6.22(rxjs@7.8.2):
+  gesso-components@0.6.24(rxjs@7.8.2):
     dependencies:
-      gesso-core: 0.6.22(rxjs@7.8.2)
-      gesso-framework: 0.6.22(rxjs@7.8.2)
+      gesso-core: 0.6.24(rxjs@7.8.2)
+      gesso-framework: 0.6.24(rxjs@7.8.2)
       rxjs: 7.8.2
 
-  gesso-core@0.6.22(rxjs@7.8.2):
+  gesso-core@0.6.24(rxjs@7.8.2):
     dependencies:
       '@webgpu/types': 0.1.74
       rxjs: 7.8.2
 
-  gesso-devtools@0.6.22(rxjs@7.8.2):
+  gesso-devtools@0.6.24(rxjs@7.8.2):
     dependencies:
-      gesso-framework: 0.6.22(rxjs@7.8.2)
+      gesso-framework: 0.6.24(rxjs@7.8.2)
     transitivePeerDependencies:
       - rxjs
 
-  gesso-framework@0.6.22(rxjs@7.8.2):
+  gesso-framework@0.6.24(rxjs@7.8.2):
     dependencies:
-      gesso-core: 0.6.22(rxjs@7.8.2)
+      gesso-core: 0.6.24(rxjs@7.8.2)
       rxjs: 7.8.2
 
-  gesso-testing@0.6.22(rxjs@7.8.2)(vitest@4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3))):
+  gesso-testing@0.6.24(rxjs@7.8.2)(vitest@4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3))):
     dependencies:
-      gesso-core: 0.6.22(rxjs@7.8.2)
-      gesso-framework: 0.6.22(rxjs@7.8.2)
+      gesso-core: 0.6.24(rxjs@7.8.2)
+      gesso-framework: 0.6.24(rxjs@7.8.2)
       rxjs: 7.8.2
     optionalDependencies:
       vitest: 4.1.11(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3))
 
-  gesso-vite-plugin@0.6.22(typescript@7.0.2)(vite@8.3.1(@types/node@26.6.3)):
+  gesso-vite-plugin@0.6.24(typescript@7.0.2)(vite@8.3.1(@types/node@26.6.3)):
     dependencies:
       vite: 8.3.1(@types/node@26.6.3)
     optionalDependencies:
